@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>JivanOS — Personal Life System</title>
+    <meta name="description" content="JivanOS: Sanskrit & Hindi rooted Life Operating System merging tasks, habits, medications, encrypted journal, and daily wellness." />
+    <meta property="og:title" content="JivanOS — Personal Life System" />
+    <meta property="og:description" content="JivanOS: Sanskrit & Hindi rooted Life Operating System merging tasks, habits, medications, encrypted journal, and daily wellness." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content="#0f172a" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Jivan" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <script>
+      (function() {
+        try {
+          var theme = localStorage.getItem('omniplan_theme');
+          var isDark = theme === 'dark' || (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          if (isDark) {
+            document.documentElement.classList.add('dark');
+            document.documentElement.setAttribute('data-theme', 'dark');
+          } else {
+            document.documentElement.classList.remove('dark');
+            document.documentElement.setAttribute('data-theme', 'light');
+          }
+          var style = localStorage.getItem('omniplan_theme_style');
+          document.documentElement.classList.add(style === 'glass' ? 'theme-glass' : 'theme-bento');
+          var accent = localStorage.getItem('omniplan_accent_tone') || 'indigo';
+          document.documentElement.setAttribute('data-accent', accent);
+        } catch(e) {}
+      })();
+    </script>
+  </head>
+  <body class="antialiased selection:bg-indigo-500 selection:text-white">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

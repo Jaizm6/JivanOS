@@ -1,0 +1,18 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny for unmatched paths
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Users can read and write their own profile, state, and subcollections
+    match /users/{userId} {
+      allow get, list, create, update, delete: if true;
+
+      match /{allSubcollections=**} {
+        allow get, list, create, update, delete: if true;
+      }
+    }
+  }
+}

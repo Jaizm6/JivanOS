@@ -1,0 +1,857 @@
+@import "tailwindcss";
+
+:root {
+  --app-height: 100vh;
+}
+
+@variant dark (&:where(.dark, .dark *, [data-theme="dark"], [data-theme="dark"] *));
+
+/* Subtle shrinking when keyboard is active */
+.keyboard-active .hide-on-keyboard {
+  display: none !important;
+}
+.keyboard-active .shrink-on-keyboard {
+  transform: scale(0.95);
+  transition: transform 0.2s ease-out;
+}
+
+html,
+body {
+  overflow-x: clip;
+  max-width: 100vw;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  overscroll-behavior-y: none;
+}
+
+#root {
+  overscroll-behavior-y: none;
+}
+
+/* Mobile Safe Area & Navigation Dock Clearance Utilities */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.pb-nav-clearance {
+  padding-bottom: calc(7.5rem + env(safe-area-inset-bottom, 0px));
+}
+
+@media (min-width: 768px) {
+  .pb-nav-clearance {
+    padding-bottom: 2rem;
+  }
+}
+
+/* Hide scrollbars for element with scrollbar-none, scrollbar-hide, or no-scrollbar */
+.scrollbar-none,
+.scrollbar-hide,
+.no-scrollbar,
+[class*="scrollbar-none"],
+[class*="scrollbar-hide"],
+[class*="no-scrollbar"] {
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
+}
+
+.scrollbar-none::-webkit-scrollbar,
+.scrollbar-hide::-webkit-scrollbar,
+.no-scrollbar::-webkit-scrollbar,
+[class*="scrollbar-none"]::-webkit-scrollbar,
+[class*="scrollbar-hide"]::-webkit-scrollbar,
+[class*="no-scrollbar"]::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  background: transparent !important;
+}
+
+/* Optional custom draggable scrollbars applied specifically with .custom-scrollbar */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.7) rgba(226, 232, 240, 0.5);
+  -webkit-overflow-scrolling: touch;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(226, 232, 240, 0.5);
+  border-radius: 9999px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.7);
+  border-radius: 9999px;
+}
+
+#root {
+  overflow-x: clip;
+  max-width: 100vw;
+  width: 100%;
+  min-height: 100vh;
+}
+
+/* Sentinel serif font family utility with high-fidelity fallbacks */
+.font-sentinel {
+  font-family: 'Sentinel', 'Sentinel SSm', 'Sentinel SSm A', 'Sentinel SSm B', 'Zilla Slab', Georgia, Cambria, 'Times New Roman', serif;
+}
+
+/* Task Marquee Animation for Compact Mode Overflow */
+@keyframes taskMarquee {
+  0%, 15% { transform: translateX(0); }
+  50%, 65% { transform: translateX(var(--marquee-distance, -100px)); }
+  85%, 100% { transform: translateX(0); }
+}
+
+.animate-task-marquee {
+  animation: taskMarquee var(--marquee-duration, 8s) ease-in-out infinite;
+}
+
+/* Weight Modal Task Blink & Highlight */
+@keyframes weightHighlightBlink {
+  0%, 100% {
+    background-color: rgba(168, 85, 247, 0.22);
+    box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.65);
+  }
+  50% {
+    background-color: rgba(168, 85, 247, 0.45);
+    box-shadow: 0 0 0 3.5px rgba(168, 85, 247, 0.95);
+  }
+}
+
+.animate-weight-blink {
+  animation: weightHighlightBlink 0.5s ease-in-out 3;
+}
+
+/* ==========================================================================
+   DYNAMIC ACCENT PALETTE SYSTEM
+   Immediately transforms all primary buttons, active tabs, badges, rings, & highlights
+   ========================================================================== */
+:root,
+:root[data-accent="indigo"] {
+  --primary-accent: #4f46e5;
+  --primary-accent-hover: #4338ca;
+  --primary-accent-light: #818cf8;
+  --primary-accent-rgb: 79, 70, 229;
+  --primary-accent-subtle: #eef2ff;
+  --primary-accent-subtle-dark: rgba(79, 70, 229, 0.22);
+  --primary-accent-ring: rgba(99, 102, 241, 0.45);
+}
+
+:root[data-accent="emerald"] {
+  --primary-accent: #059669;
+  --primary-accent-hover: #047857;
+  --primary-accent-light: #34d399;
+  --primary-accent-rgb: 5, 150, 105;
+  --primary-accent-subtle: #ecfdf5;
+  --primary-accent-subtle-dark: rgba(5, 150, 105, 0.22);
+  --primary-accent-ring: rgba(16, 185, 129, 0.45);
+}
+
+:root[data-accent="violet"] {
+  --primary-accent: #7c3aed;
+  --primary-accent-hover: #6d28d9;
+  --primary-accent-light: #a78bfa;
+  --primary-accent-rgb: 124, 58, 237;
+  --primary-accent-subtle: #f5f3ff;
+  --primary-accent-subtle-dark: rgba(124, 58, 237, 0.22);
+  --primary-accent-ring: rgba(139, 92, 246, 0.45);
+}
+
+:root[data-accent="rose"] {
+  --primary-accent: #e11d48;
+  --primary-accent-hover: #be123c;
+  --primary-accent-light: #fb7185;
+  --primary-accent-rgb: 225, 29, 72;
+  --primary-accent-subtle: #fff1f2;
+  --primary-accent-subtle-dark: rgba(225, 29, 72, 0.22);
+  --primary-accent-ring: rgba(244, 63, 94, 0.45);
+}
+
+:root[data-accent="amber"] {
+  --primary-accent: #d97706;
+  --primary-accent-hover: #b45309;
+  --primary-accent-light: #f59e0b;
+  --primary-accent-rgb: 217, 119, 6;
+  --primary-accent-subtle: #fef3c7;
+  --primary-accent-subtle-dark: rgba(245, 158, 11, 0.22);
+  --primary-accent-ring: rgba(245, 158, 11, 0.5);
+}
+
+:root[data-accent="cyan"] {
+  --primary-accent: #0284c7;
+  --primary-accent-hover: #0369a1;
+  --primary-accent-light: #38bdf8;
+  --primary-accent-rgb: 2, 132, 199;
+  --primary-accent-subtle: #f0f9ff;
+  --primary-accent-subtle-dark: rgba(14, 165, 233, 0.22);
+  --primary-accent-ring: rgba(6, 182, 212, 0.5);
+}
+
+/* Automatic accent overrides across interactive buttons, navs, and highlights with strict contrast scoping */
+[data-accent] .bg-indigo-600,
+[data-accent] button.bg-indigo-600,
+[data-accent] #sidebar-nav-dashboard.bg-indigo-600 {
+  background-color: var(--primary-accent) !important;
+}
+
+[data-accent] .hover\:bg-indigo-700:hover,
+[data-accent] .hover\:bg-indigo-600:hover,
+[data-accent] button.bg-indigo-600:hover {
+  background-color: var(--primary-accent-hover) !important;
+}
+
+/* Light mode text accent: Always high contrast */
+html:not(.dark)[data-accent] .text-indigo-600,
+html:not(.dark)[data-accent] .text-indigo-500,
+html:not(.dark) [data-accent] .text-indigo-600,
+html:not(.dark) [data-accent] .text-indigo-500 {
+  color: var(--primary-accent) !important;
+}
+
+/* Dark mode text accent: Only active when .dark is present */
+html.dark[data-accent] .dark\:text-indigo-400,
+html.dark[data-accent] .dark\:text-indigo-300,
+html.dark [data-accent] .dark\:text-indigo-400,
+html.dark [data-accent] .dark\:text-indigo-300,
+.dark[data-accent] .dark\:text-indigo-400 {
+  color: var(--primary-accent-light) !important;
+}
+
+[data-accent] .border-indigo-600,
+[data-accent] .border-indigo-500 {
+  border-color: var(--primary-accent) !important;
+}
+
+/* Solid accent tints - without wildcards that break opacity modifiers like /20 */
+html:not(.dark)[data-accent] .bg-indigo-50:not([class*="/"]),
+html:not(.dark)[data-accent] .bg-indigo-100:not([class*="/"]),
+html:not(.dark) [data-accent] .bg-indigo-50:not([class*="/"]),
+html:not(.dark) [data-accent] .bg-indigo-100:not([class*="/"]) {
+  background-color: var(--primary-accent-subtle) !important;
+}
+
+html.dark[data-accent] .dark\:bg-indigo-950:not([class*="/"]),
+html.dark [data-accent] .dark\:bg-indigo-950:not([class*="/"]) {
+  background-color: var(--primary-accent-subtle-dark) !important;
+}
+
+[data-accent] .ring-indigo-500,
+[data-accent] .focus\:ring-indigo-500:focus {
+  --tw-ring-color: var(--primary-accent-ring) !important;
+  border-color: var(--primary-accent) !important;
+}
+
+[data-accent] .from-indigo-600 {
+  --tw-gradient-from: var(--primary-accent) var(--tw-gradient-from-position) !important;
+  --tw-gradient-to: var(--primary-accent-hover) var(--tw-gradient-to-position) !important;
+}
+
+/* ==========================================================================
+   SOLID THEME CANVAS & DARK MODE (AMOLED PURE BLACK) ARCHITECTURE
+   Guarantees true AMOLED 0-nit pitch black canvas (#000000) and strongly elevated,
+   detached cards with multi-tiered ambient depth for crystal-clear readability
+   ========================================================================== */
+html,
+body,
+#root {
+  min-height: 100vh;
+}
+
+html:not(.dark),
+html:not(.dark) body,
+html:not(.dark) #root,
+html:not(.dark) #root > div {
+  background-color: #f0f4f9 !important;
+  color: #090d16 !important;
+}
+
+/* Dark Mode = Pure AMOLED Black Canvas (#000000) */
+html.dark,
+html.dark body,
+body.dark,
+html.dark #root,
+html.dark #root > div,
+[data-theme="dark"],
+[data-theme="dark"] #root,
+[data-theme="dark"] #root > div {
+  color-scheme: dark;
+  background-color: #000000 !important;
+  color: #f8fafc !important;
+}
+
+/* Structural Layout Protection: Header & Persistent Sidebar in AMOLED Mode */
+html.dark header,
+html.dark header.sticky {
+  background-color: #000000 !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10) !important;
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.9) !important;
+}
+
+html.dark aside {
+  background-color: #000000 !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+/* ==========================================================================
+   SQUIRCLE & CIRCULAR SHAPE UNIFICATION
+   Replaces harsh rectangular elements with smooth squircles and circles
+   ========================================================================== */
+/* Smooth squircles for cards and structural containers */
+div[class*="rounded-3xl"] {
+  border-radius: 1.5rem !important; /* 24px continuous squircle */
+}
+
+div[class*="rounded-2xl"],
+section[class*="rounded-2xl"] {
+  border-radius: 1.25rem !important; /* 20px smooth squircle */
+}
+
+div[class*="rounded-xl"]:not(span):not(button) {
+  border-radius: 1rem !important; /* 16px inner squircle */
+}
+
+/* Rounded pills and circles for badges, chips, status indicators, and avatar triggers */
+span[class*="rounded-full"],
+div[class*="rounded-full"],
+button[class*="rounded-full"],
+a[class*="rounded-full"],
+.rounded-full {
+  border-radius: 9999px !important;
+}
+
+/* Squircle buttons across the application (replaces rectangular 4px/6px corners) */
+button.rounded-xl,
+button[class*="rounded-xl"] {
+  border-radius: 0.875rem !important;
+}
+
+button.rounded-lg,
+button[class*="rounded-lg"] {
+  border-radius: 0.75rem !important;
+}
+
+/* Structural Layout: Header and Persistent Sidebar maintain dock alignment with crisp borders */
+header,
+header.sticky {
+  border-radius: 0 !important;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05) !important;
+  border-top: none !important;
+  border-left: none !important;
+  border-right: none !important;
+}
+
+aside {
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  border-top: none !important;
+  border-left: none !important;
+  border-bottom: none !important;
+}
+
+nav.fixed {
+  border-radius: 0 !important;
+}
+
+/* ==========================================================================
+   ELEVATED & DETACHED CARD SURFACES (BOX VS BACKGROUND CONTRAST)
+   Guarantees that cards never submerge into the background canvas
+   ========================================================================== */
+/* Light Mode: Crisp pure white box elevated with multidimensional shadow over #f0f4f9 canvas */
+html:not(.dark) main .bg-white:not(button):not(input):not(span):not(#quote-preview-card):not([data-custom-bg]):not([data-dark-card]):not([data-dark-modal]):not([data-quote-card]):not([data-habit-card]):not([data-habit-detail-modal] *),
+html:not(.dark) main div[class*="rounded-2xl"]:not(#quote-preview-card):not([data-custom-bg]):not([data-dark-card]):not([data-dark-modal]):not([data-quote-card]):not([data-habit-card]):not([data-habit-detail-modal] *),
+html:not(.dark) main div[class*="rounded-3xl"]:not(#quote-preview-card):not([data-custom-bg]):not([data-dark-card]):not([data-dark-modal]):not([data-quote-card]):not([data-habit-card]):not([data-habit-detail-modal] *) {
+  background-color: #ffffff !important;
+  border: 1px solid #dbe3ed !important;
+  box-shadow: 0 10px 25px -4px rgba(15, 23, 42, 0.07), 0 4px 10px -2px rgba(15, 23, 42, 0.03) !important;
+}
+
+/* Light Mode Sub-surfaces & Nested items */
+html:not(.dark) main .bg-slate-50:not(button):not(input):not(#quote-preview-card):not([data-custom-bg]):not([data-dark-card]):not([data-dark-modal]):not([data-quote-card]):not([data-habit-card]):not([data-habit-detail-modal] *),
+html:not(.dark) main .bg-slate-100:not(button):not(input):not(#quote-preview-card):not([data-custom-bg]):not([data-dark-card]):not([data-dark-modal]):not([data-quote-card]):not([data-habit-card]):not([data-habit-detail-modal] *) {
+  background-color: #f6f8fb !important;
+  border: 1px solid #e2e8f0 !important;
+}
+
+/* Explicit Dark Modal & Card Enforcement */
+[data-dark-modal="true"],
+[data-habit-detail-modal="true"].modal-dark {
+  background-color: #0c0f17 !important;
+  color: #f8fafc !important;
+}
+
+[data-dark-card="true"],
+[data-habit-detail-modal="true"].modal-dark [data-habit-card="true"],
+[data-habit-detail-modal="true"].modal-dark div[class*="rounded-3xl"] {
+  background-color: #151a26 !important;
+  border-color: #232a3d !important;
+  color: #f8fafc !important;
+}
+
+[data-habit-detail-modal="true"].modal-light {
+  background-color: #f4f6fb !important;
+  color: #0f172a !important;
+}
+
+[data-habit-detail-modal="true"].modal-light [data-habit-card="true"],
+[data-habit-detail-modal="true"].modal-light div[class*="rounded-3xl"] {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  color: #0f172a !important;
+}
+
+/* Dark Mode: Elevated & Detached Surfaces over Pure AMOLED Black (#000000) Canvas
+   Features multi-tier deep occlusion, atmospheric elevation glow, and crisp specular rim */
+html.dark main .dark\:bg-slate-900:not(button):not(input):not(span):not(#quote-preview-card):not([data-custom-bg]):not([data-quote-card]),
+html.dark main div[class*="rounded-2xl"]:not(button):not(input):not(span):not([role="menu"]):not(#quote-preview-card):not([data-custom-bg]):not([data-quote-card]),
+html.dark main div[class*="rounded-3xl"]:not(button):not(input):not(span):not(#quote-preview-card):not([data-custom-bg]):not([data-quote-card]),
+html.dark [data-card="elevated"] {
+  background-color: #0f1422 !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  box-shadow: 
+    0 24px 48px -10px rgba(0, 0, 0, 0.98),
+    0 10px 22px -4px rgba(0, 0, 0, 0.95),
+    0 0 36px -4px rgba(30, 42, 68, 0.45),
+    0 0 0 1px rgba(255, 255, 255, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.10) !important;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+/* Real Quote Card & Preview Card Styling & Transition Animations */
+#quote-preview-card,
+[data-custom-bg="true"],
+[data-quote-card="true"] {
+  background-color: var(--preview-card-bg, var(--quote-card-bg, inherit)) !important;
+  border-color: var(--preview-card-border, var(--quote-card-border, rgba(226, 232, 240, 0.8))) !important;
+}
+
+@keyframes quoteFadeInAnim {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes quoteSlideInAnim {
+  0% {
+    opacity: 0;
+    transform: translateY(28px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes quoteScaleInAnim {
+  0% {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.quote-transition-fade {
+  animation: quoteFadeInAnim 0.35s cubic-bezier(0.16, 1, 0.3, 1) both !important;
+}
+
+.quote-transition-slide {
+  animation: quoteSlideInAnim 0.4s cubic-bezier(0.16, 1, 0.3, 1) both !important;
+}
+
+.quote-transition-scale {
+  animation: quoteScaleInAnim 0.35s cubic-bezier(0.16, 1, 0.3, 1) both !important;
+}
+
+/* Hover elevation enhancement for dark mode cards */
+html.dark main div[class*="rounded-3xl"]:not(button):not(input):hover,
+html.dark main div[class*="rounded-2xl"]:not(button):not(input):hover {
+  box-shadow: 
+    0 30px 60px -12px rgba(0, 0, 0, 1),
+    0 14px 28px -4px rgba(0, 0, 0, 0.98),
+    0 0 45px -4px rgba(45, 62, 100, 0.60),
+    0 0 0 1px rgba(255, 255, 255, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14) !important;
+}
+
+/* Dark Mode Sub-surfaces & Nested items */
+html.dark main .dark\:bg-slate-800:not(button):not(input),
+html.dark main [class*="dark:bg-slate-800"]:not(button):not(input) {
+  background-color: #151b29 !important;
+  border: 1px solid rgba(255, 255, 255, 0.09) !important;
+  box-shadow: 0 4px 14px -2px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
+}
+
+/* ==========================================================================
+   VISIBILITY & CONTRAST PROTECTION (PREVENTS FADED/WASHED-OUT TEXT & BORDERS)
+   Guarantees that all labels, descriptions, and indicators meet strict WCAG AAA contrast
+   ========================================================================== */
+html.theme-bento:not(.dark) .text-slate-400,
+html:not(.dark):not(.theme-glass) .text-slate-400 {
+  color: #64748b !important; /* Raised from pale gray to solid Slate 500 (contrast > 4.8:1) */
+}
+
+html.theme-bento:not(.dark) .text-slate-500,
+html:not(.dark):not(.theme-glass) .text-slate-500 {
+  color: #475569 !important; /* Solid Slate 600 */
+}
+
+html.theme-bento:not(.dark) .text-slate-600,
+html:not(.dark):not(.theme-glass) .text-slate-600 {
+  color: #334155 !important; /* Solid Slate 700 */
+}
+
+html.theme-bento:not(.dark) .text-slate-900,
+html:not(.dark):not(.theme-glass) .text-slate-900 {
+  color: #090d16 !important; /* Pitch black for crystal-clear readability */
+}
+
+/* Dark mode contrast protection */
+html.theme-bento.dark .dark\:text-slate-400,
+html.dark:not(.theme-glass) .dark\:text-slate-400 {
+  color: #94a3b8 !important;
+}
+
+html.theme-bento.dark .dark\:text-slate-300,
+html.dark:not(.theme-glass) .dark\:text-slate-300 {
+  color: #cbd5e1 !important;
+}
+
+html.theme-bento.dark .dark\:text-white,
+html.dark:not(.theme-glass) .dark\:text-white {
+  color: #ffffff !important;
+}
+
+/* ==========================================================================
+   THEME 2: APPLE GLASS (LIQUID GAUSSIAN BLUR)
+   Apple visionOS/macOS Frosted Glass with Real Gaussian Backdrop Blur
+   - High-performance Gaussian blur
+   - Refined specular white highlight border
+   - Translucent ambient refraction
+   ========================================================================== */
+
+
+html.theme-glass:not(.dark) body {
+  background: 
+    radial-gradient(at 15% 15%, rgba(199, 210, 254, 0.65) 0px, transparent 55%),
+    radial-gradient(at 85% 12%, rgba(254, 205, 211, 0.6) 0px, transparent 50%),
+    radial-gradient(at 50% 80%, rgba(209, 250, 229, 0.6) 0px, transparent 55%),
+    #f8fafc !important;
+  background-attachment: fixed;
+  background-size: cover;
+  color: #0f172a;
+}
+
+html.theme-glass.dark {
+  background-color: #000000 !important;
+}
+
+html.theme-glass.dark body {
+  background: 
+    radial-gradient(at 15% 15%, rgba(67, 56, 202, 0.20) 0px, transparent 55%),
+    radial-gradient(at 85% 12%, rgba(225, 29, 72, 0.14) 0px, transparent 50%),
+    radial-gradient(at 50% 80%, rgba(13, 148, 136, 0.16) 0px, transparent 55%),
+    #000000 !important;
+  background-attachment: fixed;
+  background-size: cover;
+  color: #f8fafc;
+}
+
+/* Light Mode Apple Glass Cards with Gaussian Blur */
+html.theme-glass:not(.dark) .bg-white,
+html.theme-glass:not(.dark) [class*="bg-white"] {
+  background-color: rgba(255, 255, 255, 0.72) !important;
+  backdrop-filter: blur(24px) saturate(190%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(190%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.7) !important;
+  box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.07) !important;
+  border-radius: 1.25rem !important;
+}
+
+html.theme-glass:not(.dark) .bg-slate-50,
+html.theme-glass:not(.dark) .bg-slate-100 {
+  background-color: rgba(248, 250, 252, 0.65) !important;
+  backdrop-filter: blur(16px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(180%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.55) !important;
+  border-radius: 1rem !important;
+}
+
+/* Dark Mode Apple Glass Cards with Elevated Detachment over AMOLED */
+html.theme-glass.dark .dark\:bg-slate-900,
+html.theme-glass.dark [class*="dark:bg-slate-900"],
+html.theme-glass.dark .dark\:bg-slate-950,
+html.theme-glass.dark .dark .bg-white {
+  background-color: rgba(15, 20, 32, 0.85) !important;
+  backdrop-filter: blur(24px) saturate(190%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(190%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  box-shadow: 
+    0 22px 48px -10px rgba(0, 0, 0, 0.98),
+    0 10px 22px -4px rgba(0, 0, 0, 0.90),
+    0 0 32px -4px rgba(35, 48, 75, 0.40),
+    0 0 0 1px rgba(255, 255, 255, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
+  border-radius: 1.5rem !important;
+}
+
+html.theme-glass.dark .dark\:bg-slate-800,
+html.theme-glass.dark [class*="dark:bg-slate-800"] {
+  background-color: rgba(22, 28, 42, 0.75) !important;
+  backdrop-filter: blur(16px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(180%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.10) !important;
+  box-shadow: 0 4px 14px -2px rgba(0, 0, 0, 0.65) !important;
+  border-radius: 1rem !important;
+}
+
+/* Bento stat typography & Screen Time inspired micro-components */
+.bento-stat-num {
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+/* Floating Gradient Circle Badge (Inspired by alarm clock & thumbs up in Dribbble Screen Time shots) */
+.bento-circle-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  box-shadow: 0 10px 22px -5px rgba(244, 63, 94, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.6);
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.bento-circle-badge:hover {
+  transform: scale(1.06);
+}
+
+/* High-contrast Screen Time Pill Button (like "Got it, Thanks" in screenshot 2) */
+.bento-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  font-weight: 700;
+  padding: 0.75rem 1.5rem;
+  letter-spacing: -0.01em;
+  box-shadow: 0 8px 20px -4px rgba(79, 70, 229, 0.35);
+  transition: all 0.2s ease;
+}
+
+.bento-pill-btn:hover {
+  box-shadow: 0 12px 24px -4px rgba(79, 70, 229, 0.45);
+  transform: translateY(-1px);
+}
+
+/* ========================================================================== */
+/* ==========================================================================
+   GLOBAL ULTRA-COMPACT STYLES FOR DASHBOARD WIDGETS
+   Reduces vertical whitespace by 50%, maximizing density & readability
+   ========================================================================== */
+.ultra-compact div[class*="rounded-3xl"],
+.ultra-compact div[class*="rounded-2xl"],
+.ultra-compact .widget-card {
+  padding: 0.5rem 0.75rem !important;
+  border-radius: 0.875rem !important;
+}
+
+.ultra-compact .space-y-4 > *,
+.ultra-compact .space-y-3\.5 > *,
+.ultra-compact .space-y-3 > * {
+  margin-top: 0.25rem !important;
+  margin-bottom: 0.25rem !important;
+}
+
+.ultra-compact .gap-4,
+.ultra-compact .gap-3\.5,
+.ultra-compact .gap-3 {
+  gap: 0.375rem !important;
+}
+
+.ultra-compact .py-5,
+.ultra-compact .py-4,
+.ultra-compact .py-3\.5,
+.ultra-compact .py-3 {
+  padding-top: 0.25rem !important;
+  padding-bottom: 0.25rem !important;
+}
+
+.ultra-compact .pb-4,
+.ultra-compact .pb-3\.5,
+.ultra-compact .pb-3 {
+  padding-bottom: 0.25rem !important;
+}
+
+.ultra-compact .pt-4,
+.ultra-compact .pt-3\.5,
+.ultra-compact .pt-3 {
+  padding-top: 0.25rem !important;
+}
+
+.ultra-compact .my-4,
+.ultra-compact .my-3\.5,
+.ultra-compact .my-3 {
+  margin-top: 0.25rem !important;
+  margin-bottom: 0.25rem !important;
+}
+
+.ultra-compact .p-4,
+.ultra-compact .p-5 {
+  padding: 0.5rem 0.75rem !important;
+}
+
+.ultra-compact h2 {
+  font-size: 1.125rem !important;
+  line-height: 1.25 !important;
+}
+
+.ultra-compact h3,
+.ultra-compact h4 {
+  line-height: 1.25 !important;
+}
+
+
+
+
+/* Print rules ensuring only the Hourly Schedule printable sheet is printed */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    overflow: visible !important;
+  }
+
+  /* Hide global navigation, sidebars, headers, modals, etc. */
+  nav,
+  aside,
+  header,
+  footer,
+  #ai-chat-assistant,
+  .print\:hidden,
+  [data-print-hide="true"] {
+    display: none !important;
+  }
+
+  /* Hide everything by default in print */
+  body * {
+    visibility: hidden;
+  }
+
+  /* Reveal ONLY the printable hourly schedule element and its descendants */
+  #printable-hourly-schedule,
+  #printable-hourly-schedule * {
+    visibility: visible;
+  }
+
+  #printable-hourly-schedule {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    display: block !important;
+  }
+}
+
+/* Note Preview Unified Standard Bubble Classes */
+.note-preview-bubble {
+  position: absolute;
+  bottom: 100%;
+  margin-bottom: 0.5rem;
+  z-index: 50;
+  width: 18rem; /* default width for mobile */
+  max-width: 90vw;
+  background-color: rgba(51, 65, 85, 0.95); /* bg-slate-700/95 */
+  border: 1px solid rgba(71, 85, 105, 0.8); /* border-slate-600/80 */
+  color: #f8fafc; /* text-slate-50 */
+  border-radius: 0.75rem; /* rounded-xl */
+  padding: 0.75rem; /* p-3 */
+  font-size: 0.875rem !important; /* text-sm, corrected font-size exactly 14px */
+  font-weight: 400;
+  line-height: 1.375; /* leading-normal */
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  word-break: break-word;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  animation: fadeInZoom 150ms ease-out forwards;
+}
+
+html.dark .note-preview-bubble,
+.dark .note-preview-bubble {
+  background-color: rgba(30, 41, 59, 0.95); /* bg-slate-800/95 */
+  border-color: rgba(51, 65, 85, 0.8); /* border-slate-700/80 */
+}
+
+@media (min-width: 640px) {
+  .note-preview-bubble {
+    width: 20rem; /* w-80 */
+    max-width: 32rem; /* max-w-lg */
+  }
+}
+
+/* Dynamic positioning helper */
+.note-preview-bubble-dynamic {
+  position: fixed !important;
+  bottom: auto !important;
+  margin-bottom: 0 !important;
+}
+
+@keyframes fadeInZoom {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* High-visibility blink & glow animation when jumping from PiP to active task or habit */
+@keyframes pipItemBlink {
+  0%, 100% {
+    box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.95), 0 0 30px rgba(245, 158, 11, 0.7);
+    outline: 3px solid #f59e0b;
+    outline-offset: 3px;
+    background-color: rgba(245, 158, 11, 0.22);
+    transform: scale(1.025);
+  }
+  50% {
+    box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.2), 0 0 0px transparent;
+    outline: 1px solid rgba(245, 158, 11, 0.3);
+    outline-offset: 0px;
+    background-color: rgba(245, 158, 11, 0.04);
+    transform: scale(1);
+  }
+}
+
+.pip-highlight-blink {
+  animation: pipItemBlink 0.55s ease-in-out 5 !important;
+  position: relative !important;
+  z-index: 50 !important;
+  border-color: #f59e0b !important;
+}
+
+
