@@ -1,14 +1,15 @@
 {
   "id": "/",
-  "name": "Jivan: Simple Life System",
+  "name": "JivanOS",
   "short_name": "Jivan",
-  "description": "Simple Hindi & Sanskrit rooted Life Operating System merging health, tasks, habits, and private journaling.",
+  "description": "Personal Life, Health, Habit & Productivity Operating System",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#0f172a",
-  "theme_color": "#0f172a",
+  "background_color": "#000000",
+  "theme_color": "#4f46e5",
   "orientation": "portrait-primary",
+  "dir": "ltr",
   "icons": [
     {
       "src": "/pwa-192x192.png",

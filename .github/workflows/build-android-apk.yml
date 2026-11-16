@@ -1,0 +1,79 @@
+name: Build JivanOS Android APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    name: Compile Standalone Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Set up JDK 21 (Required for Android Gradle Plugin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Dependencies & Build Web App
+        run: |
+          npm install --legacy-peer-deps
+          npm run build
+
+      - name: Add Capacitor Android & Sync Web Bundle
+        run: |
+          npm install --no-save @capacitor/core @capacitor/cli @capacitor/android
+          npx cap add android
+          npx cap sync android
+
+      - name: Configure Android Manifest Permissions (Alarms, Notifications, Vibration, Biometrics)
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if [ -f "$MANIFEST" ]; then
+            sed -i 's|<application|<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.VIBRATE" />\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n    <application|g' "$MANIFEST"
+          fi
+
+      - name: Build Installable Android APK with Gradle
+        working-directory: ./android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+          cp app/build/outputs/apk/debug/app-debug.apk ../JivanOS.apk
+
+      - name: Upload JivanOS.apk to Workflow Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: JivanOS-Android-APK
+          path: JivanOS.apk
+          if-no-files-found: error
+
+      - name: Publish JivanOS.apk to GitHub Releases (Latest)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest-apk
+          name: "JivanOS Android APK (Latest Build)"
+          body: |
+            ### 📱 JivanOS Standalone Android APK
+            Download **`JivanOS.apk`** below on your Android phone and tap it to install JivanOS as a standalone native Android application.
+            - Includes full offline bundle, local storage, Web Audio synthesizer chimes, and Firebase cloud sync.
+          files: JivanOS.apk
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
