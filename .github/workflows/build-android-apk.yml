@@ -28,10 +28,11 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Configure Android SDK 34 (Self-Contained)
+      - name: Configure Android SDK 34
         run: |
           if [ -d "/usr/local/lib/android/sdk" ]; then
             SDK_ROOT="/usr/local/lib/android/sdk"
+            sudo chown -R $USER:$USER "$SDK_ROOT"
           else
             SDK_ROOT="$HOME/android-sdk"
             mkdir -p "$SDK_ROOT/cmdline-tools"
@@ -42,14 +43,6 @@ jobs:
           echo "ANDROID_HOME=$SDK_ROOT" >> $GITHUB_ENV
           echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> $GITHUB_ENV
           SDKMANAGER=$(find "$SDK_ROOT" -name sdkmanager | head -n 1)
-          if [ -z "$SDKMANAGER" ]; then
-            mkdir -p "$SDK_ROOT/cmdline-tools"
-            curl -sL "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip" -o /tmp/cmdline-tools.zip
-            unzip -q /tmp/cmdline-tools.zip -d "$SDK_ROOT/cmdline-tools"
-            rm -rf "$SDK_ROOT/cmdline-tools/latest"
-            mv "$SDK_ROOT/cmdline-tools/cmdline-tools" "$SDK_ROOT/cmdline-tools/latest"
-            SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-          fi
           chmod +x "$SDKMANAGER"
           yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses > /dev/null 2>&1 || true
           "$SDKMANAGER" --sdk_root="$SDK_ROOT" "platform-tools" "platforms;android-34" "build-tools;34.0.0"
@@ -61,7 +54,7 @@ jobs:
 
       - name: Add Capacitor Android & Sync Web Bundle
         run: |
-          npm install --no-save @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
+          npm install --no-save --legacy-peer-deps @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
           npx cap add android
           npx cap sync android
 
@@ -91,8 +84,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete latest-apk --yes --cleanup-tag || true
+          gh release delete latest-apk --yes --cleanup-tag 2>/dev/null || true
           gh release create latest-apk JivanOS.apk \
             --title "JivanOS Android APK (Latest Build)" \
-            --notes "### 📱 JivanOS Standalone Android APK
-          Download **JivanOS.apk** below under Assets on your Android phone and tap it to install."
+            --notes "Download JivanOS.apk below under Assets on your Android phone and tap it to install."
