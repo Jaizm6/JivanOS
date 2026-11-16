@@ -21,16 +21,38 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
 
-      - name: Set up JDK 21 (Required for Android Gradle Plugin)
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Configure Android SDK 34 (Self-Contained)
+        run: |
+          if [ -d "/usr/local/lib/android/sdk" ]; then
+            SDK_ROOT="/usr/local/lib/android/sdk"
+          else
+            SDK_ROOT="$HOME/android-sdk"
+            mkdir -p "$SDK_ROOT/cmdline-tools"
+            curl -sL "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip" -o /tmp/cmdline-tools.zip
+            unzip -q /tmp/cmdline-tools.zip -d "$SDK_ROOT/cmdline-tools"
+            mv "$SDK_ROOT/cmdline-tools/cmdline-tools" "$SDK_ROOT/cmdline-tools/latest"
+          fi
+          echo "ANDROID_HOME=$SDK_ROOT" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> $GITHUB_ENV
+          SDKMANAGER=$(find "$SDK_ROOT" -name sdkmanager | head -n 1)
+          if [ -z "$SDKMANAGER" ]; then
+            mkdir -p "$SDK_ROOT/cmdline-tools"
+            curl -sL "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip" -o /tmp/cmdline-tools.zip
+            unzip -q /tmp/cmdline-tools.zip -d "$SDK_ROOT/cmdline-tools"
+            rm -rf "$SDK_ROOT/cmdline-tools/latest"
+            mv "$SDK_ROOT/cmdline-tools/cmdline-tools" "$SDK_ROOT/cmdline-tools/latest"
+            SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          fi
+          chmod +x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" --sdk_root="$SDK_ROOT" "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
       - name: Install Dependencies & Build Web App
         run: |
@@ -39,11 +61,11 @@ jobs:
 
       - name: Add Capacitor Android & Sync Web Bundle
         run: |
-          npm install --no-save @capacitor/core @capacitor/cli @capacitor/android
+          npm install --no-save @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
           npx cap add android
           npx cap sync android
 
-      - name: Configure Android Manifest Permissions (Alarms, Notifications, Vibration, Biometrics)
+      - name: Configure Android Manifest Permissions
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           if [ -f "$MANIFEST" ]; then
@@ -56,6 +78,7 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
           cp app/build/outputs/apk/debug/app-debug.apk ../JivanOS.apk
+          ls -lh ../JivanOS.apk
 
       - name: Upload JivanOS.apk to Workflow Artifacts
         uses: actions/upload-artifact@v4
@@ -64,16 +87,12 @@ jobs:
           path: JivanOS.apk
           if-no-files-found: error
 
-      - name: Publish JivanOS.apk to GitHub Releases (Latest)
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: latest-apk
-          name: "JivanOS Android APK (Latest Build)"
-          body: |
-            ### 📱 JivanOS Standalone Android APK
-            Download **`JivanOS.apk`** below on your Android phone and tap it to install JivanOS as a standalone native Android application.
-            - Includes full offline bundle, local storage, Web Audio synthesizer chimes, and Firebase cloud sync.
-          files: JivanOS.apk
-          prerelease: false
+      - name: Publish JivanOS.apk to GitHub Releases
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete latest-apk --yes --cleanup-tag || true
+          gh release create latest-apk JivanOS.apk \
+            --title "JivanOS Android APK (Latest Build)" \
+            --notes "### 📱 JivanOS Standalone Android APK
+          Download **JivanOS.apk** below under Assets on your Android phone and tap it to install."

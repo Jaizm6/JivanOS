@@ -202,19 +202,16 @@ export const InstallAppModal: React.FC<InstallAppModalProps> = ({ isOpen, onClos
           </button>
         </div>
 
-        {/* Tab 0: Dedicated Standalone .APK File via GitHub Actions + Capacitor */}
+        {/* Tab 0: Dedicated Standalone .APK File via GitHub Actions */}
         {activeTab === 'apk' && (
           <div className="space-y-3 text-xs text-slate-600 dark:text-slate-300">
             <div className="p-4 rounded-2xl border border-indigo-200 dark:border-indigo-800/70 bg-indigo-50/50 dark:bg-indigo-950/30 space-y-2.5">
               <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5 text-xs">
                 <Package className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
-                <span>Automated Native Android APK Builder (Capacitor + Gradle)</span>
+                <span>Automated Native Android APK Compiler (GitHub Actions + Capacitor)</span>
               </div>
               <p className="text-[11.5px] leading-relaxed text-slate-600 dark:text-slate-300">
-                Why did PWABuilder get stuck earlier? Because AI Studio preview URLs (<code className="font-mono">ais-dev-...</code>) require your Google session cookies, so external crawlers like PWABuilder cannot read the manifest from the preview URL.
-              </p>
-              <p className="text-[11.5px] leading-relaxed text-slate-700 dark:text-slate-200 font-medium">
-                Instead, this project now includes a pre-configured <strong>Capacitor Android configuration</strong> (<code className="font-mono">capacitor.config.json</code>) and an automated <strong>GitHub Actions APK Compiler</strong> (<code className="font-mono">.github/workflows/build-android-apk.yml</code>) that bundles the entire app offline into a real <code className="font-mono">JivanOS.apk</code> file!
+                Because AI Studio&apos;s &quot;Push to GitHub&quot; button does not include GitHub&apos;s <code className="font-mono">workflow</code> OAuth permission, GitHub requires you to commit the workflow file once inside the GitHub Actions tab:
               </p>
               <ol className="space-y-2 text-[11.5px] leading-relaxed pt-1">
                 <li className="flex items-start gap-2">
@@ -222,7 +219,7 @@ export const InstallAppModal: React.FC<InstallAppModalProps> = ({ isOpen, onClos
                     1
                   </span>
                   <span>
-                    Click the <strong>GitHub icon</strong> in the top-right bar of AI Studio to push this project to your GitHub repository (large video files have been cleaned up so the push succeeds).
+                    Click the <strong>GitHub icon</strong> in the top-right bar of AI Studio to push this project to your GitHub repository.
                   </span>
                 </li>
                 <li className="flex items-start gap-2">
@@ -230,7 +227,7 @@ export const InstallAppModal: React.FC<InstallAppModalProps> = ({ isOpen, onClos
                     2
                   </span>
                   <span>
-                    Open your GitHub repository. GitHub Actions will automatically run the <strong>&quot;Build JivanOS Android APK&quot;</strong> workflow using JDK 21, Android SDK, and Capacitor.
+                    Open your GitHub repository &rarr; click the <strong>Actions</strong> tab &rarr; click <strong>&quot;set up a workflow yourself&quot;</strong>, paste the workflow YAML from chat, and click <strong>Commit changes</strong>.
                   </span>
                 </li>
                 <li className="flex items-start gap-2">
@@ -238,7 +235,7 @@ export const InstallAppModal: React.FC<InstallAppModalProps> = ({ isOpen, onClos
                     3
                   </span>
                   <span>
-                    Once complete (~2 minutes), go to the <strong>Releases</strong> section (or the <strong>Actions</strong> tab &rarr; Artifacts) on your GitHub repo and download <strong><code className="font-mono">JivanOS.apk</code></strong> straight to your Android phone!
+                    In ~2 minutes, open <strong>Releases</strong> (or <strong>Actions</strong> &rarr; <strong>JivanOS-Android-APK</strong> artifact) on your GitHub repo to download <strong><code className="font-mono">JivanOS.apk</code></strong> straight to your phone!
                   </span>
                 </li>
               </ol>
