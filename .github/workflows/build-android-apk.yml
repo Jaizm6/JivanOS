@@ -50,28 +50,32 @@ jobs:
       - name: Install Dependencies & Build Web App
         run: |
           npm install --legacy-peer-deps
+          npm install --no-save --legacy-peer-deps react-is postcss
           npm run build
 
-      - name: Add Capacitor Android & Sync Web Bundle
+      - name: Package Web Bundle into Native Android Project (Capacitor 6)
         run: |
-          npm install --no-save --legacy-peer-deps @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
+          rm -rf /tmp/cap-project
+          mkdir -p /tmp/cap-project
+          cp -r "$GITHUB_WORKSPACE/dist" /tmp/cap-project/dist
+          cp "$GITHUB_WORKSPACE/capacitor.config.json" /tmp/cap-project/capacitor.config.json
+          cd /tmp/cap-project
+          npm init -y
+          npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
           npx cap add android
           npx cap sync android
-
-      - name: Configure Android Manifest Permissions
-        run: |
-          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          MANIFEST="/tmp/cap-project/android/app/src/main/AndroidManifest.xml"
           if [ -f "$MANIFEST" ]; then
             sed -i 's|<application|<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.VIBRATE" />\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n    <application|g' "$MANIFEST"
           fi
 
-      - name: Build Installable Android APK with Gradle
-        working-directory: ./android
+      - name: Compile Installable Android APK with Gradle
         run: |
+          cd /tmp/cap-project/android
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
-          cp app/build/outputs/apk/debug/app-debug.apk ../JivanOS.apk
-          ls -lh ../JivanOS.apk
+          cp app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/JivanOS.apk"
+          ls -lh "$GITHUB_WORKSPACE/JivanOS.apk"
 
       - name: Upload JivanOS.apk to Workflow Artifacts
         uses: actions/upload-artifact@v4
