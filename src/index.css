@@ -1,0 +1,1517 @@
+@import "tailwindcss";
+
+:root {
+  --app-height: 100vh;
+}
+
+@variant dark (&:where(.dark, .dark *, [data-theme="dark"], [data-theme="dark"] *));
+
+/* Subtle shrinking when keyboard is active */
+.keyboard-active .hide-on-keyboard {
+  display: none !important;
+}
+.keyboard-active .shrink-on-keyboard {
+  transform: scale(0.95);
+  transition: transform 0.2s ease-out;
+}
+
+html {
+  overflow-x: clip;
+  max-width: 100vw;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  overscroll-behavior-y: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  overflow-x: clip;
+  max-width: 100vw;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  overscroll-behavior-y: none;
+}
+
+button, a, input, select, textarea {
+  touch-action: manipulation;
+}
+
+#root {
+  overscroll-behavior-y: none;
+}
+
+/* Safe Area & Unified Bottom Navigation Dock Clearance Utilities */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.pb-nav-clearance {
+  padding-bottom: calc(4rem + env(safe-area-inset-bottom, 0px));
+}
+
+/* Hide scrollbars for element with scrollbar-none, scrollbar-hide, or no-scrollbar */
+.scrollbar-none,
+.scrollbar-hide,
+.no-scrollbar,
+[class*="scrollbar-none"],
+[class*="scrollbar-hide"],
+[class*="no-scrollbar"] {
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
+}
+
+.scrollbar-none::-webkit-scrollbar,
+.scrollbar-hide::-webkit-scrollbar,
+.no-scrollbar::-webkit-scrollbar,
+[class*="scrollbar-none"]::-webkit-scrollbar,
+[class*="scrollbar-hide"]::-webkit-scrollbar,
+[class*="no-scrollbar"]::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  background: transparent !important;
+}
+
+/* Optional custom draggable scrollbars applied specifically with .custom-scrollbar */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.7) rgba(226, 232, 240, 0.5);
+  -webkit-overflow-scrolling: touch;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(226, 232, 240, 0.5);
+  border-radius: 9999px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.7);
+  border-radius: 9999px;
+}
+
+#root {
+  overflow-x: clip;
+  max-width: 100vw;
+  width: 100%;
+  min-height: 100vh;
+}
+
+/* Sentinel serif font family utility with high-fidelity fallbacks */
+.font-sentinel {
+  font-family: 'Sentinel', 'Sentinel SSm', 'Sentinel SSm A', 'Sentinel SSm B', 'Zilla Slab', Georgia, Cambria, 'Times New Roman', serif;
+}
+
+/* Task Marquee Animation for Compact Mode Overflow */
+@keyframes taskMarquee {
+  0%, 15% { transform: translateX(0); }
+  50%, 65% { transform: translateX(var(--marquee-distance, -100px)); }
+  85%, 100% { transform: translateX(0); }
+}
+
+.animate-task-marquee {
+  animation: taskMarquee var(--marquee-duration, 8s) ease-in-out infinite;
+}
+
+/* Weight Modal Task Blink & Highlight */
+@keyframes weightHighlightBlink {
+  0%, 100% {
+    background-color: rgba(168, 85, 247, 0.22);
+    box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.65);
+  }
+  50% {
+    background-color: rgba(168, 85, 247, 0.45);
+    box-shadow: 0 0 0 3.5px rgba(168, 85, 247, 0.95);
+  }
+}
+
+.animate-weight-blink {
+  animation: weightHighlightBlink 0.5s ease-in-out 3;
+}
+
+/* ==========================================================================
+   DYNAMIC ACCENT PALETTE SYSTEM
+   Immediately transforms all primary buttons, active tabs, badges, rings, & highlights
+   ========================================================================== */
+:root,
+:root[data-accent="indigo"] {
+  --primary-accent: #4f46e5;
+  --primary-accent-hover: #4338ca;
+  --primary-accent-light: #818cf8;
+  --primary-accent-rgb: 79, 70, 229;
+  --primary-accent-subtle: #eef2ff;
+  --primary-accent-subtle-dark: rgba(79, 70, 229, 0.22);
+  --primary-accent-ring: rgba(99, 102, 241, 0.45);
+}
+
+:root[data-accent="emerald"] {
+  --primary-accent: #059669;
+  --primary-accent-hover: #047857;
+  --primary-accent-light: #34d399;
+  --primary-accent-rgb: 5, 150, 105;
+  --primary-accent-subtle: #ecfdf5;
+  --primary-accent-subtle-dark: rgba(5, 150, 105, 0.22);
+  --primary-accent-ring: rgba(16, 185, 129, 0.45);
+}
+
+:root[data-accent="violet"] {
+  --primary-accent: #7c3aed;
+  --primary-accent-hover: #6d28d9;
+  --primary-accent-light: #a78bfa;
+  --primary-accent-rgb: 124, 58, 237;
+  --primary-accent-subtle: #f5f3ff;
+  --primary-accent-subtle-dark: rgba(124, 58, 237, 0.22);
+  --primary-accent-ring: rgba(139, 92, 246, 0.45);
+}
+
+:root[data-accent="rose"] {
+  --primary-accent: #e11d48;
+  --primary-accent-hover: #be123c;
+  --primary-accent-light: #fb7185;
+  --primary-accent-rgb: 225, 29, 72;
+  --primary-accent-subtle: #fff1f2;
+  --primary-accent-subtle-dark: rgba(225, 29, 72, 0.22);
+  --primary-accent-ring: rgba(244, 63, 94, 0.45);
+}
+
+:root[data-accent="amber"] {
+  --primary-accent: #d97706;
+  --primary-accent-hover: #b45309;
+  --primary-accent-light: #f59e0b;
+  --primary-accent-rgb: 217, 119, 6;
+  --primary-accent-subtle: #fef3c7;
+  --primary-accent-subtle-dark: rgba(245, 158, 11, 0.22);
+  --primary-accent-ring: rgba(245, 158, 11, 0.5);
+}
+
+:root[data-accent="cyan"] {
+  --primary-accent: #0284c7;
+  --primary-accent-hover: #0369a1;
+  --primary-accent-light: #38bdf8;
+  --primary-accent-rgb: 2, 132, 199;
+  --primary-accent-subtle: #f0f9ff;
+  --primary-accent-subtle-dark: rgba(14, 165, 233, 0.22);
+  --primary-accent-ring: rgba(6, 182, 212, 0.5);
+}
+
+/* Automatic accent overrides across interactive buttons, navs, and highlights with strict contrast scoping */
+[data-accent] .bg-indigo-600,
+[data-accent] .bg-indigo-500,
+[data-accent] button.bg-indigo-600,
+[data-accent] #sidebar-nav-dashboard.bg-indigo-600 {
+  background-color: var(--primary-accent) !important;
+}
+
+html.dark[data-accent] .dark\:bg-indigo-500,
+html.dark[data-accent] .dark\:bg-indigo-400 {
+  background-color: var(--primary-accent-light, var(--primary-accent)) !important;
+}
+
+[data-accent] .hover\:bg-indigo-700:hover,
+[data-accent] .hover\:bg-indigo-600:hover,
+[data-accent] .hover\:bg-indigo-500:hover,
+[data-accent] button.bg-indigo-600:hover {
+  background-color: var(--primary-accent-hover) !important;
+}
+
+[data-accent] .accent-indigo-600,
+[data-accent] .accent-indigo-500 {
+  accent-color: var(--primary-accent) !important;
+}
+
+/* Translucent & Tinted Accent Containers (Sidebar active card, 3-way toggle pill, BottomNav pill, Badges) */
+[data-accent] .bg-indigo-600\/10,
+[data-accent] .bg-indigo-600\/15,
+[data-accent] .bg-indigo-500\/10,
+[data-accent] .bg-indigo-500\/15,
+[data-accent] .bg-indigo-500\/20,
+[data-accent] .bg-indigo-50\/80,
+[data-accent] .bg-indigo-50\/60 {
+  background-color: rgba(var(--primary-accent-rgb), 0.14) !important;
+}
+
+html.dark[data-accent] .dark\:bg-indigo-400\/20,
+html.dark[data-accent] .dark\:bg-indigo-400\/25,
+html.dark[data-accent] .dark\:bg-indigo-500\/20,
+html.dark[data-accent] .dark\:bg-indigo-500\/30,
+html.dark[data-accent] .dark\:bg-indigo-950\/70,
+html.dark[data-accent] .dark\:bg-indigo-950\/60,
+html.dark[data-accent] .dark\:bg-indigo-950\/50,
+html.dark[data-accent] .dark\:bg-indigo-950\/40,
+html.dark[data-accent] .dark\:bg-indigo-900\/40,
+html.dark[data-accent] .dark\:bg-indigo-900\/30 {
+  background-color: rgba(var(--primary-accent-rgb), 0.24) !important;
+}
+
+/* Light mode text accent: Always high contrast */
+html:not(.dark)[data-accent] .text-indigo-700,
+html:not(.dark)[data-accent] .text-indigo-600,
+html:not(.dark)[data-accent] .text-indigo-500,
+html:not(.dark) [data-accent] .text-indigo-700,
+html:not(.dark) [data-accent] .text-indigo-600,
+html:not(.dark) [data-accent] .text-indigo-500 {
+  color: var(--primary-accent) !important;
+}
+
+/* Dark mode text accent: Adapts all indigo text/icon classes in dark mode */
+html.dark[data-accent] .text-indigo-500,
+html.dark[data-accent] .text-indigo-600,
+html.dark[data-accent] .dark\:text-indigo-400,
+html.dark[data-accent] .dark\:text-indigo-300,
+html.dark[data-accent] .dark\:text-indigo-200,
+html.dark [data-accent] .dark\:text-indigo-400,
+html.dark [data-accent] .dark\:text-indigo-300,
+html.dark [data-accent] .dark\:text-indigo-200,
+.dark[data-accent] .dark\:text-indigo-400 {
+  color: var(--primary-accent-light) !important;
+}
+
+[data-accent] .border-indigo-600,
+[data-accent] .border-indigo-500 {
+  border-color: var(--primary-accent) !important;
+}
+
+[data-accent] .border-indigo-500\/35,
+[data-accent] .border-indigo-500\/30,
+[data-accent] .border-indigo-400\/35,
+[data-accent] .border-indigo-300,
+[data-accent] .border-indigo-200,
+[data-accent] .border-indigo-200\/70,
+html.dark[data-accent] .dark\:border-indigo-400\/30,
+html.dark[data-accent] .dark\:border-indigo-400\/35,
+html.dark[data-accent] .dark\:border-indigo-800,
+html.dark[data-accent] .dark\:border-indigo-800\/60,
+html.dark[data-accent] .dark\:border-indigo-700 {
+  border-color: rgba(var(--primary-accent-rgb), 0.38) !important;
+}
+
+/* Solid accent tints - without wildcards that break opacity modifiers like /20 */
+html:not(.dark)[data-accent] .bg-indigo-50:not([class*="/"]),
+html:not(.dark)[data-accent] .bg-indigo-100:not([class*="/"]),
+html:not(.dark) [data-accent] .bg-indigo-50:not([class*="/"]),
+html:not(.dark) [data-accent] .bg-indigo-100:not([class*="/"]) {
+  background-color: var(--primary-accent-subtle) !important;
+}
+
+html.dark[data-accent] .dark\:bg-indigo-950:not([class*="/"]),
+html.dark [data-accent] .dark\:bg-indigo-950:not([class*="/"]) {
+  background-color: var(--primary-accent-subtle-dark) !important;
+}
+
+[data-accent] .ring-indigo-500,
+[data-accent] .ring-indigo-600,
+[data-accent] .ring-indigo-500\/30,
+[data-accent] .ring-indigo-500\/35,
+[data-accent] .ring-indigo-500\/40,
+[data-accent] .ring-indigo-500\/60,
+html.dark[data-accent] .dark\:ring-indigo-400,
+html.dark[data-accent] .dark\:ring-indigo-400\/40,
+[data-accent] .focus\:ring-indigo-500:focus,
+[data-accent] .focus\:ring-indigo-500\/35:focus {
+  --tw-ring-color: var(--primary-accent-ring) !important;
+  border-color: var(--primary-accent) !important;
+}
+
+[data-accent] .from-indigo-600 {
+  --tw-gradient-from: var(--primary-accent) var(--tw-gradient-from-position) !important;
+  --tw-gradient-to: var(--primary-accent-hover) var(--tw-gradient-to-position) !important;
+}
+
+/* ==========================================================================
+   SOLID THEME CANVAS & DARK MODE (AMOLED PURE BLACK) ARCHITECTURE
+   Guarantees true AMOLED 0-nit pitch black canvas (#000000) and strongly elevated,
+   detached cards with multi-tiered ambient depth for crystal-clear readability
+   ========================================================================== */
+html,
+body,
+#root {
+  min-height: 100vh;
+}
+
+html:not(.dark),
+html:not(.dark) body,
+html:not(.dark) #root,
+html:not(.dark) #root > div {
+  background-color: var(--m3-app-canvas, #f1f3f7) !important;
+  color: #090d16 !important;
+}
+
+/* Dark Mode = Pure AMOLED Black Canvas (#000000) */
+html.dark,
+html.dark body,
+body.dark,
+html.dark #root,
+html.dark #root > div,
+[data-theme="dark"],
+[data-theme="dark"] #root,
+[data-theme="dark"] #root > div {
+  color-scheme: dark;
+  background-color: #000000 !important;
+  color: #f8fafc !important;
+}
+
+/* Structural Layout Protection: Header, Bottom Nav & Persistent Sidebar */
+html:not(.dark) header,
+html:not(.dark) header.sticky {
+  background-color: #ffffff !important;
+  border-bottom: 1px solid #cbd5e1 !important;
+}
+
+html:not(.dark) nav.fixed {
+  background-color: #ffffff !important;
+  border-top: 1px solid #cbd5e1 !important;
+}
+
+html.dark header,
+html.dark header.sticky {
+  background-color: #050507 !important;
+  border-bottom: 1px solid #2b2b35 !important;
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.9) !important;
+}
+
+html.dark aside {
+  background-color: #050507 !important;
+  border-right: 1px solid #2b2b35 !important;
+}
+
+html.dark nav {
+  background-color: #050507 !important;
+  border-top: 1px solid #2b2b35 !important;
+}
+
+/* ==========================================================================
+   SQUIRCLE & CIRCULAR SHAPE UNIFICATION
+   Replaces harsh rectangular elements with smooth squircles and circles
+   ========================================================================== */
+/* Smooth squircles for cards and structural containers */
+div[class*="rounded-3xl"] {
+  border-radius: 1.5rem !important; /* 24px continuous squircle */
+}
+
+div[class*="rounded-2xl"],
+section[class*="rounded-2xl"] {
+  border-radius: 1.25rem !important; /* 20px smooth squircle */
+}
+
+div[class*="rounded-xl"]:not(span):not(button) {
+  border-radius: 1rem !important; /* 16px inner squircle */
+}
+
+/* Rounded pills and circles for badges, chips, status indicators, and avatar triggers */
+span[class*="rounded-full"],
+div[class*="rounded-full"],
+button[class*="rounded-full"],
+a[class*="rounded-full"],
+.rounded-full {
+  border-radius: 9999px !important;
+}
+
+/* Squircle buttons across the application (replaces rectangular 4px/6px corners) */
+button.rounded-xl,
+button[class*="rounded-xl"] {
+  border-radius: 0.875rem !important;
+}
+
+button.rounded-lg,
+button[class*="rounded-lg"] {
+  border-radius: 0.75rem !important;
+}
+
+/* Structural Layout: Header and Persistent Sidebar maintain dock alignment with crisp borders */
+header,
+header.sticky {
+  border-radius: 0 !important;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05) !important;
+  border-top: none !important;
+  border-left: none !important;
+  border-right: none !important;
+}
+
+aside {
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  border-top: none !important;
+  border-left: none !important;
+  border-bottom: none !important;
+}
+
+nav.fixed {
+  border-radius: 0 !important;
+}
+
+/* ==========================================================================
+   ELEVATED & DETACHED CARD SURFACES (BOX VS BACKGROUND CONTRAST)
+   Guarantees that cards never submerge into the background canvas
+   ========================================================================== */
+/* Light Mode: Crisp Pure White (#ffffff) cards with clear border over distinct tonal canvas */
+html:not(.dark) main .bg-white:not(button):not(input):not(span):not(#quote-preview-card):not([data-custom-bg]):not([data-dark-card]):not([data-dark-modal]):not([data-quote-card]):not([data-habit-card]):not([data-m3-tonal-card]),
+html:not(.dark) main div[class*="rounded-2xl"]:not(#quote-preview-card):not([data-custom-bg]):not([data-dark-card]):not([data-dark-modal]):not([data-quote-card]):not([data-habit-card]):not([data-m3-tonal-card]),
+html:not(.dark) main div[class*="rounded-3xl"]:not(#quote-preview-card):not([data-custom-bg]):not([data-dark-card]):not([data-dark-modal]):not([data-quote-card]):not([data-habit-card]):not([data-m3-tonal-card]),
+html:not(.dark) main div[class*="rounded-[2"]:not(#quote-preview-card):not([data-custom-bg]):not([data-dark-card]):not([data-dark-modal]):not([data-quote-card]):not([data-habit-card]):not([data-m3-tonal-card]) {
+  background-color: #ffffff !important;
+  border: 1px solid var(--m3-card-border, #cbd5e1) !important;
+  box-shadow: 0 2px 8px -2px rgba(15, 23, 42, 0.07), 0 1px 2px rgba(15, 23, 42, 0.04) !important;
+}
+
+/* Light Mode Sub-surfaces & Nested items */
+html:not(.dark) main .bg-slate-50:not(button):not(input):not(#quote-preview-card):not([data-custom-bg]):not([data-dark-card]):not([data-dark-modal]):not([data-quote-card]):not([data-habit-card]):not([data-m3-tonal-card]),
+html:not(.dark) main .bg-slate-100:not(button):not(input):not(#quote-preview-card):not([data-custom-bg]):not([data-dark-card]):not([data-dark-modal]):not([data-quote-card]):not([data-habit-card]):not([data-m3-tonal-card]) {
+  background-color: #f1f5fa !important;
+  border: 1px solid #d5deea !important;
+}
+
+/* Explicit Dark Modal & Card Enforcement */
+[data-dark-modal="true"],
+[data-habit-detail-modal="true"].modal-dark {
+  background-color: #0c0f17 !important;
+  color: #f8fafc !important;
+}
+
+[data-dark-card="true"],
+[data-habit-detail-modal="true"].modal-dark [data-habit-card="true"],
+[data-habit-detail-modal="true"].modal-dark div[class*="rounded-3xl"] {
+  background-color: #151a26 !important;
+  border-color: #29324a !important;
+  color: #f8fafc !important;
+}
+
+[data-habit-detail-modal="true"].modal-light {
+  background-color: #e8eef6 !important;
+  color: #0f172a !important;
+}
+
+[data-habit-detail-modal="true"].modal-light [data-habit-card="true"],
+[data-habit-detail-modal="true"].modal-light div[class*="rounded-3xl"] {
+  background-color: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
+/* Dark Mode: Elevated Surfaces over Pure AMOLED Black (#000000) Canvas */
+html.dark main .dark\:bg-slate-900:not(button):not(input):not(span):not(#quote-preview-card):not([data-custom-bg]):not([data-quote-card]):not([data-m3-tonal-card]),
+html.dark main div[class*="rounded-2xl"]:not(button):not(input):not(span):not([role="menu"]):not(#quote-preview-card):not([data-custom-bg]):not([data-quote-card]):not([data-m3-tonal-card]),
+html.dark main div[class*="rounded-3xl"]:not(button):not(input):not(span):not(#quote-preview-card):not([data-custom-bg]):not([data-quote-card]):not([data-m3-tonal-card]),
+html.dark main div[class*="rounded-[2"]:not(button):not(input):not(span):not([role="menu"]):not(#quote-preview-card):not([data-custom-bg]):not([data-quote-card]):not([data-m3-tonal-card]),
+html.dark [data-card="elevated"] {
+  background-color: #101116 !important;
+  border: 1px solid #2d2f3b !important;
+  box-shadow: 0 4px 14px -2px rgba(0, 0, 0, 0.85) !important;
+}
+
+/* ==========================================================================
+   MATERIAL 3 EXPRESSIVE TONAL CARD SYSTEM (Light & Dark Modes)
+   Pure elevated surfaceContainerLowest (#ffffff) over crisp surfaceContainer (#f1f3f7) canvas
+   with unmistakable hairline borders across primary, nested, and semantic states
+   ========================================================================== */
+html:not(.dark) [data-m3-tonal-card="true"] {
+  background-color: #ffffff;
+  border: 1px solid var(--m3-card-border, #c4cddb);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.035);
+}
+
+html:not(.dark) [data-m3-tonal-card="true"][data-tonal-tone="subcard"] {
+  background-color: #f5f7fb;
+  border: 1px solid #cbd5e1;
+  box-shadow: none;
+}
+
+html:not(.dark) [data-m3-tonal-card="true"][data-tonal-tone="overdue"],
+html:not(.dark) [data-m3-tonal-card="true"][data-tonal-tone="rose"] {
+  background-color: #fff3f5;
+  border: 1px solid #fda4af;
+}
+
+html:not(.dark) [data-m3-tonal-card="true"][data-tonal-tone="soon"],
+html:not(.dark) [data-m3-tonal-card="true"][data-tonal-tone="amber"] {
+  background-color: #fff9eb;
+  border: 1px solid #fcd34d;
+}
+
+html:not(.dark) [data-m3-tonal-card="true"][data-tonal-tone="paid"],
+html:not(.dark) [data-m3-tonal-card="true"][data-tonal-tone="emerald"] {
+  background-color: #eefbf4;
+  border: 1px solid #6ee7b7;
+}
+
+html:not(.dark) [data-m3-tonal-card="true"][data-tonal-tone="done"] {
+  background-color: #f8fafd;
+  border: 1px solid #d5deea;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+html:not(.dark) [data-m3-tonal-card="true"][data-tonal-tone="archived"],
+html:not(.dark) [data-m3-tonal-card="true"][data-tonal-tone="muted"] {
+  background-color: #f4f6fa;
+  border: 1px solid #cbd5e1;
+}
+
+html.dark [data-m3-tonal-card="true"] {
+  background-color: #111319;
+  border: 1px solid #2e3444;
+  box-shadow: 0 2px 10px -2px rgba(0, 0, 0, 0.8);
+}
+
+html.dark [data-m3-tonal-card="true"][data-tonal-tone="subcard"] {
+  background-color: #171a24;
+  border: 1px solid #32394d;
+  box-shadow: none;
+}
+
+html.dark [data-m3-tonal-card="true"][data-tonal-tone="overdue"],
+html.dark [data-m3-tonal-card="true"][data-tonal-tone="rose"] {
+  background-color: #1a0f15;
+  border: 1px solid rgba(244, 63, 94, 0.45);
+}
+
+html.dark [data-m3-tonal-card="true"][data-tonal-tone="soon"],
+html.dark [data-m3-tonal-card="true"][data-tonal-tone="amber"] {
+  background-color: #18140c;
+  border: 1px solid rgba(245, 158, 11, 0.45);
+}
+
+html.dark [data-m3-tonal-card="true"][data-tonal-tone="paid"],
+html.dark [data-m3-tonal-card="true"][data-tonal-tone="emerald"] {
+  background-color: #0d1915;
+  border: 1px solid rgba(16, 185, 129, 0.45);
+}
+
+html.dark [data-m3-tonal-card="true"][data-tonal-tone="done"] {
+  background-color: #0f1219;
+  border: 1px solid #262c3d;
+}
+
+html.dark [data-m3-tonal-card="true"][data-tonal-tone="archived"],
+html.dark [data-m3-tonal-card="true"][data-tonal-tone="muted"] {
+  background-color: #11131a;
+  border: 1px solid #2b303e;
+}
+
+html.dark[data-amoled="false"] [data-m3-tonal-card="true"] {
+  background-color: #161e2e;
+  border: 1px solid #354363;
+}
+
+html.dark[data-amoled="false"] [data-m3-tonal-card="true"][data-tonal-tone="subcard"] {
+  background-color: #1c2539;
+  border: 1px solid #3e4f73;
+}
+
+html.dark[data-amoled="false"] [data-m3-tonal-card="true"][data-tonal-tone="overdue"],
+html.dark[data-amoled="false"] [data-m3-tonal-card="true"][data-tonal-tone="rose"] {
+  background-color: #211521;
+  border: 1px solid rgba(244, 63, 94, 0.48);
+}
+
+html.dark[data-amoled="false"] [data-m3-tonal-card="true"][data-tonal-tone="soon"],
+html.dark[data-amoled="false"] [data-m3-tonal-card="true"][data-tonal-tone="amber"] {
+  background-color: #211c14;
+  border: 1px solid rgba(245, 158, 11, 0.48);
+}
+
+html.dark[data-amoled="false"] [data-m3-tonal-card="true"][data-tonal-tone="paid"],
+html.dark[data-amoled="false"] [data-m3-tonal-card="true"][data-tonal-tone="emerald"] {
+  background-color: #122320;
+  border: 1px solid rgba(16, 185, 129, 0.46);
+}
+
+html.dark[data-amoled="false"] [data-m3-tonal-card="true"][data-tonal-tone="done"] {
+  background-color: #141b29;
+  border: 1px solid #2c3853;
+}
+
+html.dark[data-amoled="false"] [data-m3-tonal-card="true"][data-tonal-tone="archived"],
+html.dark[data-amoled="false"] [data-m3-tonal-card="true"][data-tonal-tone="muted"] {
+  background-color: #171f2f;
+  border: 1px solid #34405c;
+}
+
+/* Real Quote Card & Preview Card Styling (Defaults cleanly to crisp Pure White / Elevated Dark — NEVER inherit!) */
+:root {
+  --quote-card-bg: #ffffff;
+  --quote-card-border: #cbd5e1;
+}
+
+html.dark {
+  --quote-card-bg: #121319;
+  --quote-card-border: #2e313f;
+}
+
+html.dark[data-amoled="false"] {
+  --quote-card-bg: #151c2c;
+  --quote-card-border: #313e5c;
+}
+
+#quote-preview-card,
+[data-custom-bg="true"],
+[data-quote-card="true"] {
+  background-color: var(--preview-card-bg, var(--quote-card-bg, #ffffff)) !important;
+  border-color: var(--preview-card-border, var(--quote-card-border, #cbd5e1)) !important;
+}
+
+@keyframes quoteFadeInAnim {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes quoteSlideInAnim {
+  0% {
+    opacity: 0;
+    transform: translateY(28px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes quoteScaleInAnim {
+  0% {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.quote-transition-fade {
+  animation: quoteFadeInAnim 0.25s cubic-bezier(0.16, 1, 0.3, 1) both !important;
+}
+
+.quote-transition-slide {
+  animation: quoteSlideInAnim 0.25s cubic-bezier(0.16, 1, 0.3, 1) both !important;
+}
+
+.quote-transition-scale {
+  animation: quoteScaleInAnim 0.25s cubic-bezier(0.16, 1, 0.3, 1) both !important;
+}
+
+/* Dark Mode Sub-surfaces & Nested items */
+html.dark main .dark\:bg-slate-800:not(button):not(input),
+html.dark main [class*="dark:bg-slate-800"]:not(button):not(input) {
+  background-color: #121215 !important;
+  border: 1px solid #27272a !important;
+}
+
+/* ==========================================================================
+   VISIBILITY & CONTRAST PROTECTION (PREVENTS FADED/WASHED-OUT TEXT & BORDERS)
+   Guarantees that all labels, descriptions, and indicators meet strict WCAG AAA contrast
+   ========================================================================== */
+html.theme-bento:not(.dark) .text-slate-400,
+html:not(.dark):not(.theme-glass) .text-slate-400 {
+  color: #64748b !important; /* Raised from pale gray to solid Slate 500 (contrast > 4.8:1) */
+}
+
+html.theme-bento:not(.dark) .text-slate-500,
+html:not(.dark):not(.theme-glass) .text-slate-500 {
+  color: #475569 !important; /* Solid Slate 600 */
+}
+
+html.theme-bento:not(.dark) .text-slate-600,
+html:not(.dark):not(.theme-glass) .text-slate-600 {
+  color: #334155 !important; /* Solid Slate 700 */
+}
+
+html.theme-bento:not(.dark) .text-slate-900,
+html:not(.dark):not(.theme-glass) .text-slate-900 {
+  color: #090d16 !important; /* Pitch black for crystal-clear readability */
+}
+
+/* Dark mode contrast protection */
+html.theme-bento.dark .dark\:text-slate-400,
+html.dark:not(.theme-glass) .dark\:text-slate-400 {
+  color: #94a3b8 !important;
+}
+
+html.theme-bento.dark .dark\:text-slate-300,
+html.dark:not(.theme-glass) .dark\:text-slate-300 {
+  color: #cbd5e1 !important;
+}
+
+html.theme-bento.dark .dark\:text-white,
+html.dark:not(.theme-glass) .dark\:text-white {
+  color: #ffffff !important;
+}
+
+/* Bento stat typography & Screen Time inspired micro-components */
+.bento-stat-num {
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+/* Floating Gradient Circle Badge (Inspired by alarm clock & thumbs up in Dribbble Screen Time shots) */
+.bento-circle-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  box-shadow: 0 10px 22px -5px rgba(244, 63, 94, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.6);
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.bento-circle-badge:hover {
+  transform: scale(1.06);
+}
+
+/* High-contrast Screen Time Pill Button (like "Got it, Thanks" in screenshot 2) */
+.bento-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  font-weight: 700;
+  padding: 0.75rem 1.5rem;
+  letter-spacing: -0.01em;
+  box-shadow: 0 8px 20px -4px rgba(79, 70, 229, 0.35);
+  transition: all 0.2s ease;
+}
+
+.bento-pill-btn:hover {
+  box-shadow: 0 12px 24px -4px rgba(79, 70, 229, 0.45);
+  transform: translateY(-1px);
+}
+
+/* ========================================================================== */
+/* ==========================================================================
+   GLOBAL ULTRA-COMPACT STYLES FOR DASHBOARD WIDGETS
+   Reduces vertical whitespace by 50%, maximizing density & readability
+   ========================================================================== */
+.ultra-compact div[class*="rounded-3xl"],
+.ultra-compact div[class*="rounded-2xl"],
+.ultra-compact .widget-card {
+  padding: 0.5rem 0.75rem !important;
+  border-radius: 0.875rem !important;
+}
+
+.ultra-compact .space-y-4 > *,
+.ultra-compact .space-y-3\.5 > *,
+.ultra-compact .space-y-3 > * {
+  margin-top: 0.25rem !important;
+  margin-bottom: 0.25rem !important;
+}
+
+.ultra-compact .gap-4,
+.ultra-compact .gap-3\.5,
+.ultra-compact .gap-3 {
+  gap: 0.375rem !important;
+}
+
+.ultra-compact .py-5,
+.ultra-compact .py-4,
+.ultra-compact .py-3\.5,
+.ultra-compact .py-3 {
+  padding-top: 0.25rem !important;
+  padding-bottom: 0.25rem !important;
+}
+
+.ultra-compact .pb-4,
+.ultra-compact .pb-3\.5,
+.ultra-compact .pb-3 {
+  padding-bottom: 0.25rem !important;
+}
+
+.ultra-compact .pt-4,
+.ultra-compact .pt-3\.5,
+.ultra-compact .pt-3 {
+  padding-top: 0.25rem !important;
+}
+
+.ultra-compact .my-4,
+.ultra-compact .my-3\.5,
+.ultra-compact .my-3 {
+  margin-top: 0.25rem !important;
+  margin-bottom: 0.25rem !important;
+}
+
+.ultra-compact .p-4,
+.ultra-compact .p-5 {
+  padding: 0.5rem 0.75rem !important;
+}
+
+.ultra-compact h2 {
+  font-size: 1.125rem !important;
+  line-height: 1.25 !important;
+}
+
+.ultra-compact h3,
+.ultra-compact h4 {
+  line-height: 1.25 !important;
+}
+
+
+
+
+/* Print rules ensuring only the Hourly Schedule printable sheet is printed */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    overflow: visible !important;
+  }
+
+  /* Hide global navigation, sidebars, headers, modals, etc. */
+  nav,
+  aside,
+  header,
+  footer,
+  #ai-chat-assistant,
+  .print\:hidden,
+  [data-print-hide="true"] {
+    display: none !important;
+  }
+
+  /* Hide everything by default in print */
+  body * {
+    visibility: hidden;
+  }
+
+  /* Reveal ONLY the printable hourly schedule element and its descendants */
+  #printable-hourly-schedule,
+  #printable-hourly-schedule * {
+    visibility: visible;
+  }
+
+  #printable-hourly-schedule {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    display: block !important;
+  }
+}
+
+/* Note Preview Unified Standard Bubble Classes */
+.note-preview-bubble {
+  position: absolute;
+  bottom: 100%;
+  margin-bottom: 0.5rem;
+  z-index: 50;
+  width: 18rem; /* default width for mobile */
+  max-width: 90vw;
+  background-color: rgba(51, 65, 85, 0.95); /* bg-slate-700/95 */
+  border: 1px solid rgba(71, 85, 105, 0.8); /* border-slate-600/80 */
+  color: #f8fafc; /* text-slate-50 */
+  border-radius: 0.75rem; /* rounded-xl */
+  padding: 0.75rem; /* p-3 */
+  font-size: 0.875rem !important; /* text-sm, corrected font-size exactly 14px */
+  font-weight: 400;
+  line-height: 1.375; /* leading-normal */
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  word-break: break-word;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  animation: fadeInZoom 150ms ease-out forwards;
+}
+
+html.dark .note-preview-bubble,
+.dark .note-preview-bubble {
+  background-color: rgba(30, 41, 59, 0.95); /* bg-slate-800/95 */
+  border-color: rgba(51, 65, 85, 0.8); /* border-slate-700/80 */
+}
+
+@media (min-width: 640px) {
+  .note-preview-bubble {
+    width: 20rem; /* w-80 */
+    max-width: 32rem; /* max-w-lg */
+  }
+}
+
+/* Dynamic positioning helper */
+.note-preview-bubble-dynamic {
+  position: fixed !important;
+  bottom: auto !important;
+  margin-bottom: 0 !important;
+}
+
+@keyframes fadeInZoom {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* High-visibility blink & glow animation when jumping from PiP to active task or habit */
+@keyframes pipItemBlink {
+  0%, 100% {
+    box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.95), 0 0 30px rgba(245, 158, 11, 0.7);
+    outline: 3px solid #f59e0b;
+    outline-offset: 3px;
+    background-color: rgba(245, 158, 11, 0.22);
+    transform: scale(1.025);
+  }
+  50% {
+    box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.2), 0 0 0px transparent;
+    outline: 1px solid rgba(245, 158, 11, 0.3);
+    outline-offset: 0px;
+    background-color: rgba(245, 158, 11, 0.04);
+    transform: scale(1);
+  }
+}
+
+.pip-highlight-blink {
+  animation: pipItemBlink 0.55s ease-in-out 5 !important;
+  position: relative !important;
+  z-index: 50 !important;
+  border-color: #f59e0b !important;
+}
+
+/* ==========================================================================
+   AMOLED DARK MODE PERFECTION (TRUE BLACK #000000)
+   Ensures zero backlight on OLED displays across cards, modals, dropdowns & inputs
+   ========================================================================== */
+html.dark [role="dialog"]:not([data-unified-modal="true"]),
+html.dark .modal-content:not([data-unified-modal="true"]),
+html.dark div[class*="fixed inset-0"]:not([data-unified-modal="true"]) > div[class*="bg-white"]:not([data-unified-modal="true"]),
+html.dark div[class*="fixed inset-0"]:not([data-unified-modal="true"]) > div[class*="dark:bg-"]:not([data-unified-modal="true"]) {
+  background-color: #09090b !important;
+  border-color: #27272a !important;
+}
+
+html.dark input:not([type="checkbox"]):not([type="radio"]),
+html.dark textarea,
+html.dark select {
+  background-color: #141416 !important;
+  border-color: #27272a !important;
+  color: #f4f4f5 !important;
+}
+
+html.dark input:not([type="checkbox"]):not([type="radio"]):focus,
+html.dark textarea:focus,
+html.dark select:focus {
+  border-color: var(--primary-accent, #6366f1) !important;
+}
+
+/* ==========================================================================
+   ZERO-BLOAT GPU FLUID ANIMATION ENGINE (60/120FPS COMPOSITOR TRANSITIONS)
+   ========================================================================== */
+@keyframes sysPageEnter {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes sysViewEnter {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0) scale3d(0.992, 0.992, 1);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale3d(1, 1, 1);
+  }
+}
+
+@keyframes sysNavPillPop {
+  0% {
+    opacity: 0;
+    transform: scale3d(0.55, 0.82, 1);
+    border-radius: 6px;
+  }
+  60% {
+    opacity: 1;
+    transform: scale3d(1.04, 1.02, 1);
+    border-radius: 18px;
+  }
+  100% {
+    opacity: 1;
+    transform: scale3d(1, 1, 1);
+    border-radius: 16px;
+  }
+}
+
+@keyframes sysModalSpringIn {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 14px, 0) scale3d(0.96, 0.96, 1);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale3d(1, 1, 1);
+  }
+}
+
+@keyframes sysBackdropFadeIn {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+.animate-page-enter {
+  animation: sysPageEnter 200ms cubic-bezier(0.05, 0.7, 0.1, 1) backwards;
+  will-change: transform, opacity;
+}
+
+.animate-view-enter {
+  animation: sysViewEnter 200ms cubic-bezier(0.05, 0.7, 0.1, 1) backwards;
+  will-change: transform, opacity;
+}
+
+.animate-nav-pill {
+  animation: sysNavPillPop 220ms cubic-bezier(0.05, 0.7, 0.1, 1) both;
+}
+
+/* Universal Modal & Dialog Spring Entrance (excluded for Framer Motion unified modals to prevent double-animation blink) */
+[role="dialog"]:not([data-unified-modal="true"]),
+.modal-content:not([data-unified-modal="true"]),
+div[class*="fixed inset-0"]:not([data-unified-modal="true"]) > div[class*="rounded-2xl"]:not([data-unified-modal="true"]),
+div[class*="fixed inset-0"]:not([data-unified-modal="true"]) > div[class*="rounded-3xl"]:not([data-unified-modal="true"]) {
+  animation: sysModalSpringIn 220ms cubic-bezier(0.05, 0.7, 0.1, 1) both;
+  will-change: transform, opacity;
+}
+
+div[class*="fixed inset-0"][class*="bg-slate-900"]:not(.opacity-0):not([data-drawer-backdrop]):not([data-unified-modal="true"]),
+div[class*="fixed inset-0"][class*="bg-black"]:not(.opacity-0):not([data-drawer-backdrop]):not([data-unified-modal="true"]) {
+  animation: sysBackdropFadeIn 180ms cubic-bezier(0.05, 0.7, 0.1, 1) both;
+}
+
+/* Universal Tactile Button Micro-Interactions (Excluded for Framer Motion controls so CSS transitions never fight JS transforms) */
+button:not(:disabled):not([data-motion-anim="true"]) {
+  transition-property: transform, background-color, border-color, color, opacity;
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  transition-duration: 150ms;
+}
+
+button:active:not(:disabled):not([data-no-press-scale="true"]):not([data-motion-anim="true"]) {
+  transform: scale(var(--motion-press-scale, 0.965));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-page-enter,
+  .animate-view-enter,
+  .animate-nav-pill,
+  [role="dialog"],
+  .modal-content,
+  div[class*="fixed inset-0"] > div[class*="rounded-2xl"],
+  div[class*="fixed inset-0"] > div[class*="rounded-3xl"] {
+    animation: none !important;
+  }
+}
+
+/* ==========================================================================
+   GOOGLE MATERIAL 4 / MATERIAL YOU (M3 EXPRESSIVE) COMPACT DESIGN SYSTEM
+   Inspired by Seal, Read You, Lawnchair 14, Namida, Breezy Weather & Android 16
+   (Zero Backdrop-Filter / Zero GPU Blur Overhead / 120fps Solid Tonal Surfaces)
+   ========================================================================== */
+
+:root {
+  --m3-surface: #f7f8fa;
+  --m3-surface-dim: #eceef2;
+  --m3-surface-container-lowest: #ffffff;
+  --m3-surface-container-low: #f5f7fb;
+  --m3-surface-container: #f1f3f7;
+  --m3-surface-container-high: #e8ecf2;
+  --m3-surface-container-highest: #dfe4ec;
+  --m3-on-surface: #0f172a;
+  --m3-on-surface-variant: #475569;
+  --m3-outline: #94a3b8;
+  --m3-outline-variant: rgba(var(--primary-accent-rgb, 79, 70, 229), 0.14);
+  --m3-primary: var(--primary-accent, #4f46e5);
+  --m3-on-primary: #ffffff;
+  --m3-primary-container: var(--primary-accent-subtle, #e0e7ff);
+  --m3-on-primary-container: var(--primary-accent-hover, #3730a3);
+}
+
+html.dark {
+  --m3-surface: #000000;
+  --m3-surface-dim: #000000;
+  --m3-surface-container-lowest: #050507;
+  --m3-surface-container-low: #0c0c0f;
+  --m3-surface-container: #121216;
+  --m3-surface-container-high: #19191f;
+  --m3-surface-container-highest: #22222a;
+  --m3-on-surface: #f4f4f5;
+  --m3-on-surface-variant: #a1a1aa;
+  --m3-outline: #52525b;
+  --m3-outline-variant: rgba(255, 255, 255, 0.085);
+  --m3-primary: var(--primary-accent-light, #818cf8);
+  --m3-on-primary: #09090b;
+  --m3-primary-container: var(--primary-accent-subtle-dark, rgba(99, 102, 241, 0.22));
+  --m3-on-primary-container: #e0e7ff;
+}
+
+/* Rich Dark Slate when AMOLED Pure Black is turned off */
+html.dark[data-amoled="false"] {
+  --m3-surface: #0b0f19;
+  --m3-surface-dim: #080b12;
+  --m3-surface-container-lowest: #0e1320;
+  --m3-surface-container-low: #121827;
+  --m3-surface-container: #161e2e;
+  --m3-surface-container-high: #1c263b;
+  --m3-surface-container-highest: #243048;
+  --m3-outline-variant: rgba(148, 163, 184, 0.14);
+}
+
+html.dark[data-amoled="false"],
+html.dark[data-amoled="false"] body,
+html.dark[data-amoled="false"] #root,
+html.dark[data-amoled="false"] #root > div {
+  background-color: #0b0f19 !important;
+}
+
+html.dark[data-amoled="false"] header,
+html.dark[data-amoled="false"] header.sticky,
+html.dark[data-amoled="false"] aside,
+html.dark[data-amoled="false"] nav,
+html.dark[data-amoled="false"] .dark\:bg-black {
+  background-color: #111827 !important;
+  border-color: #1f2937 !important;
+}
+
+html.dark[data-amoled="false"] main .dark\:bg-slate-900:not(button):not(input):not(span):not(#quote-preview-card):not([data-custom-bg]):not([data-quote-card]):not([data-m3-tonal-card]),
+html.dark[data-amoled="false"] main div[class*="rounded-2xl"]:not(button):not(input):not(span):not([role="menu"]):not(#quote-preview-card):not([data-custom-bg]):not([data-quote-card]):not([data-m3-tonal-card]),
+html.dark[data-amoled="false"] main div[class*="rounded-3xl"]:not(button):not(input):not(span):not(#quote-preview-card):not([data-custom-bg]):not([data-quote-card]):not([data-m3-tonal-card]),
+html.dark[data-amoled="false"] main div[class*="rounded-[2"]:not(button):not(input):not(span):not([role="menu"]):not(#quote-preview-card):not([data-custom-bg]):not([data-quote-card]):not([data-m3-tonal-card]),
+html.dark[data-amoled="false"] [data-card="elevated"] {
+  background-color: #151c2c !important;
+  border-color: #303e5c !important;
+}
+
+/* Mono + Multicolor Palette Mode */
+html:not(.dark)[data-visual-palette="mono_accent"] {
+  --primary-accent: #18181b;
+  --primary-accent-hover: #27272a;
+  --primary-accent-light: #3f3f46;
+  --primary-accent-rgb: 24, 24, 27;
+  --primary-accent-subtle: #e4e4e7;
+  --primary-accent-ring: rgba(24, 24, 27, 0.35);
+  --m3-app-canvas: #e5e7eb;
+  --m3-card-border: #cbd5e1;
+}
+
+html.dark[data-visual-palette="mono_accent"] {
+  --primary-accent: #e4e4e7;
+  --primary-accent-hover: #ffffff;
+  --primary-accent-light: #f4f4f5;
+  --primary-accent-rgb: 228, 228, 231;
+  --primary-accent-subtle-dark: rgba(244, 244, 245, 0.16);
+  --primary-accent-ring: rgba(244, 244, 245, 0.4);
+}
+
+html.dark[data-visual-palette="mono_accent"] .bg-indigo-600,
+html.dark[data-visual-palette="mono_accent"] .bg-indigo-500,
+html.dark[data-visual-palette="mono_accent"] button.bg-indigo-600 {
+  color: #09090b !important;
+}
+
+/* Material 3 / Material You Color Style Variants (Neutral airy canvas + crisp card pop) */
+html:not(.dark)[data-color-style="tonal_spot"] {
+  --m3-app-canvas: color-mix(in srgb, #f2f3f7 96%, var(--primary-accent, #4f46e5) 4%);
+  --m3-card-border: color-mix(in srgb, #c6cfd9 88%, var(--primary-accent, #4f46e5) 12%);
+}
+
+html:not(.dark)[data-color-style="vibrant"] {
+  --m3-app-canvas: color-mix(in srgb, #f1f3f7 93%, var(--primary-accent, #4f46e5) 7%);
+  --m3-card-border: color-mix(in srgb, #c2cbd8 80%, var(--primary-accent, #4f46e5) 20%);
+  --m3-outline-variant: rgba(var(--primary-accent-rgb, 79, 70, 229), 0.25);
+}
+
+html.dark[data-color-style="vibrant"] {
+  --m3-outline-variant: rgba(var(--primary-accent-rgb, 129, 140, 248), 0.34);
+}
+
+html:not(.dark)[data-color-style="expressive"] {
+  --m3-app-canvas: color-mix(in srgb, #f1f2f6 92%, var(--primary-accent, #4f46e5) 8%);
+  --m3-card-border: color-mix(in srgb, #bfc8d6 76%, var(--primary-accent, #4f46e5) 24%);
+  --m3-outline-variant: rgba(var(--primary-accent-rgb, 79, 70, 229), 0.28);
+}
+
+html.dark[data-color-style="expressive"] {
+  --m3-outline-variant: rgba(var(--primary-accent-rgb, 129, 140, 248), 0.38);
+}
+
+html:not(.dark)[data-color-style="fruit_salad"] {
+  --m3-app-canvas: color-mix(in srgb, #f4f2f6 93%, var(--primary-accent, #4f46e5) 7%);
+  --m3-card-border: color-mix(in srgb, #c8cfd9 80%, var(--primary-accent, #4f46e5) 20%);
+}
+
+html:not(.dark)[data-color-style="neutral"] {
+  --m3-app-canvas: #f1f3f6;
+  --m3-card-border: #c5cdd9;
+  --m3-outline-variant: rgba(100, 116, 139, 0.25);
+}
+
+html[data-color-style="spritz"] {
+  --primary-accent: #3f3f46;
+  --primary-accent-hover: #27272a;
+  --primary-accent-light: #d4d4d8;
+  --primary-accent-rgb: 82, 82, 91;
+  --primary-accent-subtle: #f4f4f5;
+  --primary-accent-subtle-dark: rgba(161, 161, 170, 0.2);
+  --primary-accent-ring: rgba(82, 82, 91, 0.35);
+  --m3-app-canvas: #ececef;
+  --m3-card-border: #d4d4d8;
+}
+
+html.dark[data-color-style="spritz"] {
+  --primary-accent: #d4d4d8;
+  --primary-accent-hover: #f4f4f5;
+  --primary-accent-light: #f4f4f5;
+  --primary-accent-rgb: 212, 212, 216;
+  --primary-accent-subtle-dark: rgba(212, 212, 216, 0.16);
+}
+
+html.dark[data-color-style="spritz"] .bg-indigo-600,
+html.dark[data-color-style="spritz"] .bg-indigo-500,
+html.dark[data-color-style="spritz"] button.bg-indigo-600 {
+  color: #09090b !important;
+}
+
+/* ==========================================================================
+   MATERIAL 4 COMPACT CONTROLS: SWITCHES, SLIDERS, INPUTS & SEGMENTED BUTTONS
+   ========================================================================== */
+
+/* 1. Material 4 Bottom Nav Active Pill Indicator Animation */
+@keyframes m3PillIndicatorIn {
+  0% {
+    opacity: 0.25;
+    transform: scaleX(0.45) scaleY(0.88);
+  }
+  65% {
+    opacity: 1;
+    transform: scaleX(1.05) scaleY(1.02);
+  }
+  100% {
+    opacity: 1;
+    transform: scaleX(1) scaleY(1);
+  }
+}
+
+.animate-m3-indicator {
+  animation: m3PillIndicatorIn 240ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+/* 2. Material 4 Expressive Toggle Switch (Global Checkbox Upgrade) */
+input[type="checkbox"]:not([data-raw-checkbox="true"]) {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  width: 2.5rem !important; /* 40px compact M3 switch */
+  height: 1.375rem !important; /* 22px compact M3 switch */
+  border-radius: 9999px !important;
+  background-color: #e2e8f0;
+  border: 1.5px solid #94a3b8;
+  cursor: pointer;
+  transition: background-color 180ms cubic-bezier(0.2, 0, 0, 1),
+              border-color 180ms cubic-bezier(0.2, 0, 0, 1);
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+html.dark input[type="checkbox"]:not([data-raw-checkbox="true"]) {
+  background-color: #27272a;
+  border-color: #52525b;
+}
+
+input[type="checkbox"]:not([data-raw-checkbox="true"])::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 3px;
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  background-color: #64748b;
+  transform: translateY(-50%) scale(1);
+  transition: transform 200ms cubic-bezier(0.2, 0, 0, 1),
+              width 200ms cubic-bezier(0.2, 0, 0, 1),
+              height 200ms cubic-bezier(0.2, 0, 0, 1),
+              background-color 180ms cubic-bezier(0.2, 0, 0, 1),
+              left 200ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+html.dark input[type="checkbox"]:not([data-raw-checkbox="true"])::after {
+  background-color: #a1a1aa;
+}
+
+input[type="checkbox"]:not([data-raw-checkbox="true"]):checked {
+  background-color: var(--primary-accent, #4f46e5) !important;
+  border-color: var(--primary-accent, #4f46e5) !important;
+}
+
+input[type="checkbox"]:not([data-raw-checkbox="true"]):checked::after {
+  left: calc(100% - 18px);
+  width: 15px;
+  height: 15px;
+  background-color: #ffffff;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231e1b4b' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E");
+  background-size: 10px 10px;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+/* 3. Material 4 Thick-Track Range Sliders (Android 15/16 & Booming Music style) */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 10px !important;
+  border-radius: 9999px !important;
+  background: rgba(var(--primary-accent-rgb, 79, 70, 229), 0.16);
+  outline: none;
+  cursor: pointer;
+}
+
+html.dark input[type="range"] {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  background: var(--primary-accent, #4f46e5);
+  border: 2px solid #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 150ms cubic-bezier(0.2, 0, 0, 1), border-radius 150ms ease;
+}
+
+html.dark input[type="range"]::-webkit-slider-thumb {
+  border-color: #18181b;
+}
+
+input[type="range"]:active::-webkit-slider-thumb {
+  transform: scaleX(0.85) scaleY(1.22);
+  border-radius: 4px;
+}
+
+/* 4. Compact Material 4 Form Inputs & Selects */
+input[type="text"]:not(.bg-transparent),
+input[type="email"]:not(.bg-transparent),
+input[type="password"]:not(.bg-transparent),
+input[type="number"]:not(.bg-transparent),
+input[type="date"]:not(.bg-transparent),
+input[type="time"]:not(.bg-transparent),
+select:not(.bg-transparent),
+textarea:not(.bg-transparent) {
+  border-radius: 12px;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+}
+
+input[type="text"]:not(.bg-transparent):focus,
+input[type="email"]:not(.bg-transparent):focus,
+input[type="password"]:not(.bg-transparent):focus,
+input[type="number"]:not(.bg-transparent):focus,
+input[type="date"]:not(.bg-transparent):focus,
+input[type="time"]:not(.bg-transparent):focus,
+select:not(.bg-transparent):focus,
+textarea:not(.bg-transparent):focus {
+  border-color: var(--primary-accent, #4f46e5) !important;
+  box-shadow: 0 0 0 2px rgba(var(--primary-accent-rgb, 79, 70, 229), 0.16) !important;
+}
+
+/* 5. Material 4 Grouped Containment Utility Classes */
+.m3-group-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.m3-group-single {
+  border-radius: 20px !important;
+}
+
+.m3-group-top {
+  border-top-left-radius: 20px !important;
+  border-top-right-radius: 20px !important;
+  border-bottom-left-radius: 5px !important;
+  border-bottom-right-radius: 5px !important;
+}
+
+.m3-group-middle {
+  border-radius: 5px !important;
+}
+
+.m3-group-bottom {
+  border-top-left-radius: 5px !important;
+  border-top-right-radius: 5px !important;
+  border-bottom-left-radius: 20px !important;
+  border-bottom-right-radius: 20px !important;
+}
+
+/* Targeted Zero-Blur Guarantee: Disable GPU-heavy backdrop-filter without universal * overhead */
+[class*="backdrop-blur"] {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* GPU-Isolated Left Panel Drawer & Scrim (Zero Shadow Reallocation / Zero Blur / Synchronized Curves) */
+[data-drawer-sidebar="true"] {
+  contain: layout style paint;
+  backface-visibility: hidden;
+  will-change: transform;
+}
+
+[data-drawer-sidebar="true"][data-open="true"] {
+  transform: translate3d(0, 0, 0);
+  pointer-events: auto;
+  transition: transform 280ms cubic-bezier(0.05, 0.7, 0.1, 1);
+}
+
+[data-drawer-sidebar="true"][data-open="false"] {
+  transform: translate3d(-100%, 0, 0);
+  pointer-events: none;
+  transition: transform 220ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+[data-drawer-backdrop="true"] {
+  contain: strict;
+  backface-visibility: hidden;
+  will-change: opacity;
+}
+
+[data-drawer-backdrop="true"][data-open="true"] {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition: opacity 280ms cubic-bezier(0.05, 0.7, 0.1, 1), visibility 0ms linear 0ms;
+}
+
+[data-drawer-backdrop="true"][data-open="false"] {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 220ms cubic-bezier(0.2, 0, 0, 1), visibility 0ms linear 220ms;
+}
+
+
+
+

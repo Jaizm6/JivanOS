@@ -1,0 +1,10 @@
+{
+  "name": "Remix Remix OmniLifeOS: Universal Health, Task \u0026 Journal Planner",
+  "description": "Universal Android and Web app merging medication reminders, task management, private encrypted journaling, modular dashboard widgets, and cross-platform sync.",
+  "requestFramePermissions": [
+    "notifications"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

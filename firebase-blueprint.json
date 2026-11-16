@@ -1,0 +1,63 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "nickname": { "type": "string" },
+        "avatarPhoto": { "type": "string" },
+        "bio": { "type": "string" },
+        "gender": { "type": "string" },
+        "dateOfBirth": { "type": "string" },
+        "heightCm": { "type": "number" },
+        "weightKg": { "type": "number" },
+        "preferredCurrency": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["userId", "email"]
+    },
+    "UserData": {
+      "title": "UserData",
+      "description": "User state data payload for backup and synchronization",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "email": { "type": "string" },
+        "payload": { "type": "string" },
+        "version": { "type": "number" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["userId", "payload"]
+    },
+    "QuoteReminder": {
+      "title": "QuoteReminder",
+      "description": "User scheduled quote reminders",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "quoteId": { "type": "string" },
+        "reminderTime": { "type": "string" },
+        "enabled": { "type": "boolean" }
+      },
+      "required": ["userId", "quoteId", "reminderTime", "enabled"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile and configuration document"
+    },
+    "/users/{userId}/data/state": {
+      "schema": "UserData",
+      "description": "User encrypted state and full backup data"
+    },
+    "/users/{userId}/reminders/{reminderId}": {
+      "schema": "QuoteReminder",
+      "description": "User scheduled quote reminders"
+    }
+  }
+}
