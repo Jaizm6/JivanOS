@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useMemo } from 'react';
 import {
   BarChart3,
   AlertCircle,
@@ -10,6 +10,7 @@ import {
   Database,
   RefreshCw,
   CheckCircle2,
+  Cloud,
   CloudOff,
   PanelLeftClose,
   LayoutGrid,
@@ -102,8 +103,8 @@ export const Sidebar: React.FC = () => {
         className="fixed inset-y-0 left-0 z-[80] w-[276px] sm:w-[292px] bg-[#edf2fa] dark:bg-[#08090d] border-r border-slate-200/90 dark:border-zinc-800/90 flex flex-col select-none touch-pan-y"
       >
       <div className="flex flex-col h-full min-h-0 p-2.5 sm:p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] gap-1.5 overflow-hidden">
-        {/* 1. TOP BRAND & USER PROFILE CARD (Namida Header Card + Close Control) */}
-        <div className="flex items-center justify-between gap-2 p-2 rounded-2xl bg-white dark:bg-zinc-900/95 border border-slate-200/70 dark:border-zinc-800/80 shadow-2xs shrink-0">
+        {/* 1. TOP BRAND & USER PROFILE CARD (Namida Header Card + Sync Icon + Close Control) */}
+        <div className="flex items-center justify-between gap-1.5 p-2 rounded-2xl bg-white dark:bg-zinc-900/95 border border-slate-200/70 dark:border-zinc-800/80 shadow-2xs shrink-0">
           <button
             type="button"
             id="btn-sidebar-profile"
@@ -127,16 +128,22 @@ export const Sidebar: React.FC = () => {
                   J
                 </div>
               )}
-              {!isOnline && (
-                <span
-                  className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ring-2 ring-white dark:ring-zinc-900 bg-amber-500"
-                  title="Offline mode"
-                />
-              )}
+              <span
+                className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ring-2 ring-white dark:ring-zinc-900 ${
+                  !isOnline || syncStatus === 'offline'
+                    ? 'bg-amber-500'
+                    : syncStatus === 'syncing'
+                    ? 'bg-indigo-500 animate-pulse'
+                    : syncStatus === 'error'
+                    ? 'bg-rose-500'
+                    : 'bg-emerald-500'
+                }`}
+                title={!isOnline ? 'Offline' : syncStatus === 'syncing' ? 'Syncing...' : 'Cloud Synced'}
+              />
             </div>
 
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1.5">
                 <span className="font-extrabold text-[14px] tracking-tight text-slate-900 dark:text-zinc-100 truncate">
                   Jivan <span className="text-indigo-600 dark:text-indigo-400">OS</span>
                 </span>
@@ -153,7 +160,52 @@ export const Sidebar: React.FC = () => {
           </button>
 
           <div className="flex items-center gap-1 shrink-0">
-            {/* Notification Center Bell (next to logo, just before Close Panel button) */}
+            {/* Shifted Cloud Sync Status Pill / Button in Left Panel */}
+            <button
+              type="button"
+              id="btn-sidebar-sync-status"
+              onClick={() => syncWithCloud()}
+              title={
+                syncStatus === 'syncing'
+                  ? 'Syncing with Cloud...'
+                  : !isOnline || syncStatus === 'offline'
+                  ? 'Offline Mode — Tap to retry'
+                  : 'Cloud Synced — Tap to Sync Now'
+              }
+              className={`px-2 py-1.5 rounded-xl border text-[10.5px] font-bold flex items-center gap-1 transition active:scale-95 cursor-pointer shrink-0 ${
+                syncStatus === 'syncing'
+                  ? 'bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800/70'
+                  : !isOnline || syncStatus === 'offline'
+                  ? 'bg-amber-50 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/70'
+                  : syncStatus === 'error'
+                  ? 'bg-rose-50 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800/70'
+                  : 'bg-emerald-50/80 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200/80 dark:border-emerald-800/70'
+              }`}
+            >
+              {syncStatus === 'syncing' ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-indigo-600 dark:text-indigo-400" />
+                  <span>Syncing</span>
+                </>
+              ) : !isOnline || syncStatus === 'offline' ? (
+                <>
+                  <CloudOff className="w-3.5 h-3.5 text-amber-500" />
+                  <span>Offline</span>
+                </>
+              ) : syncStatus === 'error' ? (
+                <>
+                  <Cloud className="w-3.5 h-3.5 text-rose-500" />
+                  <span>Retry</span>
+                </>
+              ) : (
+                <>
+                  <Cloud className="w-3.5 h-3.5 text-emerald-500" />
+                  <span>Synced</span>
+                </>
+              )}
+            </button>
+
+            {/* Notification Center Bell */}
             <button
               type="button"
               id="btn-notifications-drawer"

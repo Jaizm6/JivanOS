@@ -999,14 +999,16 @@ export const SettingsManager: React.FC = () => {
             <div className="mt-1 font-bold text-slate-900 dark:text-white capitalize flex items-center gap-1.5">
               <span
                 className={`w-2 h-2 rounded-full ${
-                  syncState.status === 'synced'
+                  syncState.status === 'synced' || syncState.status === 'idle'
                     ? 'bg-emerald-500'
                     : syncState.status === 'syncing'
                     ? 'bg-amber-500 animate-pulse'
+                    : syncState.status === 'offline'
+                    ? 'bg-amber-500'
                     : 'bg-rose-500'
                 }`}
               />
-              {syncState.status}
+              {syncState.status === 'idle' ? 'Synced' : syncState.status}
             </div>
           </div>
 

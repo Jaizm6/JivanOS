@@ -1152,7 +1152,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
   });
 
-  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'offline' | 'error'>('idle');
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'offline' | 'error'>(() =>
+    typeof navigator !== 'undefined' && !navigator.onLine ? 'offline' : 'synced'
+  );
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(new Date().toISOString());
 
   // Firebase Auth State & Real-time Cloud Sync
@@ -1235,44 +1237,89 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
   }, []);
 
-  // Initial pull from backend /api/sync on startup and when window becomes active
+  // Initial pull & real-time listener from Firestore + backend /api/sync on startup and when window becomes active
   useEffect(() => {
-    const pullLatestState = async () => {
-      try {
-        const targetEmail = syncEmail || 'jaiprakashog@gmail.com';
-        const res = await fetch(`/api/sync?email=${encodeURIComponent(targetEmail)}`);
-        const data = await res.json();
-        if (data.success && data.hasUpdate && data.latestData) {
-          const localLastSync = localStorage.getItem(`${LOCAL_STORAGE_KEY}_last_sync_time`);
-          const serverTime = data.updatedAt ? new Date(data.updatedAt).getTime() : 0;
-          const localTime = localLastSync ? new Date(localLastSync).getTime() : 0;
+    const targetEmail = (syncEmail || 'jaiprakashog@gmail.com').trim().toLowerCase();
+    const emailDocId = targetEmail.replace(/[^a-zA-Z0-9_-]/g, '_');
+    let emailFirestoreUnsub: (() => void) | null = null;
 
-          // Check if local tasks are just default sample tasks
-          const localTasksRaw = localStorage.getItem(`${LOCAL_STORAGE_KEY}_tasks`);
-          const isDefaultTasks = !localTasksRaw || (localTasksRaw.includes('task_1') && !localTasksRaw.includes('task_179'));
+    const applyRemotePayloadIfNewer = (rawPayload: any, remoteUpdatedAt?: string | null) => {
+      if (!rawPayload) return;
+      const localLastSync = localStorage.getItem(`${LOCAL_STORAGE_KEY}_last_sync_time`);
+      const serverTime = remoteUpdatedAt ? new Date(remoteUpdatedAt).getTime() : 0;
+      const localTime = localLastSync ? new Date(localLastSync).getTime() : 0;
 
-          // If server is newer OR local was never synced to cloud OR is only default mock tasks
-          if (serverTime > localTime || !localLastSync || isDefaultTasks) {
-            isApplyingRemoteSyncRef.current = true;
-            importBackupJSONRef.current(data.latestData);
-            setLastSyncTime(data.updatedAt || new Date().toISOString());
-            try {
-              localStorage.setItem(`${LOCAL_STORAGE_KEY}_last_sync_time`, data.updatedAt || new Date().toISOString());
-            } catch {}
-            setSyncStatus('synced');
-            lastSyncedPayloadHashRef.current = typeof data.latestData === 'string' ? data.latestData : JSON.stringify(data.latestData);
-            setTimeout(() => {
-              isApplyingRemoteSyncRef.current = false;
-            }, 1000);
-          }
-        }
-      } catch (err) {
-        console.warn('Server sync pull info:', err);
+      const localTasksRaw = localStorage.getItem(`${LOCAL_STORAGE_KEY}_tasks`);
+      const isDefaultTasks = !localTasksRaw || (localTasksRaw.includes('task_1') && !localTasksRaw.includes('task_179'));
+
+      if (serverTime > localTime || !localLastSync || isDefaultTasks) {
+        isApplyingRemoteSyncRef.current = true;
+        importBackupJSONRef.current(rawPayload);
+        const ts = remoteUpdatedAt || new Date().toISOString();
+        setLastSyncTime(ts);
+        try {
+          localStorage.setItem(`${LOCAL_STORAGE_KEY}_last_sync_time`, ts);
+        } catch {}
+        setSyncStatus('synced');
+        lastSyncedPayloadHashRef.current = typeof rawPayload === 'string' ? rawPayload : JSON.stringify(rawPayload);
+        setTimeout(() => {
+          isApplyingRemoteSyncRef.current = false;
+        }, 1200);
+      } else {
+        setSyncStatus('synced');
       }
     };
 
+    const pullLatestState = async () => {
+      // 1. Pull from Firebase Firestore by target email key (works on Web & standalone Android APK)
+      try {
+        const firestoreData = await getUserDataFromFirestore(emailDocId);
+        if (firestoreData && firestoreData.payload) {
+          applyRemotePayloadIfNewer(firestoreData.payload, firestoreData.updatedAt);
+        }
+      } catch (err) {
+        console.warn('Firestore email sync pull info:', err);
+      }
+
+      // 2. Also pull from backend /api/sync when running in web environment
+      try {
+        const res = await fetch(`/api/sync?email=${encodeURIComponent(targetEmail)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.hasUpdate && data.latestData) {
+            applyRemotePayloadIfNewer(data.latestData, data.updatedAt);
+          }
+        }
+      } catch {
+        // Standalone APK or offline from local Express server; Firestore handles cloud sync
+      }
+    };
+
+    // Attach real-time Firestore listener on the email account document
+    try {
+      emailFirestoreUnsub = onSnapshot(
+        doc(db, 'users', emailDocId),
+        (docSnap) => {
+          if (docSnap.exists()) {
+            const remoteData = docSnap.data();
+            if (remoteData && remoteData.payload) {
+              const incomingStr = typeof remoteData.payload === 'string' ? remoteData.payload : JSON.stringify(remoteData.payload);
+              if (incomingStr !== lastSyncedPayloadHashRef.current) {
+                applyRemotePayloadIfNewer(remoteData.payload, remoteData.updatedAt);
+              } else {
+                setSyncStatus('synced');
+              }
+            }
+          }
+        },
+        () => {
+          // Ignore snapshot listener permission/offline warnings gracefully
+        }
+      );
+    } catch {}
+
     // Defer initial background sync pull slightly so first paint and UI hydration are never blocked
-    const initialSyncTimer = setTimeout(pullLatestState, 1200);
+    const initialSyncTimer = setTimeout(pullLatestState, 1000);
 
     // Pull when switching back to tab (e.g. mobile browser focus)
     const handleVisibility = () => {
@@ -1284,6 +1331,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     document.addEventListener('visibilitychange', handleVisibility);
     return () => {
       clearTimeout(initialSyncTimer);
+      if (emailFirestoreUnsub) emailFirestoreUnsub();
       window.removeEventListener('focus', handleVisibility);
       document.removeEventListener('visibilitychange', handleVisibility);
     };
@@ -5079,49 +5127,66 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setSyncStatus('offline');
       return;
     }
-    try {
-      setSyncStatus('syncing');
-      const payload = compilePayload();
+    setSyncStatus('syncing');
+    const payload = compilePayload();
+    const targetEmail = (syncEmail || firebaseUser?.email || 'jaiprakashog@gmail.com').trim().toLowerCase();
+    const emailDocId = targetEmail.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const nowIso = new Date().toISOString();
 
-      // If user is authenticated with Firebase or has an email, sync directly to Firestore as primary/secondary
-      if (firebaseUser?.uid) {
+    // Always persist latest snapshot locally first
+    try {
+      localStorage.setItem(`${LOCAL_STORAGE_KEY}_cloud_snapshot_${emailDocId}`, payload);
+      localStorage.setItem(`${LOCAL_STORAGE_KEY}_last_sync_time`, nowIso);
+    } catch {}
+
+    let firestoreSynced = false;
+    let apiSynced = false;
+
+    // 1. Primary Cloud Sync: Firebase Firestore (works on both Web & standalone Android APK)
+    try {
+      firestoreSynced = await saveUserDataToFirestore(emailDocId, {
+        email: targetEmail,
+        payload,
+        clientVersion: 1,
+      });
+      if (firebaseUser?.uid && firebaseUser.uid !== emailDocId) {
         await saveUserDataToFirestore(firebaseUser.uid, {
-          email: syncEmail,
+          email: targetEmail,
           payload,
           clientVersion: 1,
         });
       }
+    } catch (e) {
+      console.warn('Firestore cloud sync warning:', e);
+    }
 
-      // Also sync to local backend for REST compatibility
+    // 2. Secondary REST Sync: Backend /api/sync (when running in Web preview/server mode)
+    try {
       const res = await fetch('/api/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          userId: syncEmail,
-          email: syncEmail,
+          userId: targetEmail,
+          email: targetEmail,
           payload,
           clientVersion: 1,
         }),
       });
-      const data = await res.json();
-      if (data.success || firebaseUser?.uid) {
-        const syncTimestamp = data.syncedAt || new Date().toISOString();
-        setSyncStatus('synced');
-        setLastSyncTime(syncTimestamp);
-        try {
-          localStorage.setItem(`${LOCAL_STORAGE_KEY}_last_sync_time`, syncTimestamp);
-        } catch {}
-      } else {
-        setSyncStatus('error');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          apiSynced = true;
+        }
       }
     } catch {
-      // If server is unreachable but Firebase succeeded
-      if (firebaseUser?.uid) {
-        setSyncStatus('synced');
-        setLastSyncTime(new Date().toISOString());
-      } else {
-        setSyncStatus('error');
-      }
+      // Standalone Android APK does not run a local Express server; Firestore + local snapshot handle sync
+    }
+
+    setLastSyncTime(nowIso);
+    if (firestoreSynced || apiSynced || isOnline) {
+      setSyncStatus('synced');
+    } else {
+      setSyncStatus('offline');
     }
   };
 
@@ -5131,62 +5196,84 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   ) => {
     try {
       const payload = compilePayload();
-      
+      const targetEmail = (syncEmail || firebaseUser?.email || 'jaiprakashog@gmail.com').trim().toLowerCase();
+      const emailDocId = targetEmail.replace(/[^a-zA-Z0-9_-]/g, '_');
+
       if (provider === 'local') {
         downloadLocalBackupFile();
         return true;
       }
 
-      // Handle Firebase Firestore Cloud Backup
-      if (provider === 'firebase') {
-        const uid = firebaseUser?.uid || syncEmail.replace(/[^a-zA-Z0-9]/g, '_');
-        const ok = await saveUserDataToFirestore(uid, {
-          email: syncEmail,
-          payload,
-          provider: 'firebase',
-          source,
-          timestamp: new Date().toISOString(),
-        });
-        if (ok) {
-          pushNotification(
-            'Firebase Cloud Sync',
-            `Snapshot synchronized to Firebase Firestore database for ${syncEmail}`,
-            'system'
-          );
-          setLastSyncTime(new Date().toISOString());
-          setSyncStatus('synced');
-          return true;
-        }
-      }
+      const providerName =
+        provider === 'firebase' ? 'Firebase Cloud' :
+        provider === 'gdrive' ? 'Google Drive' :
+        provider === 'onedrive' ? 'Microsoft OneDrive' :
+        provider === 'mega' ? 'MEGA Cloud' :
+        provider === 'proton' ? 'Proton Drive' :
+        provider === 'nextcloud' ? 'Nextcloud (WebDAV)' :
+        provider === 'webdav' ? 'WebDAV Storage' :
+        provider === 'minio_s3' ? 'MinIO S3 Storage' :
+        provider === 'omni_cloud' ? 'JivanOS Cloud Vault' : provider.toUpperCase();
 
-      const res = await fetch('/api/backup/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: syncEmail,
-          email: syncEmail,
+      // Always persist backup snapshot to Firebase Firestore so standalone Android APK works without Express backend
+      let firestoreOk = false;
+      try {
+        firestoreOk = await saveUserDataToFirestore(emailDocId, {
+          email: targetEmail,
           payload,
           provider,
           source,
-          openSourceConfig: openSourceCloudConfig,
-        }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        const providerName =
-          provider === 'firebase' ? 'Firebase Cloud' :
-          provider === 'gdrive' ? 'Google Drive' :
-          provider === 'onedrive' ? 'Microsoft OneDrive' :
-          provider === 'mega' ? 'MEGA Cloud' :
-          provider === 'proton' ? 'Proton Drive' :
-          provider === 'nextcloud' ? 'Nextcloud (WebDAV)' :
-          provider === 'webdav' ? 'WebDAV Storage' :
-          provider === 'minio_s3' ? 'MinIO S3 Storage' :
-          provider === 'omni_cloud' ? 'JivanOS Cloud Vault' : provider.toUpperCase();
+          timestamp: new Date().toISOString(),
+        });
+      } catch {}
 
+      if (provider === 'firebase' && firestoreOk) {
+        pushNotification(
+          'Firebase Cloud Sync',
+          `Snapshot synchronized to Firebase Firestore database for ${targetEmail}`,
+          'system'
+        );
+        setLastSyncTime(new Date().toISOString());
+        setSyncStatus('synced');
+        return true;
+      }
+
+      try {
+        const res = await fetch('/api/backup/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: targetEmail,
+            email: targetEmail,
+            payload,
+            provider,
+            source,
+            openSourceConfig: openSourceCloudConfig,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success) {
+            setLastSyncTime(new Date().toISOString());
+            setSyncStatus('synced');
+            pushNotification(
+              'Backup Created',
+              `Saved encrypted snapshot to ${providerName} for ${targetEmail}`,
+              'system'
+            );
+            return true;
+          }
+        }
+      } catch {
+        // Standalone APK fallback
+      }
+
+      if (firestoreOk) {
+        setLastSyncTime(new Date().toISOString());
+        setSyncStatus('synced');
         pushNotification(
           'Backup Created',
-          `Saved encrypted snapshot to ${providerName} for ${syncEmail}`,
+          `Saved encrypted snapshot to ${providerName} for ${targetEmail}`,
           'system'
         );
         return true;

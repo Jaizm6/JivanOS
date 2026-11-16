@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { Menu, RefreshCw, Cloud, CloudOff } from 'lucide-react';
+import { Menu } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { QuoteBanner } from '../common/QuoteBanner';
 
@@ -8,8 +8,6 @@ export const Navbar: React.FC = () => {
     activeTab,
     isSidebarCollapsed,
     toggleSidebar,
-    syncStatus,
-    isOnline,
   } = useApp();
 
   useEffect(() => {
@@ -46,31 +44,6 @@ export const Navbar: React.FC = () => {
             </span>
           ) : (
             <QuoteBanner />
-          )}
-        </div>
-
-        {/* Right: Subtle Sync / Connection Status Indicator */}
-        <div className="flex items-center gap-1.5 shrink-0 pl-1">
-          {syncStatus === 'syncing' ? (
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/70 text-[11px] font-semibold animate-pulse shadow-2xs select-none">
-              <RefreshCw className="w-3 h-3 animate-spin text-indigo-600 dark:text-indigo-400" />
-              <span>Syncing...</span>
-            </div>
-          ) : !isOnline || syncStatus === 'offline' ? (
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/70 text-[11px] font-semibold shadow-2xs select-none">
-              <CloudOff className="w-3 h-3 text-amber-500" />
-              <span>Offline</span>
-            </div>
-          ) : syncStatus === 'error' ? (
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-rose-50 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800/70 text-[11px] font-semibold shadow-2xs select-none" title="Sync Error">
-              <Cloud className="w-3 h-3 text-rose-500" />
-              <span>Sync Error</span>
-            </div>
-          ) : (
-            <div className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-full text-slate-400 dark:text-zinc-500 text-[10.5px] font-medium select-none" title="Cloud Synced">
-              <Cloud className="w-3 h-3 text-emerald-500" />
-              <span>Synced</span>
-            </div>
           )}
         </div>
       </div>
