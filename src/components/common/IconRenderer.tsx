@@ -91,15 +91,33 @@ export const renderIconElement = (
     );
   }
 
+  // Normalize string for keyword matching
+  const key = trimmed.toLowerCase().replace(/[-_\s]+/g, '');
+
+  // Explicit distinct round scored Tablet SVG for 'pill' / 'tablet' (not shadowed by structured catalog Pill capsule)
+  if (key === 'pill' || key === 'tablet') {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.1"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className={className}
+      >
+        <circle cx="12" cy="12" r="8.5" />
+        <line x1="6.3" y1="17.7" x2="17.7" y2="6.3" />
+      </svg>
+    );
+  }
+
   // Check Structured Icon Catalog first (160+ categorized icons)
   const structuredMatch = findStructuredIconByKey(trimmed);
   if (structuredMatch) {
     const MatchedComp = structuredMatch.Icon;
     return <MatchedComp className={className} />;
   }
-
-  // Normalize string for keyword matching
-  const key = trimmed.toLowerCase().replace(/[-_\s]+/g, '');
 
   switch (key) {
     // Water / Hydration / Drop (User explicitly reported this)
@@ -222,9 +240,9 @@ export const renderIconElement = (
     case 'pill':
     case 'tablet':
       return (
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-          <circle cx="12" cy="12" r="9" />
-          <line x1="12" y1="3" x2="12" y2="21" />
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" className={className}>
+          <circle cx="12" cy="12" r="8.5" />
+          <line x1="6.3" y1="17.7" x2="17.7" y2="6.3" />
         </svg>
       );
 

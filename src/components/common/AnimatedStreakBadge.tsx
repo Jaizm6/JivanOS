@@ -41,6 +41,11 @@ export const AnimatedStreakBadge: React.FC<AnimatedStreakBadgeProps> = ({
     const wasCompleted = prevCompletedRef.current;
     const prevStreak = prevStreakRef.current;
 
+    if (!isCompleted && streak <= 0) {
+      setShowPop(false);
+      return;
+    }
+
     if ((!wasCompleted && isCompleted) || (streak > prevStreak && prevStreak > 0)) {
       setShowPop(true);
       const timer = setTimeout(() => setShowPop(false), 950);
@@ -63,17 +68,17 @@ export const AnimatedStreakBadge: React.FC<AnimatedStreakBadgeProps> = ({
 
   const sizeClasses = {
     xs: {
-      badge: 'px-1.5 py-0.2 text-[12px] gap-0.5 rounded-md border border-amber-400/90 dark:border-amber-500/80 shadow-2xs font-bold',
+      badge: 'px-1.5 py-0.2 text-[12px] gap-0.5 rounded-md border shadow-2xs font-bold',
       icon: 'w-3 h-3',
       label: 'text-[11px]',
     },
     sm: {
-      badge: 'px-2 py-0.5 text-[13px] gap-1 rounded-lg border border-amber-400/90 dark:border-amber-500/80 shadow-2xs font-bold',
+      badge: 'px-2 py-0.5 text-[13px] gap-1 rounded-lg border shadow-2xs font-bold',
       icon: 'w-3.5 h-3.5',
       label: 'text-[12px]',
     },
     md: {
-      badge: 'px-2.5 py-1 text-[15px] gap-1.5 rounded-xl border border-amber-400/90 dark:border-amber-500/80 shadow-2xs font-bold',
+      badge: 'px-2.5 py-1 text-[15px] gap-1.5 rounded-xl border shadow-2xs font-bold',
       icon: 'w-4 h-4',
       label: 'text-[14px]',
     },

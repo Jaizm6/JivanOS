@@ -82,6 +82,7 @@ export const UniformTaskCard = React.memo<UniformTaskCardProps>(({
 }) => {
   const { pomodoro, startPomodoro, pausePomodoro, stopPomodoro, pushNotification } = useApp();
   const [isAnimating, setIsAnimating] = useState(false);
+  const [isFading, setIsFading] = useState(false);
   const [isSuccessScale, setIsSuccessScale] = useState(false);
   const [subtaskSuccessId, setSubtaskSuccessId] = useState<string | null>(null);
   const [celebrationKey, setCelebrationKey] = useState<number>(0);
@@ -155,12 +156,17 @@ export const UniformTaskCard = React.memo<UniformTaskCardProps>(({
 
       setTimeout(() => {
         setCelebrationKey(prev => prev + 1);
-      }, 260);
+      }, 120);
+
+      setTimeout(() => {
+        setIsFading(true);
+      }, 520);
 
       setTimeout(() => {
         setIsAnimating(false);
+        setIsFading(false);
         onToggleTask(task.id);
-      }, 850);
+      }, 780);
     } else {
       haptics.toggle();
       onToggleTask(task.id);
@@ -223,7 +229,9 @@ export const UniformTaskCard = React.memo<UniformTaskCardProps>(({
       onDragEnter={(e: any) => onDragEnter?.(e)}
       onDragLeave={(e: any) => onDragLeave?.(e)}
       onDrop={(e: any) => onDrop?.(e)}
-      className={`relative group select-none transition-all w-full min-w-0 ${
+      className={`relative group select-none transition-all duration-200 w-full min-w-0 ${
+        isFading ? 'opacity-0 translate-x-4 scale-[0.98] pointer-events-none' : ''
+      } ${
         isCompact
           ? 'px-2.5 py-1.5 min-h-[34px] hover:bg-slate-50/80 dark:hover:bg-slate-800/50 flex flex-col justify-center'
           : 'rounded-xl border px-3 py-2 flex flex-col justify-between gap-1 shadow-2xs hover:shadow-xs bg-white dark:bg-slate-900 border-slate-200/90 dark:border-slate-800/90 hover:border-slate-300 dark:hover:border-slate-700'
@@ -236,15 +244,17 @@ export const UniformTaskCard = React.memo<UniformTaskCardProps>(({
           ? 'border-b-2 border-b-indigo-600 bg-indigo-50/40 dark:bg-indigo-950/30'
           : ''
       } ${
-        task.completed
+        isAnimating
+          ? 'border-emerald-400/80 dark:border-emerald-600/80 bg-emerald-50/75 dark:bg-emerald-950/30'
+          : task.completed
           ? 'bg-slate-50/50 dark:bg-slate-900/40'
           : ''
       } ${className}`}
     >
       {/* Primary Row: Checkbox on top + Title */}
       <div className="flex items-start gap-2.5 min-w-0 w-full">
-        {/* Checkbox on top */}
-        <div className="relative flex items-center justify-center shrink-0 mt-0.5">
+        {/* Generous 36px tap area centered on 20px circle */}
+        <div className="relative flex items-center justify-center w-[20px] h-[20px] shrink-0">
           <CheckmarkCelebration
             activeKey={isAnimating ? celebrationKey : null}
             badgeText="Done✅"
@@ -253,16 +263,22 @@ export const UniformTaskCard = React.memo<UniformTaskCardProps>(({
           />
           <motion.button
             type="button"
-            whileTap={{ scale: 0.88 }}
+            whileTap={{ scale: 0.86 }}
             animate={isSuccessScale ? { scale: [1, 1.25, 1] } : { scale: 1 }}
-            transition={{ duration: 0.3, ease: 'easeOut' }}
+            transition={{ duration: 0.34, ease: 'easeOut' }}
+            onPointerDown={e => e.stopPropagation()}
+            onMouseDown={e => e.stopPropagation()}
+            onTouchStart={e => e.stopPropagation()}
             onClick={handleCheckboxClick}
             title={`Eisenhower: ${qStr === 'urgent_important' ? 'DO (Urg & Imp)' : qStr === 'not_urgent_important' ? 'PLAN (Imp)' : qStr === 'urgent_not_important' ? 'PASS (Urg)' : 'SKIP (Neither)'} — Click to toggle completion`}
-            className={`w-5 h-5 rounded-full flex items-center justify-center transition-all shrink-0 cursor-pointer ${checkboxClasses}`}
+            className="absolute -inset-2 flex items-center justify-center rounded-full cursor-pointer touch-manipulation z-10 hover:bg-slate-100/70 dark:hover:bg-slate-800/60 transition-colors"
+            aria-label={isDone ? 'Mark task incomplete' : 'Mark task complete'}
           >
-            {(task.completed || isAnimating) && (
-              <AnimatedCheckIcon className="w-3.5 h-3.5 text-white" strokeWidth={3} animate={isAnimating} />
-            )}
+            <span className={`w-5 h-5 rounded-full flex items-center justify-center transition-all ${checkboxClasses}`}>
+              {(task.completed || isAnimating) && (
+                <AnimatedCheckIcon className="w-3.5 h-3.5 text-white" strokeWidth={3} animate={isAnimating} />
+              )}
+            </span>
           </motion.button>
         </div>
 

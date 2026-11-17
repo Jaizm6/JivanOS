@@ -14,13 +14,16 @@ export default defineConfig(({mode}) => {
       alias: {
         '@': path.resolve(__dirname, '.'),
       },
+      dedupe: ['react', 'react-dom', 'react/jsx-runtime', 'react/jsx-dev-runtime'],
     },
     optimizeDeps: {
-      holdUntilCrawlEnd: false,
+      holdUntilCrawlEnd: true,
       include: [
         'react',
         'react-dom',
         'react-dom/client',
+        'react/jsx-runtime',
+        'react/jsx-dev-runtime',
         'lucide-react',
         'framer-motion',
         'recharts',

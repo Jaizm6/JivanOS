@@ -8,7 +8,7 @@
     <meta property="og:title" content="JivanOS — Personal Life, Health, Habit & Productivity Operating System" />
     <meta property="og:description" content="Unified personal life OS combining HabitTick habits, TickTick-style Eisenhower & Kanban tasks, medication reminders, bills tracker, and AES-256 encrypted journal." />
     <meta property="og:type" content="website" />
-    <meta name="theme-color" content="#000000" />
+    <meta name="theme-color" content="#f0f4f9" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -30,7 +30,7 @@
       (function() {
         try {
           var saved = localStorage.getItem('omniplan_theme');
-          var isDark = saved === 'dark' || (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          var isDark = saved === 'dark';
           var savedStyle = localStorage.getItem('omniplan_theme_style') || 'bento';
           var validStyles = ['bento', 'glass', 'pastel', 'neumorphic', 'claymorphic', 'standard', 'sea-glass'];
           if (validStyles.indexOf(savedStyle) === -1) savedStyle = 'bento';

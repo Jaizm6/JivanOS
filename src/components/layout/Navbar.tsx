@@ -8,6 +8,7 @@ export const Navbar: React.FC = () => {
     activeTab,
     isSidebarCollapsed,
     toggleSidebar,
+    unreadNotificationsCount,
   } = useApp();
 
   useEffect(() => {
@@ -34,6 +35,9 @@ export const Navbar: React.FC = () => {
           className="relative w-9 h-9 rounded-[12px] bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800/90 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-200 flex items-center justify-center active:scale-95 transition cursor-pointer shrink-0 shadow-2xs"
         >
           <Menu className="w-4.5 h-4.5 stroke-[2.2]" />
+          {unreadNotificationsCount > 0 && (
+            <span className="absolute -top-0.5 -right-0.5 inline-flex rounded-full h-2.5 w-2.5 bg-rose-500 ring-2 ring-white dark:ring-zinc-900" />
+          )}
         </button>
 
         {/* Top Bar Quote Strip (or page heading when viewing Quotes / Tags) */}

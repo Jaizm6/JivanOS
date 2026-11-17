@@ -1506,7 +1506,7 @@ export const PlannerPage: React.FC<{ embedded?: boolean }> = ({ embedded = false
 
                     <div className="flex items-center gap-2 shrink-0">
                       {ev.type === 'task' && (
-                        <div className="relative flex items-center justify-center">
+                        <div className="relative flex items-center justify-center w-[18px] h-[18px] shrink-0">
                           <CheckmarkCelebration
                             activeKey={celebratingPlannerId === ev.rawItem.id ? plannerCelebrationKey : null}
                             badgeText={plannerBadgeText}
@@ -1518,26 +1518,32 @@ export const PlannerPage: React.FC<{ embedded?: boolean }> = ({ embedded = false
                             whileTap={{ scale: 0.85 }}
                             animate={celebratingPlannerId === ev.rawItem.id ? { scale: [1, 1.22, 0.94, 1] } : {}}
                             transition={{ duration: 0.35, ease: 'easeOut' }}
-                            onClick={() => handleToggleWithCelebration(ev.rawItem.id, 'task')}
-                            className="p-1 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer flex items-center justify-center"
+                            onPointerDown={e => e.stopPropagation()}
+                            onMouseDown={e => e.stopPropagation()}
+                            onTouchStart={e => e.stopPropagation()}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleToggleWithCelebration(ev.rawItem.id, 'task');
+                            }}
+                            className="absolute -inset-2.5 rounded-full hover:bg-slate-200/70 dark:hover:bg-slate-700/70 transition cursor-pointer flex items-center justify-center touch-manipulation"
                             title={ev.completed ? 'Mark task incomplete' : 'Mark task complete'}
                           >
                             {ev.completed ? (
-                              <div className="w-4 h-4 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-2xs">
+                              <div className="w-[18px] h-[18px] rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-2xs">
                                 <AnimatedCheckIcon
-                                  className="w-2.5 h-2.5 text-white"
+                                  className="w-3 h-3 text-white"
                                   strokeWidth={3}
                                   animate={celebratingPlannerId === ev.rawItem.id}
                                 />
                               </div>
                             ) : (
-                              <div className="w-4 h-4 rounded-full border border-slate-400 dark:border-slate-500 hover:border-emerald-500 transition" />
+                              <div className="w-[18px] h-[18px] rounded-full border-[1.75px] border-slate-400 dark:border-slate-500 hover:border-emerald-500 transition" />
                             )}
                           </motion.button>
                         </div>
                       )}
                       {ev.type === 'schedule' && (
-                        <div className="relative flex items-center justify-center">
+                        <div className="relative flex items-center justify-center w-[18px] h-[18px] shrink-0">
                           <CheckmarkCelebration
                             activeKey={celebratingPlannerId === ev.rawItem.id ? plannerCelebrationKey : null}
                             badgeText={plannerBadgeText}
@@ -1549,20 +1555,26 @@ export const PlannerPage: React.FC<{ embedded?: boolean }> = ({ embedded = false
                             whileTap={{ scale: 0.85 }}
                             animate={celebratingPlannerId === ev.rawItem.id ? { scale: [1, 1.22, 0.94, 1] } : {}}
                             transition={{ duration: 0.35, ease: 'easeOut' }}
-                            onClick={() => handleToggleWithCelebration(ev.rawItem.id, 'schedule')}
-                            className="p-1 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer flex items-center justify-center"
+                            onPointerDown={e => e.stopPropagation()}
+                            onMouseDown={e => e.stopPropagation()}
+                            onTouchStart={e => e.stopPropagation()}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleToggleWithCelebration(ev.rawItem.id, 'schedule');
+                            }}
+                            className="absolute -inset-2.5 rounded-full hover:bg-slate-200/70 dark:hover:bg-slate-700/70 transition cursor-pointer flex items-center justify-center touch-manipulation"
                             title={ev.completed ? 'Mark event incomplete' : 'Mark event complete'}
                           >
                             {ev.completed ? (
-                              <div className="w-4 h-4 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-2xs">
+                              <div className="w-[18px] h-[18px] rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-2xs">
                                 <AnimatedCheckIcon
-                                  className="w-2.5 h-2.5 text-white"
+                                  className="w-3 h-3 text-white"
                                   strokeWidth={3}
                                   animate={celebratingPlannerId === ev.rawItem.id}
                                 />
                               </div>
                             ) : (
-                              <div className="w-4 h-4 rounded-full border border-slate-400 dark:border-slate-500 hover:border-emerald-500 transition" />
+                              <div className="w-[18px] h-[18px] rounded-full border-[1.75px] border-slate-400 dark:border-slate-500 hover:border-emerald-500 transition" />
                             )}
                           </motion.button>
                         </div>

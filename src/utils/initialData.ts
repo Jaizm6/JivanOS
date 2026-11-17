@@ -18,18 +18,18 @@ import {
 export const DEFAULT_AVATAR_PHOTO = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><defs><linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="%23059669"/><stop offset="50%" stop-color="%2310b981"/><stop offset="100%" stop-color="%23047857"/></linearGradient><linearGradient id="face" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="%23fed7aa"/><stop offset="100%" stop-color="%23fbb05b"/></linearGradient></defs><circle cx="64" cy="64" r="64" fill="url(%23bg)"/><circle cx="64" cy="50" r="23" fill="url(%23face)"/><path d="M44 42 C46 29 54 23 64 23 C74 23 82 29 84 42 C82 34 75 30 64 30 C53 30 46 34 44 42 Z" fill="%231e293b"/><circle cx="56" cy="49" r="2.8" fill="%231e293b"/><circle cx="72" cy="49" r="2.8" fill="%231e293b"/><path d="M58 59 Q64 64 70 59" stroke="%23b45309" stroke-width="2.2" stroke-linecap="round" fill="none"/><path d="M30 110 C34 85 49 78 64 78 C79 78 94 85 98 110 Z" fill="%23ffffff" fill-opacity="0.95"/></svg>`;
 
 export const initialProfile: UserProfile = {
-  id: 'usr_demo_789',
-  identifier: 'jaiprakashog@gmail.com',
-  name: 'Jaiprakash',
-  nickname: 'Jaiz',
+  id: 'usr_guest',
+  identifier: '',
+  name: 'Guest',
+  nickname: '',
   dateOfBirth: '1998-05-15',
   heightCm: 175,
   weightKg: 68,
   gender: 'male',
   preferredCurrency: 'INR',
-  avatarPhoto: DEFAULT_AVATAR_PHOTO,
+  avatarPhoto: '',
   type: 'email',
-  twoFactorEnabled: true,
+  twoFactorEnabled: false,
   isPasscodeProtected: false,
   lastSyncedAt: new Date().toISOString(),
 };

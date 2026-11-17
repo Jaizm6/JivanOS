@@ -10,12 +10,19 @@ import { ActiveAlarmBanner } from './components/notifications/ActiveAlarmBanner'
 import { UndoSnackbar } from './components/common/UndoSnackbar';
 import { DraggablePiPWidget } from './components/common/DraggablePiPWidget';
 import { OfflineIndicator } from './components/common/OfflineIndicator';
-import { Bell, X, Check, Clock, ExternalLink, AlertCircle, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
+import { AndroidToastContainer } from './components/common/AndroidToast';
+import { Bell, X, Check, Clock, ExternalLink, AlertCircle, ChevronDown, ChevronUp, Pill, Quote, CheckSquare } from 'lucide-react';
 import { NotificationPopupStyle } from './utils/audio';
 
 import { NotificationDrawer } from './components/notifications/NotificationDrawer';
 import { ActiveTab, AppNotification } from './types';
-import { getSavedPetalColorStyle, getSavedAmoledBlack, getSavedExpressiveShapes } from './components/common/PetalExpressive';
+import {
+  getSavedPetalColorStyle,
+  getSavedAmoledBlack,
+  getSavedExpressiveShapes,
+  PetalShapeBadge,
+  PetalExpressiveShape,
+} from './components/common/PetalExpressive';
 import { getVisualPaletteMode } from './utils/activityStyles';
 import { getInitialLiquidGlassConfig, getInitialMotionConfig, applyLiquidGlassAndMotionToCSS } from './utils/liquidGlass';
 import { lazyWithRetry } from './utils/lazyWithRetry';
@@ -376,27 +383,54 @@ const AutoDismissToast: React.FC<{
     </div>
   );
 
-  const rotateDeg = translateX * 0.04;
+  const rotateDeg = translateX * 0.035;
+
+  const catShape: PetalExpressiveShape = isMed
+    ? 'pill'
+    : isQuote
+      ? 'flower'
+      : isTask
+        ? 'squircle'
+        : 'cookie9';
+
+  const catFillClass = isMed
+    ? 'text-amber-100 dark:text-amber-950/80'
+    : isQuote
+      ? 'text-violet-100 dark:text-violet-950/80'
+      : isTask
+        ? 'text-indigo-100 dark:text-indigo-950/80'
+        : 'text-sky-100 dark:text-sky-950/80';
+
+  const catStrokeClass = isMed
+    ? 'text-amber-300/70 dark:text-amber-800/60'
+    : isQuote
+      ? 'text-violet-300/70 dark:text-violet-800/60'
+      : isTask
+        ? 'text-indigo-300/70 dark:text-indigo-800/60'
+        : 'text-sky-300/70 dark:text-sky-800/60';
+
+  const catIconColor = isMed
+    ? 'text-amber-600 dark:text-amber-300'
+    : isQuote
+      ? 'text-violet-600 dark:text-violet-300'
+      : isTask
+        ? 'text-indigo-600 dark:text-indigo-300'
+        : 'text-sky-600 dark:text-sky-300';
+
+  const CategoryGlyph = isMed ? Pill : isQuote ? Quote : isTask ? CheckSquare : Bell;
 
   // ============================================================================
-  // STYLE 0: TICKTICK BOTTOM-SHEET TASK REMINDER POP-UP CARD
+  // STYLE 0: MATERIAL 3 EXPRESSIVE COMPACT CARD (DEFAULT)
   // ============================================================================
   if (popupStyle === 'ticktick_card') {
     const matchedTask = notif.taskId ? tasks.find(t => t.id === notif.taskId) : undefined;
-    const scheduleText = (() => {
-      if (formattedDueTime) {
-        return `Today, ${formattedDueTime}`;
-      }
-      return 'Today, 9:00am - 9:20am';
-    })();
-    const listEmoji = isTask ? '👋' : isMed ? '💊' : isQuote ? '✨' : '📋';
-    const listName = matchedTask?.project || matchedTask?.category || (isTask ? 'Welcome' : notif.category || 'Welcome');
+    const listName = matchedTask?.project || matchedTask?.category || notif.category || 'Alert';
 
     return (
       <div
         data-no-drawer-swipe="true"
-        className={`relative pointer-events-auto w-[94vw] max-w-[430px] transition-all duration-300 ${
-          index > 0 ? '-mt-4' : ''
+        className={`relative pointer-events-auto w-[92vw] max-w-[376px] transition-all duration-300 ${
+          index > 0 ? '-mt-2.5' : ''
         }`}
         style={{ zIndex: 100 - index }}
       >
@@ -405,117 +439,112 @@ const AutoDismissToast: React.FC<{
           onTouchStart={handleTouchStart}
           onMouseEnter={() => setIsHovered(true)}
           onMouseLeave={() => setIsHovered(false)}
+          onClick={() => {
+            if (Math.abs(translateX) > 6 || Math.abs(translateY) > 6 || isDraggingRef.current) return;
+            onOpenHistory();
+          }}
           style={{
             transform: `translate3d(${translateX}px, ${translateY}px, 0) rotate(${rotateDeg}deg)`,
-            opacity: Math.max(0, 1 - Math.max(Math.abs(translateX), Math.abs(translateY)) / 220),
+            opacity: Math.max(0, 1 - Math.max(Math.abs(translateX), Math.abs(translateY)) / 210),
             transition: isDragging
               ? 'none'
-              : 'all 0.3s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s ease',
+              : 'all 0.28s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s ease',
           }}
-          className={`rounded-[26px] bg-[#1c1c1e]/98 text-white border border-white/[0.08] shadow-[0_24px_70px_rgba(0,0,0,0.85)] backdrop-blur-2xl px-4.5 pt-4 pb-4 flex flex-col justify-between ${
-            isActionableReminder ? 'min-h-[210px]' : 'min-h-[135px]'
-          } select-none touch-pan-y animate-in slide-in-from-bottom-6 fade-in duration-250`}
+          className={`relative overflow-hidden rounded-[24px] bg-white/95 dark:bg-zinc-900/95 text-slate-900 dark:text-white border border-slate-200/90 dark:border-zinc-800/90 shadow-[0_14px_38px_rgba(15,23,42,0.16)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.68)] backdrop-blur-xl px-3.5 pt-2.5 pb-3 select-none touch-pan-y animate-in slide-in-from-bottom-4 fade-in duration-200 ${
+            isDragging ? 'cursor-grabbing ring-2 ring-indigo-500/40' : 'cursor-grab'
+          }`}
         >
-          {/* Top Header Row */}
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5 min-w-0">
-              <span className="text-[13px] font-medium text-[#4c8df6] tracking-tight truncate">
-                {formattedDueTime ? scheduleText : (notif.category || 'Notification')}
-              </span>
-              {isActionableReminder && (
-                <RefreshCw className="w-3.5 h-3.5 text-[#4c8df6] stroke-[2.2] shrink-0" />
-              )}
-            </div>
+          {/* Top Slim M3 Progress Line */}
+          <div className="absolute top-0 left-0 right-0 h-[2.5px] bg-slate-100 dark:bg-zinc-800 overflow-hidden">
+            <div
+              className="h-full bg-indigo-500 dark:bg-indigo-400 transition-[width] duration-1000 ease-linear"
+              style={{ width: `${Math.max(0, (1 - fillRatio) * 100)}%` }}
+            />
+          </div>
 
-            <div className="flex items-center gap-2.5 shrink-0">
-              <div className="flex items-center gap-1.5 text-[13px] font-medium text-[#98989f]">
-                <span className="text-sm leading-none">{listEmoji}</span>
-                <span className="truncate max-w-[95px] capitalize">{listName}</span>
+          {/* Header Row */}
+          <div className="flex items-start gap-2.5">
+            <PetalShapeBadge
+              shape={catShape}
+              sizeClass="w-8 h-8 mt-0.5"
+              fillClass={catFillClass}
+              strokeClass={catStrokeClass}
+            >
+              <CategoryGlyph className={`w-3.5 h-3.5 ${catIconColor}`} />
+            </PetalShapeBadge>
+
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[10px] font-extrabold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 capitalize">
+                  {listName}
+                </span>
+                <span className="text-[10px] text-slate-400 dark:text-zinc-500">•</span>
+                <span className="text-[10px] font-medium text-slate-500 dark:text-zinc-400 tabular-nums">
+                  {formattedDueTime || 'Now'}
+                </span>
+                {priority === 'high' && priorityBadge}
               </div>
 
-              {isActionableReminder && (
+              <h3 className="text-[13.5px] font-extrabold text-slate-900 dark:text-white tracking-tight leading-snug mt-0.5 truncate">
+                {notif.title}
+              </h3>
+
+              {notif.body ? (
+                <p className="text-[11.5px] text-slate-600 dark:text-zinc-300 font-normal leading-snug mt-0.5 line-clamp-2">
+                  {notif.body}
+                </p>
+              ) : null}
+            </div>
+
+            <div className="flex items-center gap-1 shrink-0">
+              {isActionableReminder && matchedTask && (
                 <button
                   type="button"
                   onClick={e => {
                     e.stopPropagation();
-                    if (matchedTask) {
-                      startPomodoro(matchedTask.id);
-                      setActiveTab('tasks');
-                    } else {
-                      onOpenHistory();
-                    }
+                    startPomodoro(matchedTask.id);
+                    setActiveTab('tasks');
+                    onDismiss(notif.id);
                   }}
-                  className="text-[#a1a1aa] hover:text-white transition-colors cursor-pointer p-0.5"
-                  title="Start Focus / Open Task"
+                  className="w-7 h-7 rounded-full bg-indigo-50 dark:bg-indigo-950/70 text-indigo-600 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900 flex items-center justify-center transition cursor-pointer"
+                  title="Start Focus"
                 >
-                  <svg
-                    viewBox="0 0 20 20"
-                    fill="none"
-                    className="w-[18px] h-[18px]"
-                    stroke="currentColor"
-                  >
-                    <circle cx="10" cy="10" r="7.2" strokeWidth="1.7" />
-                    <circle cx="10" cy="10" r="2.8" strokeWidth="1.7" />
-                  </svg>
+                  <Clock className="w-3.5 h-3.5" />
                 </button>
               )}
 
-              {/* Dismiss X Button */}
               <button
                 type="button"
                 onClick={e => {
                   e.stopPropagation();
                   onDismiss(notif.id);
                 }}
-                className="text-[#a1a1aa] hover:text-white transition-colors cursor-pointer p-0.5"
+                className="w-7 h-7 rounded-full bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-white flex items-center justify-center transition cursor-pointer"
                 title="Dismiss"
               >
-                <X className="w-5 h-5 stroke-[2]" />
+                <X className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
 
-          {/* Main Body Area */}
-          <div className="pt-2.5 pb-4 flex-1 flex flex-col justify-start">
-            <h3 className="text-[17px] sm:text-[19px] font-bold text-white tracking-tight leading-snug">
-              {notif.title}
-            </h3>
-            {notif.body ? (
-              <p className="text-[13.5px] sm:text-[14px] text-[#98989f] font-normal leading-relaxed mt-1">
-                {notif.body}
-              </p>
-            ) : null}
-          </div>
-
-          {/* Bottom Action Bar: Snooze/Complete ONLY for actionable reminders */}
-          {isActionableReminder ? (
-            <div className="grid grid-cols-2 gap-2.5 pt-1">
+          {/* Action Pills ONLY for actionable reminders */}
+          {isActionableReminder && (
+            <div className="grid grid-cols-2 gap-2 pt-2.5 mt-2 border-t border-slate-100 dark:border-zinc-800/80">
               <button
                 type="button"
                 onClick={handleSnooze}
-                className="py-2.5 px-4 rounded-[14px] bg-[#2c2c2e] hover:bg-[#363638] active:scale-[0.98] text-[#d1d1d6] font-semibold text-[14px] text-center transition cursor-pointer"
+                className="py-1.5 px-3 rounded-full bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 active:scale-[0.98] text-slate-700 dark:text-zinc-200 font-bold text-[11.5px] flex items-center justify-center gap-1.5 transition cursor-pointer"
               >
-                Snooze
+                <Clock className="w-3.5 h-3.5" />
+                <span>Snooze 5m</span>
               </button>
               <button
                 type="button"
                 onClick={handleDone}
-                className="py-2.5 px-4 rounded-[14px] bg-[#2c2c2e] hover:bg-[#363638] active:scale-[0.98] text-[#4c8df6] font-semibold text-[14px] text-center transition cursor-pointer"
+                className="py-1.5 px-3 rounded-full bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] text-white font-bold text-[11.5px] flex items-center justify-center gap-1.5 shadow-2xs transition cursor-pointer"
               >
-                Complete
-              </button>
-            </div>
-          ) : (
-            <div className="flex items-center justify-end gap-2 pt-1">
-              <button
-                type="button"
-                onClick={e => {
-                  e.stopPropagation();
-                  onDismiss(notif.id);
-                }}
-                className="py-2 px-4 rounded-[12px] bg-[#2c2c2e] hover:bg-[#363638] text-[#d1d1d6] font-semibold text-[13px] transition cursor-pointer"
-              >
-                Dismiss
+                <Check className="w-3.5 h-3.5 stroke-[2.8]" />
+                <span>Complete</span>
               </button>
             </div>
           )}
@@ -530,18 +559,18 @@ const AutoDismissToast: React.FC<{
   if (popupStyle === 'dynamic_island') {
     const accentGlow =
       priority === 'high'
-        ? 'ring-1 ring-rose-500/50 shadow-[0_14px_38px_rgba(244,63,94,0.32)]'
+        ? 'ring-1 ring-rose-500/45 shadow-[0_12px_32px_rgba(244,63,94,0.28)]'
         : isTask
-          ? 'ring-1 ring-blue-500/40 shadow-[0_14px_38px_rgba(59,130,246,0.26)]'
+          ? 'ring-1 ring-blue-500/40 shadow-[0_12px_32px_rgba(59,130,246,0.22)]'
           : isMed
-            ? 'ring-1 ring-rose-500/40 shadow-[0_14px_38px_rgba(244,63,94,0.26)]'
-            : 'ring-1 ring-indigo-500/40 shadow-[0_14px_38px_rgba(99,102,241,0.28)]';
+            ? 'ring-1 ring-amber-500/40 shadow-[0_12px_32px_rgba(245,158,11,0.22)]'
+            : 'ring-1 ring-indigo-500/40 shadow-[0_12px_32px_rgba(99,102,241,0.24)]';
 
     return (
       <div
         data-no-drawer-swipe="true"
         className={`relative pointer-events-auto flex justify-center transition-all duration-300 ${
-          index > 0 ? '-mt-2.5' : ''
+          index > 0 ? '-mt-2' : ''
         }`}
         style={{ zIndex: 100 - index }}
       >
@@ -559,62 +588,40 @@ const AutoDismissToast: React.FC<{
             opacity: Math.max(0, 1 - Math.max(Math.abs(translateX), Math.abs(translateY)) / 200),
             transition: isDragging
               ? 'none'
-              : 'all 0.32s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s ease',
+              : 'all 0.28s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s ease',
           }}
           className={`relative z-10 bg-zinc-950/95 text-white border border-white/15 backdrop-blur-2xl select-none touch-pan-y overflow-hidden will-change-transform animate-in fade-in zoom-in-95 slide-in-from-top-3 duration-200 ${accentGlow} ${
             isIslandExpanded
-              ? 'rounded-[28px] px-4 py-3 w-[92vw] max-w-[355px]'
-              : 'rounded-full pl-2.5 pr-2 py-1.5 min-w-[260px] max-w-[345px]'
+              ? 'rounded-[26px] px-3.5 py-2.5 w-[92vw] max-w-[350px]'
+              : 'rounded-full pl-2 pr-2 py-1.5 min-w-[252px] max-w-[340px]'
           } ${isDragging ? 'cursor-grabbing scale-[1.02]' : 'cursor-pointer hover:border-white/25'}`}
-          title="Tap to expand Camera Pill • Swipe right to complete • Swipe left to snooze"
+          title="Tap to expand Pill • Swipe right to complete • Swipe left to snooze"
         >
-          {/* Compact Camera Pill Mode */}
           {!isIslandExpanded ? (
-            <div className="flex items-center justify-between gap-2.5">
-              {/* Left: Camera Lens + Category Icon + Animated Waveform */}
+            <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 min-w-0 flex-1">
                 <div className="relative flex items-center justify-center w-7 h-7 rounded-full bg-zinc-900 border border-white/10 shrink-0">
-                  <Bell
-                    className={`w-3.5 h-3.5 ${
-                      isTask
-                        ? 'text-blue-400'
-                        : isMed
-                          ? 'text-rose-400'
-                          : isQuote
-                            ? 'text-amber-400'
-                            : 'text-indigo-400'
-                    }`}
-                  />
-                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                  <CategoryGlyph className={`w-3.5 h-3.5 ${catIconColor}`} />
                   <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400" />
                 </div>
 
-                {/* Camera Cutout Equalizer Bars */}
-                <div className="flex items-center gap-0.5 h-3 shrink-0 px-0.5">
-                  <span className="w-0.5 h-2.5 rounded-full bg-indigo-400 animate-pulse" />
-                  <span className="w-0.5 h-3.5 rounded-full bg-violet-400 animate-pulse" />
-                  <span className="w-0.5 h-2 rounded-full bg-sky-400 animate-pulse" />
-                </div>
-
-                {/* Center Pill Text */}
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
-                    <span className="font-bold text-[11px] text-white truncate">
+                    <span className="font-bold text-[11.5px] text-white truncate">
                       {notif.title}
                     </span>
                     {formattedDueTime && (
-                      <span className="text-[9px] font-mono text-indigo-300 bg-indigo-500/20 px-1.5 py-0.2 rounded-full shrink-0">
+                      <span className="text-[9.5px] font-mono text-indigo-300 bg-indigo-500/20 px-1.5 py-0.2 rounded-full shrink-0">
                         {formattedDueTime}
                       </span>
                     )}
                   </div>
-                  <p className="text-[9.5px] text-zinc-400 truncate leading-tight">
+                  <p className="text-[10px] text-zinc-400 truncate leading-tight">
                     {notif.body}
                   </p>
                 </div>
               </div>
 
-              {/* Right: Quick Complete Check Ring + Expand + Dismiss */}
               <div className="flex items-center gap-1 shrink-0">
                 <button
                   type="button"
@@ -622,25 +629,6 @@ const AutoDismissToast: React.FC<{
                   className="relative w-6 h-6 rounded-full bg-emerald-500/20 hover:bg-emerald-500/35 text-emerald-400 flex items-center justify-center transition active:scale-90 cursor-pointer"
                   title="Mark Done"
                 >
-                  <svg className="absolute inset-0 w-6 h-6 -rotate-90 pointer-events-none" viewBox="0 0 24 24">
-                    <circle
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      className="stroke-white/10 fill-none"
-                      strokeWidth="1.8"
-                    />
-                    <circle
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      className="stroke-emerald-400 fill-none transition-all duration-150"
-                      strokeWidth="1.8"
-                      strokeDasharray={62.83}
-                      strokeDashoffset={62.83 * (1 - fillRatio)}
-                      strokeLinecap="round"
-                    />
-                  </svg>
                   <Check className="w-3 h-3 stroke-[3]" />
                 </button>
 
@@ -651,7 +639,7 @@ const AutoDismissToast: React.FC<{
                     setIsIslandExpanded(true);
                   }}
                   className="w-5 h-5 rounded-full hover:bg-white/10 text-zinc-400 hover:text-white flex items-center justify-center transition cursor-pointer"
-                  title="Expand Dynamic Island"
+                  title="Expand Pill"
                 >
                   <ChevronDown className="w-3 h-3" />
                 </button>
@@ -670,21 +658,20 @@ const AutoDismissToast: React.FC<{
               </div>
             </div>
           ) : (
-            /* Expanded Dynamic Island Capsule Mode */
-            <div className="flex flex-col gap-2.5">
+            <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
-                  <div className="w-8 h-8 rounded-2xl bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center shrink-0">
-                    <Bell className="w-4 h-4 text-indigo-300" />
+                  <div className="w-7 h-7 rounded-2xl bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center shrink-0">
+                    <CategoryGlyph className="w-3.5 h-3.5 text-indigo-300" />
                   </div>
                   <div className="min-w-0">
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[9px] font-black uppercase tracking-widest text-indigo-400">
-                        {notif.category || 'Alert'} • Dynamic Pill
+                      <span className="text-[9.5px] font-bold uppercase tracking-wider text-indigo-300">
+                        {notif.category || 'Alert'}
                       </span>
-                      {priorityBadge}
+                      {priority === 'high' && priorityBadge}
                     </div>
-                    <h4 className="font-bold text-xs text-white leading-snug truncate">
+                    <h4 className="font-bold text-[12px] text-white leading-snug truncate">
                       {notif.title}
                     </h4>
                   </div>
@@ -716,16 +703,15 @@ const AutoDismissToast: React.FC<{
                 </div>
               </div>
 
-              <p className="text-[11px] text-zinc-300 leading-relaxed pl-0.5">
+              <p className="text-[11px] text-zinc-300 leading-snug line-clamp-2">
                 {notif.body}
               </p>
 
-              {/* Action Capsule Buttons */}
               <div className="flex items-center gap-1.5 pt-1">
                 <button
                   type="button"
                   onClick={handleDone}
-                  className="flex-1 inline-flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-full bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-extrabold text-[10px] transition active:scale-95 cursor-pointer"
+                  className="flex-1 inline-flex items-center justify-center gap-1 py-1.5 px-3 rounded-full bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-extrabold text-[10.5px] transition active:scale-95 cursor-pointer"
                 >
                   <Check className="w-3 h-3 stroke-[3]" />
                   <span>Complete</span>
@@ -733,7 +719,7 @@ const AutoDismissToast: React.FC<{
                 <button
                   type="button"
                   onClick={handleSnooze}
-                  className="flex-1 inline-flex items-center justify-center gap-1 py-1.5 px-3 rounded-full bg-white/10 hover:bg-white/20 text-white font-bold text-[10px] transition active:scale-95 cursor-pointer"
+                  className="flex-1 inline-flex items-center justify-center gap-1 py-1.5 px-3 rounded-full bg-white/10 hover:bg-white/20 text-white font-bold text-[10.5px] transition active:scale-95 cursor-pointer"
                 >
                   <Clock className="w-3 h-3" />
                   <span>Snooze 5m</span>
@@ -758,14 +744,14 @@ const AutoDismissToast: React.FC<{
   }
 
   // ============================================================================
-  // STYLE 2: ANDROID HEADS-UP NOTIFICATION POP-UP
+  // STYLE 2: ANDROID HEADS-UP MATERIAL 3 EXPRESSIVE POP-UP
   // ============================================================================
   if (popupStyle === 'android_heads_up') {
     return (
       <div
         data-no-drawer-swipe="true"
-        className={`relative pointer-events-auto w-[92vw] max-w-[360px] transition-all duration-200 ${
-          index > 0 ? '-mt-2.5' : ''
+        className={`relative pointer-events-auto w-[92vw] max-w-[366px] transition-all duration-200 ${
+          index > 0 ? '-mt-2' : ''
         }`}
         style={{ zIndex: 100 - index }}
       >
@@ -783,31 +769,47 @@ const AutoDismissToast: React.FC<{
             opacity: Math.max(0, 1 - Math.max(Math.abs(translateX), Math.abs(translateY)) / 200),
             transition: isDragging ? 'none' : 'transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s ease',
           }}
-          className={`relative z-10 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200/90 dark:border-zinc-800 shadow-[0_16px_40px_rgba(0,0,0,0.22)] px-4 pt-3 pb-2.5 flex flex-col gap-1.5 select-none touch-pan-y overflow-hidden animate-in fade-in slide-in-from-top-3 duration-200 ${
+          className={`relative z-10 rounded-[24px] bg-white/95 dark:bg-zinc-900/95 border border-slate-200/90 dark:border-zinc-800/90 shadow-[0_14px_36px_rgba(15,23,42,0.16)] dark:shadow-[0_16px_40px_rgba(0,0,0,0.55)] backdrop-blur-xl px-3.5 pt-2.5 pb-2.5 flex flex-col gap-1.5 select-none touch-pan-y overflow-hidden animate-in fade-in slide-in-from-top-3 duration-200 ${
             isDragging ? 'cursor-grabbing ring-2 ring-indigo-500/40' : 'cursor-grab'
           }`}
-          title="Android Heads-Up Notification • Swipe right to complete • Swipe left to snooze • Swipe up to dismiss"
+          title="Swipe right to complete • Swipe left to snooze • Swipe up to dismiss"
         >
           {/* Top Progress Line */}
-          <div className="absolute top-0 left-0 right-0 h-0.5 bg-slate-100 dark:bg-zinc-800 overflow-hidden">
+          <div className="absolute top-0 left-0 right-0 h-[2.5px] bg-slate-100 dark:bg-zinc-800 overflow-hidden">
             <div
               className="h-full bg-indigo-500 transition-[width] duration-1000 ease-linear"
               style={{ width: `${Math.max(0, (1 - fillRatio) * 100)}%` }}
             />
           </div>
 
-          {/* Android System Header Row */}
-          <div className="flex items-center justify-between gap-2 text-[10px] text-slate-500 dark:text-zinc-400">
-            <div className="flex items-center gap-1.5 min-w-0">
-              <div className="w-4 h-4 rounded-full bg-indigo-600 text-white flex items-center justify-center shrink-0">
-                <Bell className="w-2.5 h-2.5" />
+          <div className="flex items-start gap-2.5">
+            <PetalShapeBadge
+              shape={catShape}
+              sizeClass="w-7 h-7 mt-0.5"
+              fillClass={catFillClass}
+              strokeClass={catStrokeClass}
+            >
+              <CategoryGlyph className={`w-3.5 h-3.5 ${catIconColor}`} />
+            </PetalShapeBadge>
+
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 text-[10px] text-slate-500 dark:text-zinc-400">
+                <span className="font-extrabold text-indigo-600 dark:text-indigo-400 capitalize">
+                  {notif.category || 'Reminder'}
+                </span>
+                <span>•</span>
+                <span className="tabular-nums">{formattedDueTime || 'Now'}</span>
+                {priority === 'high' && priorityBadge}
               </div>
-              <span className="font-bold text-slate-700 dark:text-zinc-200">JivanOS</span>
-              <span>•</span>
-              <span className="capitalize font-medium">{notif.category || 'Reminder'}</span>
-              <span>•</span>
-              <span>{formattedDueTime || 'now'}</span>
-              {priorityBadge}
+
+              <h4 className="font-extrabold text-[12.5px] text-slate-900 dark:text-white leading-snug truncate mt-0.5">
+                {notif.title}
+              </h4>
+              {notif.body && (
+                <p className="text-[11px] text-slate-600 dark:text-zinc-300 line-clamp-2 leading-snug">
+                  {notif.body}
+                </p>
+              )}
             </div>
 
             <button
@@ -816,100 +818,87 @@ const AutoDismissToast: React.FC<{
                 e.stopPropagation();
                 onDismiss(notif.id);
               }}
-              className="p-0.5 rounded-full text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-zinc-800 transition cursor-pointer"
+              className="w-6 h-6 rounded-full bg-slate-100 dark:bg-zinc-800 text-slate-400 hover:text-slate-700 dark:hover:text-white flex items-center justify-center transition cursor-pointer shrink-0"
               title="Dismiss"
             >
               <X className="w-3.5 h-3.5" />
             </button>
           </div>
 
-          {/* Main Content Row */}
-          <div className="flex items-start justify-between gap-3 pt-0.5">
-            <div className="min-w-0 flex-1">
-              <h4 className="font-bold text-xs text-slate-900 dark:text-white leading-snug">
-                {notif.title}
-              </h4>
-              <p className="text-[11px] text-slate-600 dark:text-zinc-300 line-clamp-2 mt-0.5 leading-relaxed">
-                {notif.body}
-              </p>
+          {isActionableReminder && (
+            <div className="flex items-center gap-1.5 pt-1.5 border-t border-slate-100 dark:border-zinc-800/80">
+              <button
+                type="button"
+                onClick={handleDone}
+                className="px-3 py-1 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[10.5px] transition active:scale-95 cursor-pointer"
+              >
+                Mark Done
+              </button>
+              <button
+                type="button"
+                onClick={handleSnooze}
+                className="px-3 py-1 rounded-full bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-200 font-bold text-[10.5px] transition active:scale-95 cursor-pointer"
+              >
+                Snooze 5m
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenHistory();
+                }}
+                className="px-2.5 py-1 rounded-full text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200 font-semibold text-[10.5px] transition cursor-pointer ml-auto"
+              >
+                Open
+              </button>
             </div>
-          </div>
-
-          {/* Android Material Action Buttons Row */}
-          <div className="flex items-center justify-start gap-4 pt-1.5 mt-0.5 border-t border-slate-100 dark:border-zinc-800/80 text-[10px] font-extrabold tracking-wider uppercase">
-            <button
-              type="button"
-              onClick={handleDone}
-              className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 transition active:scale-95 cursor-pointer"
-            >
-              Mark Done
-            </button>
-            <button
-              type="button"
-              onClick={handleSnooze}
-              className="text-slate-600 dark:text-zinc-300 hover:text-slate-900 dark:hover:text-white transition active:scale-95 cursor-pointer"
-            >
-              Snooze 5m
-            </button>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onOpenHistory();
-              }}
-              className="text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200 transition active:scale-95 cursor-pointer ml-auto"
-            >
-              Open
-            </button>
-          </div>
+          )}
         </div>
       </div>
     );
   }
 
   // ============================================================================
-  // STYLE 3: COMPACT CARD (CLASSIC JIVANOS TOAST)
+  // STYLE 3: MATERIAL 3 EXPRESSIVE COMPACT PILL-CARD
   // ============================================================================
   return (
     <div
       data-no-drawer-swipe="true"
-      className={`relative pointer-events-auto max-w-xs w-full transition-all duration-200 ${
-        index > 0 ? '-mt-3.5 sm:-mt-4' : ''
+      className={`relative pointer-events-auto w-[90vw] max-w-[336px] transition-all duration-200 ${
+        index > 0 ? '-mt-2' : ''
       }`}
       style={{ zIndex: 100 - index }}
     >
       {/* Underlying Action Backdrops (Revealed on Swipe / Drag) */}
-      <div className="absolute inset-0 rounded-xl overflow-hidden flex items-center justify-between px-3 text-xs font-bold shadow-xs pointer-events-none bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
-        {/* Left Action Backdrop (Revealed on Drag Right) */}
+      <div className="absolute inset-0 rounded-[22px] overflow-hidden flex items-center justify-between px-3.5 text-xs font-bold pointer-events-none bg-slate-100 dark:bg-zinc-800/90 border border-slate-200 dark:border-zinc-700">
         <div
           className={`flex items-center gap-1.5 transition-opacity duration-150 ${
             translateX > 10 ? 'opacity-100' : 'opacity-0'
           }`}
         >
-          <div className={`p-1 rounded-full text-white ${translateX >= 45 ? 'bg-emerald-600 animate-pulse' : 'bg-emerald-500'}`}>
-            <Check className="w-3.5 h-3.5 stroke-[3]" />
+          <div className="p-1 rounded-full bg-emerald-600 text-white">
+            <Check className="w-3 h-3 stroke-[3]" />
           </div>
           <span className="text-[10px] font-extrabold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide">
-            {translateX >= 45 ? 'Release to Complete ✓' : 'Swipe Right to Complete →'}
+            Complete
           </span>
         </div>
 
-        {/* Right Action Backdrop (Revealed on Drag Left) */}
         <div
           className={`flex items-center gap-1.5 ml-auto transition-opacity duration-150 ${
             translateX < -10 ? 'opacity-100' : 'opacity-0'
           }`}
         >
           <span className="text-[10px] font-extrabold text-amber-600 dark:text-amber-400 uppercase tracking-wide">
-            {translateX <= -45 ? 'Release to Snooze ⏱' : '← Swipe Left to Snooze'}
+            Snooze
           </span>
-          <div className={`p-1 rounded-full text-white ${translateX <= -45 ? 'bg-amber-600 animate-pulse' : 'bg-amber-500'}`}>
-            <Clock className="w-3.5 h-3.5 stroke-[2.5]" />
+          <div className="p-1 rounded-full bg-amber-500 text-white">
+            <Clock className="w-3 h-3 stroke-[2.5]" />
           </div>
         </div>
       </div>
 
-      {/* Foreground Toast Card Container */}
+      {/* Foreground Compact Expressive Toast */}
       <div
         onMouseDown={handleMouseDown}
         onTouchStart={handleTouchStart}
@@ -924,90 +913,45 @@ const AutoDismissToast: React.FC<{
           opacity: Math.max(0, 1 - Math.max(Math.abs(translateX), Math.abs(translateY)) / 200),
           transition: isDragging ? 'none' : 'transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s ease',
         }}
-        className={`relative z-10 pl-3.5 pr-2.5 py-1.5 rounded-xl bg-white dark:bg-zinc-900 border shadow-lg flex flex-col gap-1 text-xs animate-in fade-in slide-in-from-top-2 duration-150 select-none max-w-xs w-auto touch-pan-y overflow-hidden will-change-transform ${
-          isDragging ? 'shadow-xl ring-2 ring-indigo-500/40 cursor-grabbing' : 'hover:shadow-xl cursor-grab'
-        } ${priorityBorder}`}
-        title="Swipe right to complete • Swipe left to snooze • Swipe up/down to dismiss"
+        className={`relative z-10 px-3 py-2.5 rounded-[22px] bg-white/95 dark:bg-zinc-900/95 border border-slate-200/90 dark:border-zinc-800/90 shadow-[0_12px_30px_rgba(15,23,42,0.14)] dark:shadow-[0_14px_34px_rgba(0,0,0,0.55)] backdrop-blur-xl flex flex-col gap-2 select-none touch-pan-y overflow-hidden will-change-transform animate-in fade-in slide-in-from-top-2 duration-150 ${
+          isDragging ? 'ring-2 ring-indigo-500/40 cursor-grabbing' : 'cursor-grab'
+        }`}
+        title={`Time remaining: ${remainingTimeLabel} • Swipe right to complete • Swipe left to snooze`}
       >
-        {/* Attached Vertical Grey Line Handle at the Left Border */}
-        <div
-          data-toast-handle="true"
-          className="absolute left-0 top-1.5 bottom-1.5 w-2 rounded-full bg-slate-300 dark:bg-slate-700 hover:bg-slate-400 dark:hover:bg-slate-500 active:bg-indigo-600 transition-colors flex items-center justify-center cursor-grab active:cursor-grabbing z-20 group/handle select-none touch-none shadow-2xs"
-          title="Swipe right to complete • Swipe left to snooze"
-        >
-          <div className="w-0.5 h-4.5 rounded-full bg-slate-400/80 dark:bg-slate-500/80 group-hover/handle:opacity-100 transition-opacity" />
+        <div className="absolute top-0 left-0 right-0 h-[2px] bg-slate-100 dark:bg-zinc-800 overflow-hidden">
+          <div
+            className="h-full bg-indigo-500 transition-[width] duration-1000 ease-linear"
+            style={{ width: `${Math.max(0, (1 - fillRatio) * 100)}%` }}
+          />
         </div>
 
-        {/* Top Header Row */}
-        <div className="flex items-center justify-between gap-1.5 min-w-0">
-          <div className="flex items-center gap-1.5 min-w-0 flex-1">
-            {/* Bell Icon Wrapper with Small Circular Progress Ring */}
-            <div
-              className="relative flex items-center justify-center shrink-0 w-7 h-7"
-              title={`Time remaining: ${remainingTimeLabel}`}
-            >
-              {/* Circular Progress Ring SVG */}
-              <svg className="absolute inset-0 w-7 h-7 -rotate-90 pointer-events-none" viewBox="0 0 28 28">
-                {/* Background Ring Track */}
-                <circle
-                  cx="14"
-                  cy="14"
-                  r="11"
-                  className="stroke-slate-200 dark:stroke-slate-700/80 fill-none"
-                  strokeWidth="2.2"
-                />
-                {/* Filling Progress Ring Stroke */}
-                <circle
-                  cx="14"
-                  cy="14"
-                  r="11"
-                  className={`fill-none transition-[stroke-dashoffset] duration-1000 ease-linear ${
-                    isTask
-                      ? 'stroke-blue-500 dark:stroke-blue-400'
-                      : isMed
-                        ? 'stroke-rose-500 dark:stroke-rose-400'
-                        : isQuote
-                           ? 'stroke-amber-500 dark:stroke-amber-400'
-                          : 'stroke-indigo-500 dark:stroke-indigo-400'
-                  }`}
-                  strokeWidth="2.2"
-                  strokeDasharray={69.115}
-                  strokeDashoffset={69.115 * (1 - fillRatio)}
-                  strokeLinecap="round"
-                />
-              </svg>
+        <div className="flex items-start gap-2 min-w-0">
+          <PetalShapeBadge
+            shape={catShape}
+            sizeClass="w-7 h-7"
+            fillClass={catFillClass}
+            strokeClass={catStrokeClass}
+          >
+            <CategoryGlyph className={`w-3.5 h-3.5 ${catIconColor}`} />
+          </PetalShapeBadge>
 
-              {/* Inner Bell Icon Box */}
-              <div
-                className={`w-5 h-5 rounded-full flex items-center justify-center z-10 shadow-2xs ${
-                  isTask
-                    ? 'bg-blue-100 dark:bg-blue-950 text-blue-600 dark:text-blue-400'
-                    : isMed
-                      ? 'bg-rose-100 dark:bg-rose-950 text-rose-600 dark:text-rose-400'
-                      : isQuote
-                        ? 'bg-amber-100 dark:bg-amber-950 text-amber-600 dark:text-amber-400'
-                        : 'bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400'
-                }`}
-              >
-                <Bell className="w-2.5 h-2.5" />
-              </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5">
+              <h5 className="font-extrabold text-slate-900 dark:text-white truncate text-[12px] leading-tight">
+                {notif.title}
+              </h5>
+              {Boolean((notif as any).count && (notif as any).count > 1) && (
+                <span className="px-1.5 py-0.2 rounded-full text-[9px] font-extrabold bg-indigo-600 text-white">
+                  +{(notif as any).count - 1}
+                </span>
+              )}
+              {priority === 'high' && priorityBadge}
             </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <h5 className="font-bold text-slate-900 dark:text-white truncate text-[10px] leading-tight">
-                  {notif.title}
-                </h5>
-                {Boolean((notif as any).count && (notif as any).count > 1) && (
-                  <span className="px-1.5 py-0.2 rounded text-[8px] font-extrabold bg-indigo-600 text-white uppercase tracking-wider">
-                    +{(notif as any).count - 1} more
-                  </span>
-                )}
-                {priorityBadge}
-              </div>
-              <p className="text-slate-600 dark:text-slate-300 text-[9.5px] truncate leading-none mt-0.5">
+            {notif.body && (
+              <p className="text-slate-600 dark:text-zinc-300 text-[11px] truncate leading-snug mt-0.5">
                 {notif.body}
               </p>
-            </div>
+            )}
           </div>
 
           <button
@@ -1017,48 +961,35 @@ const AutoDismissToast: React.FC<{
               e.stopPropagation();
               onDismiss(notif.id);
             }}
-            className="w-4 h-4 rounded flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition shrink-0 cursor-pointer"
+            className="w-6 h-6 rounded-full bg-slate-100 dark:bg-zinc-800 flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-white transition shrink-0 cursor-pointer"
             aria-label="Dismiss notification"
             title="Dismiss"
           >
-            <X className="w-2.5 h-2.5" />
+            <X className="w-3 h-3" />
           </button>
         </div>
 
-        {/* Quick Action Icon Buttons Row */}
-        <div className="flex items-center justify-between gap-1 pt-0.5 border-t border-slate-100 dark:border-slate-800/80 text-[9px]">
-          <button
-            type="button"
-            onClick={handleDone}
-            className="flex-1 inline-flex items-center justify-center gap-1 px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/70 hover:bg-indigo-100 dark:hover:bg-indigo-900/80 text-indigo-600 dark:text-indigo-400 font-bold transition active:scale-95 cursor-pointer"
-            title="Mark done / complete"
-          >
-            <Check className="w-2.5 h-2.5 stroke-[2.5]" />
-            <span>Done</span>
-          </button>
+        {isActionableReminder && (
+          <div className="flex items-center gap-1.5 pt-1.5 border-t border-slate-100 dark:border-zinc-800/80 text-[10.5px]">
+            <button
+              type="button"
+              onClick={handleDone}
+              className="flex-1 inline-flex items-center justify-center gap-1 px-2.5 py-1 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold transition active:scale-95 cursor-pointer"
+            >
+              <Check className="w-3 h-3 stroke-[2.8]" />
+              <span>Done</span>
+            </button>
 
-          <button
-            type="button"
-            onClick={handleSnooze}
-            className="inline-flex items-center justify-center gap-0.5 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-semibold transition active:scale-95 cursor-pointer"
-            title="Snooze for 5 minutes"
-          >
-            <Clock className="w-2.5 h-2.5" />
-            <span>Snooze 5m</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onOpenHistory();
-            }}
-            className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition cursor-pointer shrink-0"
-            title="Open Notification Drawer"
-          >
-            <ExternalLink className="w-2.5 h-2.5" />
-          </button>
-        </div>
+            <button
+              type="button"
+              onClick={handleSnooze}
+              className="inline-flex items-center justify-center gap-1 px-2.5 py-1 rounded-full bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-200 font-bold transition active:scale-95 cursor-pointer"
+            >
+              <Clock className="w-3 h-3" />
+              <span>Snooze 5m</span>
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1646,6 +1577,24 @@ const AppContent: React.FC = () => {
 
   const isDrawerOpen = !isSidebarCollapsed;
 
+  // Prevent background page scrolling when Left Panel drawer is open
+  React.useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const prevBodyOverflow = document.body.style.overflow;
+    const prevHtmlOverscroll = document.documentElement.style.overscrollBehavior;
+    if (isDrawerOpen) {
+      document.body.style.overflow = 'hidden';
+      document.documentElement.style.overscrollBehavior = 'none';
+    } else {
+      document.body.style.overflow = '';
+      document.documentElement.style.overscrollBehavior = '';
+    }
+    return () => {
+      document.body.style.overflow = prevBodyOverflow;
+      document.documentElement.style.overscrollBehavior = prevHtmlOverscroll;
+    };
+  }, [isDrawerOpen]);
+
   return (
     <div
       className="min-h-[var(--app-height)] w-full max-w-full overflow-x-clip flex flex-col transition-colors selection:bg-indigo-500 selection:text-white bg-slate-50 dark:bg-black"
@@ -1653,13 +1602,16 @@ const AppContent: React.FC = () => {
       {/* Smooth GPU-Composited Left Panel Drawer */}
       <Sidebar />
 
-      {/* Tap-to-Close Scrim Overlay (synchronized CSS opacity + delayed visibility on close) */}
+      {/* Tap-to-Close Scrim Overlay (synchronized CSS opacity + delayed visibility on close, touch-none blocks background scroll) */}
       <div
         data-drawer-backdrop="true"
         data-open={isDrawerOpen ? 'true' : 'false'}
         onClick={() => setIsSidebarCollapsed(true)}
+        onTouchMove={e => {
+          if (isDrawerOpen && e.cancelable) e.preventDefault();
+        }}
         aria-hidden="true"
-        className="fixed inset-0 z-[75] bg-black/25 dark:bg-black/50 cursor-pointer"
+        className="fixed inset-0 z-[75] bg-black/25 dark:bg-black/50 cursor-pointer touch-none overscroll-none"
       />
 
       {/* Main Viewport Container (Stationary, zero blur, crisp native rendering) */}
@@ -1769,6 +1721,9 @@ const AppContent: React.FC = () => {
 
       {/* Global Undo Completion Snackbar (Appears for 3s upon task or habit completion) */}
       <UndoSnackbar />
+
+      {/* Minimal Android-style Bottom Micro-Toast (Theme switch, lightweight confirmations) */}
+      <AndroidToastContainer />
 
       {/* Draggable Floating PiP Stopwatch / Timer Widget */}
       <DraggablePiPWidget />

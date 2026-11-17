@@ -22,6 +22,9 @@ import {
 import { OverdueIcon } from '../common/OverdueIcon';
 import { SubtaskBranchIcon } from '../common/SubtaskBranchIcon';
 import { CardCalendarButton } from '../common/CardReminderCalendarModal';
+import { AnimatedCheckIcon, CheckmarkCelebration } from '../common/CheckmarkCelebration';
+import { soundEngine } from '../../utils/audio';
+import { haptics } from '../../utils/haptics';
 import { TaskItem, EisenhowerQuadrant, Priority } from '../../types';
 import { getTaskWeight, getSingleTaskDateReminder } from '../../utils/taskSorter';
 import { formatLocalDate } from '../../utils/date';
@@ -231,6 +234,43 @@ export const EisenhowerGoogleBoard: React.FC<EisenhowerGoogleBoardProps> = ({
   const [focusedQuadId, setFocusedQuadId] = useState<EisenhowerQuadrant | null>(null);
   const [isTimeDropdownOpen, setIsTimeDropdownOpen] = useState(false);
   const [localFilter, setLocalFilter] = useState<'all' | 'today' | 'upcoming' | 'completed' | 'date' | 'archived'>('today');
+  const [completingIds, setCompletingIds] = useState<Set<string>>(new Set());
+  const [fadingIds, setFadingIds] = useState<Set<string>>(new Set());
+  const [celebratingId, setCelebratingId] = useState<string | null>(null);
+  const [celebrationKey, setCelebrationKey] = useState(0);
+
+  const handleToggleWithAnim = (task: TaskItem) => {
+    if (task.completed) {
+      haptics.toggle();
+      onToggleTask(task.id);
+      return;
+    }
+    if (completingIds.has(task.id)) return;
+    try {
+      soundEngine.playWaterDripNotification();
+      haptics.complete();
+    } catch {}
+    setCompletingIds(prev => new Set(prev).add(task.id));
+    setCelebratingId(task.id);
+    setCelebrationKey(k => k + 1);
+    setTimeout(() => {
+      setFadingIds(prev => new Set(prev).add(task.id));
+    }, 450);
+    setTimeout(() => {
+      onToggleTask(task.id);
+      setCompletingIds(prev => {
+        const next = new Set(prev);
+        next.delete(task.id);
+        return next;
+      });
+      setFadingIds(prev => {
+        const next = new Set(prev);
+        next.delete(task.id);
+        return next;
+      });
+      setCelebratingId(prev => (prev === task.id ? null : prev));
+    }, 680);
+  };
 
   const activeFilter = filter ?? localFilter;
 
@@ -779,6 +819,10 @@ export const EisenhowerGoogleBoard: React.FC<EisenhowerGoogleBoardProps> = ({
                     );
                     const hasBottomMetaLine = Boolean(dateInfo || hasAlarmSet || hasRepeatSet || hasSubtasks);
 
+                    const isCompleting = completingIds.has(task.id);
+                    const isFading = fadingIds.has(task.id);
+                    const isVisuallyDone = task.completed || isCompleting;
+
                     return (
                       <div
                         key={task.id}
@@ -787,10 +831,16 @@ export const EisenhowerGoogleBoard: React.FC<EisenhowerGoogleBoardProps> = ({
                           if (dndProps.wasDraggingRef.current) return;
                           onOpenDetailTask(task);
                         }}
-                        className={`group relative flex items-start gap-2 py-0.5 rounded-md hover:bg-slate-50/80 dark:hover:bg-zinc-800/40 transition-colors cursor-pointer select-none ${
+                        className={`group relative flex items-start gap-2 py-0.5 rounded-md hover:bg-slate-50/80 dark:hover:bg-zinc-800/40 transition-all duration-200 cursor-pointer select-none ${
+                          isFading ? 'opacity-0 translate-x-4 pointer-events-none' : ''
+                        } ${
                           isBeingDragged ? 'opacity-40 scale-[0.98]' : ''
                         } ${
-                          task.completed ? 'opacity-55' : ''
+                          isCompleting
+                            ? 'bg-emerald-50/70 dark:bg-emerald-950/25'
+                            : task.completed
+                            ? 'opacity-55'
+                            : ''
                         } ${
                           isDropTargetItem
                             ? dndProps.dropPosition === 'before'
@@ -799,32 +849,54 @@ export const EisenhowerGoogleBoard: React.FC<EisenhowerGoogleBoardProps> = ({
                             : ''
                         }`}
                       >
-                        {/* TickTick 18px First-Line Wrapper centering the 15px Quadrant Checkbox */}
-                        <div className="h-[18px] flex items-center shrink-0">
+                        {/* Generous 33px tap target centered on 17px Quadrant Checkbox */}
+                        <div className="relative w-[17px] h-[18px] flex items-center justify-center shrink-0">
+                          {celebratingId === task.id && (
+                            <CheckmarkCelebration
+                              activeKey={celebrationKey}
+                              badgeText="Done✅"
+                              ringColor="border-emerald-500"
+                              align="left"
+                            />
+                          )}
                           <button
                             type="button"
+                            onPointerDown={e => e.stopPropagation()}
+                            onMouseDown={e => e.stopPropagation()}
+                            onTouchStart={e => e.stopPropagation()}
                             onClick={(e) => {
                               e.stopPropagation();
-                              onToggleTask(task.id);
+                              handleToggleWithAnim(task);
                             }}
-                            className={`w-[15px] h-[15px] rounded-[4px] flex items-center justify-center shrink-0 transition-all cursor-pointer ${
-                              task.completed
-                                ? `${quad.badgeBg} border-[1.5px] ${quad.borderColor} text-white`
-                                : `${quad.borderColor} border-[1.5px] bg-transparent hover:bg-slate-100 dark:hover:bg-zinc-800`
-                            }`}
-                            title={task.completed ? 'Completed' : 'Mark complete'}
+                            className="absolute -inset-2 flex items-center justify-center rounded-full cursor-pointer touch-manipulation z-10 hover:bg-slate-100/70 dark:hover:bg-zinc-800/60 transition-colors"
+                            title={isVisuallyDone ? 'Completed' : 'Mark complete'}
+                            aria-label={isVisuallyDone ? 'Mark incomplete' : 'Mark complete'}
                           >
-                            {task.completed && <Check className="w-2.5 h-2.5 text-white stroke-[3]" />}
+                            <span
+                              className={`w-[17px] h-[17px] rounded-[5px] flex items-center justify-center shrink-0 transition-all ${
+                                isVisuallyDone
+                                  ? `${quad.badgeBg} border-[1.5px] ${quad.borderColor} text-white scale-105`
+                                  : `${quad.borderColor} border-[1.5px] bg-transparent`
+                              }`}
+                            >
+                              {isVisuallyDone && (
+                                <AnimatedCheckIcon
+                                  className="w-3 h-3 text-white"
+                                  strokeWidth={3}
+                                  animate={isCompleting}
+                                />
+                              )}
+                            </span>
                           </button>
                         </div>
 
                         {/* Line 1: Clean Task Title | Line 2: Separate Bottom Line for Date/Time, Symbols & Subtask Counter (1/3) */}
                         <div className="flex-1 min-w-0">
                           <p
-                            className={`text-[13px] leading-[18px] font-sans font-normal break-words antialiased ${
+                            className={`text-[13px] leading-[18px] font-sans font-normal break-words antialiased transition-colors ${
                               isFocused ? '' : 'line-clamp-2'
                             } ${
-                              task.completed
+                              isVisuallyDone
                                 ? 'line-through text-slate-400 dark:text-zinc-500'
                                 : 'text-slate-800 dark:text-zinc-100'
                             }`}

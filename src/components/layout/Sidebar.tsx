@@ -1,29 +1,65 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import {
   BarChart3,
   AlertCircle,
-  Timer,
   Quote,
   FolderKanban,
   Sun,
   Moon,
   Database,
   RefreshCw,
-  CheckCircle2,
   Cloud,
   CloudOff,
   PanelLeftClose,
-  LayoutGrid,
   User,
   Play,
   Pause,
+  RotateCcw,
   Bell,
   Settings,
   Sparkles,
+  ChevronUp,
+  ChevronDown,
+  Clock,
+  CheckCircle2,
+  ReceiptText,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { ActiveTab } from '../../types';
 import { soundEngine } from '../../utils/audio';
+import { showAndroidToast } from '../common/AndroidToast';
+
+/**
+ * Minimal GrapheneOS-inspired geometric hexagonal lattice emblem
+ */
+export const GrapheneLogoMark: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) => (
+  <svg viewBox="0 0 64 64" fill="none" className={className} aria-hidden="true">
+    <polygon
+      points="32,8 52,19.5 52,44.5 32,56 12,44.5 12,19.5"
+      stroke="currentColor"
+      strokeWidth="4.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <line x1="32" y1="8" x2="32" y2="21" stroke="currentColor" strokeOpacity="0.55" strokeWidth="3" strokeLinecap="round" />
+    <line x1="52" y1="44.5" x2="41" y2="38" stroke="currentColor" strokeOpacity="0.55" strokeWidth="3" strokeLinecap="round" />
+    <line x1="12" y1="44.5" x2="23" y2="38" stroke="currentColor" strokeOpacity="0.55" strokeWidth="3" strokeLinecap="round" />
+    <path
+      d="M41 26 L32 21 L23 26 L23 38 L32 43 L41 38 L41 32 L34 32"
+      stroke="#818cf8"
+      strokeWidth="4.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <circle cx="32" cy="8" r="2.8" fill="currentColor" />
+    <circle cx="52" cy="19.5" r="2.8" fill="currentColor" />
+    <circle cx="52" cy="44.5" r="2.8" fill="currentColor" />
+    <circle cx="32" cy="56" r="2.8" fill="#818cf8" />
+    <circle cx="12" cy="44.5" r="2.8" fill="currentColor" />
+    <circle cx="12" cy="19.5" r="2.8" fill="currentColor" />
+    <circle cx="32" cy="32" r="2.8" fill="#f43f5e" />
+  </svg>
+);
 
 export const Sidebar: React.FC = () => {
   const {
@@ -36,26 +72,205 @@ export const Sidebar: React.FC = () => {
     syncWithCloud,
     syncEmail,
     medications,
+    tasks,
+    bills,
+    notifications,
     pomodoro,
     startPomodoro,
     pausePomodoro,
+    resetPomodoro,
+    switchPomodoroMode,
+    setPomodoroDuration,
     isSidebarCollapsed,
     setIsSidebarCollapsed,
     setIsBackupModalOpen,
     setIsAuthModalOpen,
-    setIsWidgetModalOpen,
     unreadNotificationsCount,
     setIsNotificationDrawerOpen,
     profile,
     firebaseUser,
-    pushNotification,
     setIsAIChatOpen,
   } = useApp();
 
+  // Live Digital & Analog Clock state
+  const [now, setNow] = useState<Date>(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const clockParts = useMemo(() => {
+    const rawHours = now.getHours();
+    const rawMinutes = now.getMinutes();
+    const rawSeconds = now.getSeconds();
+    const period = rawHours >= 12 ? 'PM' : 'AM';
+    const h12 = rawHours % 12 || 12;
+    const hours = String(h12).padStart(2, '0');
+    const minutes = String(rawMinutes).padStart(2, '0');
+    const seconds = String(rawSeconds).padStart(2, '0');
+    const weekday = now.toLocaleDateString(undefined, { weekday: 'short' }).toUpperCase();
+    const dayNum = now.getDate();
+    const monthLong = now.toLocaleDateString(undefined, { month: 'long' });
+    const yearNum = now.getFullYear();
+
+    // Smooth angles for live SVG Analog Clock
+    const secondAngle = rawSeconds * 6;
+    const minuteAngle = rawMinutes * 6 + rawSeconds * 0.1;
+    const hourAngle = (rawHours % 12) * 30 + rawMinutes * 0.5;
+
+    return {
+      hours,
+      minutes,
+      seconds,
+      period,
+      weekday,
+      dayNum,
+      monthLong,
+      yearNum,
+      secondAngle,
+      minuteAngle,
+      hourAngle,
+    };
+  }, [now]);
+
+  // Exclude fixed-course/deadline meds from refill stock alerts
   const lowStockMeds = useMemo(
-    () => medications.filter(m => m.active && m.remainingPills <= m.refillThreshold),
+    () =>
+      medications.filter(
+        m =>
+          m.active &&
+          !m.archived &&
+          !m.endDate &&
+          m.remainingPills <= m.refillThreshold
+      ),
     [medications]
   );
+
+  // Build unified stackable notification cards for the Left Panel secondary card
+  const alertStack = useMemo(() => {
+    const items: Array<{
+      id: string;
+      badge: string;
+      title: string;
+      subtitle: string;
+      tone: 'amber' | 'indigo' | 'rose' | 'emerald';
+      onClick: () => void;
+    }> = [];
+
+    // 1. Unread notifications from drawer
+    const unreadList = notifications.filter(n => !n.read);
+    unreadList.slice(0, 4).forEach(n => {
+      items.push({
+        id: `notif_${n.id}`,
+        badge: 'Unread Alert',
+        title: n.title,
+        subtitle: n.body || 'Tap to view in Notification Center',
+        tone: n.category === 'medication' ? 'rose' : 'indigo',
+        onClick: () => {
+          setIsNotificationDrawerOpen(true);
+          setIsSidebarCollapsed(true);
+        },
+      });
+    });
+
+    // 2. Low-stock medication refill alerts
+    lowStockMeds.forEach(med => {
+      items.push({
+        id: `refill_${med.id}`,
+        badge: `Refill Alert (${lowStockMeds.length})`,
+        title: med.name,
+        subtitle: `${med.remainingPills} of ${med.totalPills} left • Tap to refill`,
+        tone: 'amber',
+        onClick: () => {
+          setIsAIChatOpen(false);
+          setActiveTab('medications');
+          setIsSidebarCollapsed(true);
+        },
+      });
+    });
+
+    // 3. Today's pending high-priority / due tasks
+    const todayStr = new Date().toISOString().split('T')[0];
+    const dueTodayTasks = tasks.filter(
+      t => !t.completed && !t.archived && t.dueDate && t.dueDate <= todayStr
+    );
+    if (dueTodayTasks.length > 0) {
+      items.push({
+        id: `due_tasks_${todayStr}`,
+        badge: `Tasks Due (${dueTodayTasks.length})`,
+        title: dueTodayTasks[0].title,
+        subtitle:
+          dueTodayTasks.length > 1
+            ? `+${dueTodayTasks.length - 1} more due today • Tap to review`
+            : `Scheduled for today${dueTodayTasks[0].dueTime ? ` at ${dueTodayTasks[0].dueTime}` : ''}`,
+        tone: 'indigo',
+        onClick: () => {
+          setIsAIChatOpen(false);
+          setActiveTab('tasks');
+          setIsSidebarCollapsed(true);
+        },
+      });
+    }
+
+    // 4. Unpaid upcoming bills
+    const unpaidBills = bills.filter(b => !b.isPaid && b.status !== 'paid' && !b.archived);
+    if (unpaidBills.length > 0) {
+      items.push({
+        id: `unpaid_bills`,
+        badge: `Bills Pending (${unpaidBills.length})`,
+        title: unpaidBills[0].title,
+        subtitle: `Due ${unpaidBills[0].dueDate} • Tap to manage bills`,
+        tone: 'rose',
+        onClick: () => {
+          setIsAIChatOpen(false);
+          setActiveTab('bills');
+          setIsSidebarCollapsed(true);
+        },
+      });
+    }
+
+    return items;
+  }, [
+    notifications,
+    lowStockMeds,
+    tasks,
+    bills,
+    setActiveTab,
+    setIsAIChatOpen,
+    setIsNotificationDrawerOpen,
+    setIsSidebarCollapsed,
+  ]);
+
+  const [stackIndex, setStackIndex] = useState(0);
+  const stackTouchStartYRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (stackIndex >= alertStack.length) {
+      setStackIndex(0);
+    }
+  }, [alertStack.length, stackIndex]);
+
+  const cycleStackNext = useCallback(
+    (e?: React.MouseEvent) => {
+      if (e) e.stopPropagation();
+      if (alertStack.length <= 1) return;
+      setStackIndex(prev => (prev + 1) % alertStack.length);
+    },
+    [alertStack.length]
+  );
+
+  const cycleStackPrev = useCallback(
+    (e?: React.MouseEvent) => {
+      if (e) e.stopPropagation();
+      if (alertStack.length <= 1) return;
+      setStackIndex(prev => (prev - 1 + alertStack.length) % alertStack.length);
+    },
+    [alertStack.length]
+  );
+
+  // Focus Clock Preset & Custom Duration Dropdown state
+  const [isDurationMenuOpen, setIsDurationMenuOpen] = useState(false);
+  const [customMinutesInput, setCustomMinutesInput] = useState('');
 
   const formatTimer = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -69,25 +284,90 @@ export const Sidebar: React.FC = () => {
     setIsSidebarCollapsed(true);
   };
 
-  // Only items NOT in the bottom menu appear in the first left panel
-  const navItems: { id: ActiveTab; label: string; icon: React.ReactNode; badge?: number }[] = [
-    {
-      id: 'quotes',
-      label: 'Quotes',
-      icon: <Quote className="w-[17px] h-[17px]" />,
+  // Interactive Focus Clock Dial mechanics (supports click & pointer drag to set 5..60 minutes)
+  const dialRef = useRef<SVGSVGElement | null>(null);
+  const isDraggingDialRef = useRef(false);
+
+  const updateDurationFromPointer = useCallback(
+    (clientX: number, clientY: number) => {
+      const svg = dialRef.current;
+      if (!svg) return;
+      const rect = svg.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      const dx = clientX - cx;
+      const dy = clientY - cy;
+      let angleDeg = (Math.atan2(dy, dx) * 180) / Math.PI + 90;
+      if (angleDeg < 0) angleDeg += 360;
+      const maxMins = pomodoro.mode === 'break' ? 30 : 60;
+      const rawMins = Math.round((angleDeg / 360) * maxMins);
+      const snapped =
+        pomodoro.mode === 'break'
+          ? Math.max(1, Math.min(30, rawMins || 5))
+          : Math.max(5, Math.min(60, Math.round(rawMins / 5) * 5 || 5));
+      setPomodoroDuration(snapped);
     },
-    {
-      id: 'analytics',
-      label: 'Analytics',
-      icon: <BarChart3 className="w-[17px] h-[17px]" />,
-    },
-  ];
+    [pomodoro.mode, setPomodoroDuration]
+  );
+
+  const handleDialPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (pomodoro.isRunning) return;
+    e.stopPropagation();
+    isDraggingDialRef.current = true;
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
+    updateDurationFromPointer(e.clientX, e.clientY);
+  };
+
+  const handleDialPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (!isDraggingDialRef.current || pomodoro.isRunning) return;
+    e.stopPropagation();
+    updateDurationFromPointer(e.clientX, e.clientY);
+  };
+
+  const handleDialPointerUp = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (!isDraggingDialRef.current) return;
+    isDraggingDialRef.current = false;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {}
+  };
+
+  // Focus clock SVG geometry (sleek compact layout)
+  const dialSize = 104;
+  const dialCenter = dialSize / 2;
+  const dialRadius = 42;
+  const dialCircumference = 2 * Math.PI * dialRadius;
+  const totalSec = Math.max(60, pomodoro.initialDuration || 25 * 60);
+  const maxDialScaleSec = (pomodoro.mode === 'break' ? 30 : 60) * 60;
+  const clockFraction = pomodoro.isRunning
+    ? Math.max(0, Math.min(1, pomodoro.timeRemaining / totalSec))
+    : Math.max(0.04, Math.min(1, pomodoro.timeRemaining / maxDialScaleSec));
+  const strokeOffset = dialCircumference * (1 - clockFraction);
+  const handAngleDeg = clockFraction * 360;
+  const handRad = ((handAngleDeg - 90) * Math.PI) / 180;
+  const handEndX = dialCenter + (dialRadius - 10) * Math.cos(handRad);
+  const handEndY = dialCenter + (dialRadius - 10) * Math.sin(handRad);
+  const thumbX = dialCenter + dialRadius * Math.cos(handRad);
+  const thumbY = dialCenter + dialRadius * Math.sin(handRad);
 
   const isOpen = !isSidebarCollapsed;
+  const isAuthenticated = Boolean(firebaseUser || profile.identifier || syncEmail);
+  const displayName = firebaseUser?.displayName
+    ? firebaseUser.displayName.split(' ')[0]
+    : isAuthenticated && profile.name && profile.name !== 'Guest'
+    ? profile.nickname || profile.name
+    : 'Sign In to Sync';
+
+  const quickPresets = pomodoro.mode === 'break' ? [5, 10, 15, 20] : [15, 25, 45, 60];
+  const currentSetMinutes = Math.max(1, Math.round((pomodoro.timeRemaining || 1500) / 60));
+  const hasUnreadNotifications = unreadNotificationsCount > 0;
+  const currentAlertCard = alertStack[stackIndex] || null;
 
   return (
     <>
-      {/* Dedicated Left-Edge Touch-Drag Sensor Strip (kept mounted below top bar so Navbar toggle button is never occluded) */}
+      {/* Dedicated Left-Edge Touch-Drag Sensor Strip */}
       <div
         data-drawer-edge-sensor="true"
         aria-hidden="true"
@@ -100,251 +380,424 @@ export const Sidebar: React.FC = () => {
         data-drawer-sidebar="true"
         data-open={isOpen ? 'true' : 'false'}
         aria-hidden={!isOpen}
-        className="fixed inset-y-0 left-0 z-[80] w-[276px] sm:w-[292px] bg-[#edf2fa] dark:bg-[#08090d] border-r border-slate-200/90 dark:border-zinc-800/90 flex flex-col select-none touch-pan-y"
+        className="fixed inset-y-0 left-0 z-[80] w-[288px] sm:w-[308px] bg-[#edf2fa] dark:bg-[#090b10] border-r border-slate-200/90 dark:border-zinc-800/90 flex flex-col select-none touch-pan-y overscroll-contain"
       >
-      <div className="flex flex-col h-full min-h-0 p-2.5 sm:p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] gap-1.5 overflow-hidden">
-        {/* 1. TOP BRAND & USER PROFILE CARD (Namida Header Card + Sync Icon + Close Control) */}
-        <div className="flex items-center justify-between gap-1.5 p-2 rounded-2xl bg-white dark:bg-zinc-900/95 border border-slate-200/70 dark:border-zinc-800/80 shadow-2xs shrink-0">
-          <button
-            type="button"
-            id="btn-sidebar-profile"
-            onClick={() => {
-              setIsAuthModalOpen(true);
-              setIsSidebarCollapsed(true);
-            }}
-            title="Manage Account & Profile"
-            className="flex items-center gap-2.5 min-w-0 flex-1 text-left group cursor-pointer rounded-xl p-0.5 hover:opacity-95 transition"
-          >
-            <div className="relative shrink-0">
-              {firebaseUser?.photoURL || profile.avatarPhoto ? (
-                <img
-                  src={firebaseUser?.photoURL || profile.avatarPhoto}
-                  alt={firebaseUser?.displayName || profile.name || 'Jivan OS'}
-                  referrerPolicy="no-referrer"
-                  className="w-9 h-9 rounded-full object-cover ring-2 ring-indigo-500/40 dark:ring-indigo-400/40"
-                />
-              ) : (
-                <div className="w-9 h-9 rounded-full bg-indigo-600 text-white font-black text-sm flex items-center justify-center shadow-xs">
-                  J
-                </div>
-              )}
-              <span
-                className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ring-2 ring-white dark:ring-zinc-900 ${
-                  !isOnline || syncStatus === 'offline'
-                    ? 'bg-amber-500'
-                    : syncStatus === 'syncing'
-                    ? 'bg-indigo-500 animate-pulse'
-                    : syncStatus === 'error'
-                    ? 'bg-rose-500'
-                    : 'bg-emerald-500'
-                }`}
-                title={!isOnline ? 'Offline' : syncStatus === 'syncing' ? 'Syncing...' : 'Cloud Synced'}
-              />
-            </div>
-
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5">
-                <span className="font-extrabold text-[14px] tracking-tight text-slate-900 dark:text-zinc-100 truncate">
-                  Jivan <span className="text-indigo-600 dark:text-indigo-400">OS</span>
-                </span>
-              </div>
-              <div className="text-[10.5px] font-medium text-slate-500 dark:text-zinc-400 truncate flex items-center gap-1">
-                <User className="w-2.5 h-2.5 shrink-0 text-indigo-600 dark:text-indigo-400" />
-                <span className="truncate">
-                  {firebaseUser?.displayName
-                    ? firebaseUser.displayName.split(' ')[0]
-                    : profile.nickname || profile.name || 'Sign In'}
-                </span>
-              </div>
-            </div>
-          </button>
-
-          <div className="flex items-center gap-1 shrink-0">
-            {/* Shifted Cloud Sync Status Pill / Button in Left Panel */}
+        <div className="flex flex-col h-full min-h-0 p-2.5 sm:p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] gap-2 overflow-hidden">
+          {/* 1. CLEAN TOP HEADER CARD WITH MINIMAL GRAPHENEOS EMBLEM & ANIMATED BELL */}
+          <div className="flex items-center justify-between gap-2 px-2.5 py-2 rounded-[22px] bg-white dark:bg-zinc-900/95 border border-slate-200/80 dark:border-zinc-800/80 shadow-2xs shrink-0">
             <button
               type="button"
-              id="btn-sidebar-sync-status"
-              onClick={() => syncWithCloud()}
-              title={
-                syncStatus === 'syncing'
-                  ? 'Syncing with Cloud...'
-                  : !isOnline || syncStatus === 'offline'
-                  ? 'Offline Mode — Tap to retry'
-                  : 'Cloud Synced — Tap to Sync Now'
-              }
-              className={`px-2 py-1.5 rounded-xl border text-[10.5px] font-bold flex items-center gap-1 transition active:scale-95 cursor-pointer shrink-0 ${
-                syncStatus === 'syncing'
-                  ? 'bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800/70'
-                  : !isOnline || syncStatus === 'offline'
-                  ? 'bg-amber-50 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/70'
-                  : syncStatus === 'error'
-                  ? 'bg-rose-50 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800/70'
-                  : 'bg-emerald-50/80 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200/80 dark:border-emerald-800/70'
-              }`}
-            >
-              {syncStatus === 'syncing' ? (
-                <>
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-indigo-600 dark:text-indigo-400" />
-                  <span>Syncing</span>
-                </>
-              ) : !isOnline || syncStatus === 'offline' ? (
-                <>
-                  <CloudOff className="w-3.5 h-3.5 text-amber-500" />
-                  <span>Offline</span>
-                </>
-              ) : syncStatus === 'error' ? (
-                <>
-                  <Cloud className="w-3.5 h-3.5 text-rose-500" />
-                  <span>Retry</span>
-                </>
-              ) : (
-                <>
-                  <Cloud className="w-3.5 h-3.5 text-emerald-500" />
-                  <span>Synced</span>
-                </>
-              )}
-            </button>
-
-            {/* Notification Center Bell */}
-            <button
-              type="button"
-              id="btn-notifications-drawer"
+              id="btn-sidebar-profile"
               onClick={() => {
-                setIsNotificationDrawerOpen(true);
+                setIsAuthModalOpen(true);
                 setIsSidebarCollapsed(true);
               }}
-              title="Notifications & Reminders"
-              className="relative p-2 rounded-xl bg-slate-100 dark:bg-zinc-800/90 hover:bg-slate-200/80 dark:hover:bg-zinc-700/80 text-slate-600 dark:text-zinc-300 transition active:scale-95 cursor-pointer shrink-0"
+              title="Manage Account & Profile"
+              className="flex items-center gap-2.5 min-w-0 flex-1 text-left group cursor-pointer rounded-xl p-0.5 hover:opacity-95 transition"
             >
-              <Bell className="w-4 h-4" />
-              {unreadNotificationsCount > 0 && (
-                <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white dark:ring-zinc-900" />
-              )}
-            </button>
-
-            {/* Close Left Panel Button */}
-            <button
-              type="button"
-              id="btn-close-sidebar"
-              onClick={() => setIsSidebarCollapsed(true)}
-              title="Close Panel (Ctrl+B)"
-              className="p-2 rounded-xl bg-slate-100 dark:bg-zinc-800/90 hover:bg-slate-200/80 dark:hover:bg-zinc-700/80 text-slate-600 dark:text-zinc-300 transition active:scale-95 cursor-pointer shrink-0"
-            >
-              <PanelLeftClose className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-
-        {/* 2. SCROLLABLE MATERIAL 4 GROUPED CONTAINMENT NAVIGATION STACK */}
-        <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar space-y-1.5 pr-0.5">
-          {/* Connected Group 1: Primary Drawer Destinations (Quotes & Analytics) */}
-          <div className="space-y-[3px]">
-            {navItems.map((item, idx) => {
-              const isActive =
-                activeTab === item.id ||
-                (item.id === 'tasks' &&
-                  (activeTab === 'planner' || activeTab === 'calendar' || activeTab === 'timeline' || activeTab === 'schedule'));
-              const radiusClass =
-                idx === 0
-                  ? 'rounded-t-[20px] rounded-b-[5px]'
-                  : idx === navItems.length - 1
-                  ? 'rounded-t-[5px] rounded-b-[20px]'
-                  : 'rounded-[5px]';
-
-              return (
-                <button
-                  key={item.id}
-                  id={`sidebar-nav-${item.id}`}
-                  type="button"
-                  onClick={() => handleNavigate(item.id)}
-                  className={`w-full flex items-center justify-between px-3.5 py-2.5 ${radiusClass} text-[13px] transition-all duration-200 ease-[cubic-bezier(0.2,0,0,1)] active:scale-[0.985] cursor-pointer ${
-                    isActive
-                      ? 'bg-indigo-100 dark:bg-indigo-950/90 text-indigo-700 dark:text-indigo-200 border border-indigo-300/70 dark:border-indigo-800/70 font-extrabold shadow-2xs'
-                      : 'bg-white dark:bg-zinc-900/95 hover:bg-slate-100 dark:hover:bg-zinc-800/90 text-slate-700 dark:text-zinc-200 border border-slate-200/75 dark:border-zinc-800/80 font-semibold'
+              <div className="relative shrink-0">
+                {firebaseUser?.photoURL || profile.avatarPhoto ? (
+                  <img
+                    src={firebaseUser?.photoURL || profile.avatarPhoto}
+                    alt={firebaseUser?.displayName || profile.name || 'Jivan OS'}
+                    referrerPolicy="no-referrer"
+                    className="w-9 h-9 rounded-full object-cover ring-2 ring-indigo-500/35 dark:ring-indigo-400/35"
+                  />
+                ) : (
+                  <div className="w-9 h-9 rounded-2xl bg-[#090D16] dark:bg-zinc-950 text-slate-100 ring-1 ring-slate-200/80 dark:ring-zinc-700/80 flex items-center justify-center shadow-xs">
+                    <GrapheneLogoMark className="w-6 h-6" />
+                  </div>
+                )}
+                <span
+                  className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ring-2 ring-white dark:ring-zinc-900 ${
+                    !isAuthenticated
+                      ? 'bg-slate-400'
+                      : !isOnline || syncStatus === 'offline'
+                      ? 'bg-amber-500'
+                      : syncStatus === 'syncing'
+                      ? 'bg-indigo-500 animate-pulse'
+                      : syncStatus === 'error'
+                      ? 'bg-rose-500'
+                      : 'bg-emerald-500'
                   }`}
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <span
-                      className={`shrink-0 transition-transform duration-200 ${
-                        isActive
-                          ? 'text-indigo-600 dark:text-indigo-300 scale-105'
-                          : 'text-slate-500 dark:text-zinc-400'
-                      }`}
-                    >
-                      {item.icon}
-                    </span>
-                    <span className="truncate">{item.label}</span>
+                />
+              </div>
+
+              <div className="min-w-0 flex-1">
+                <div className="font-extrabold text-[15px] tracking-tight text-slate-900 dark:text-zinc-100 leading-tight truncate">
+                  Jivan <span className="text-indigo-600 dark:text-indigo-400">OS</span>
+                </div>
+                <div className="text-[11px] font-semibold text-slate-500 dark:text-zinc-400 truncate flex items-center gap-1 mt-0.5">
+                  <User className="w-3 h-3 shrink-0 text-indigo-600 dark:text-indigo-400" />
+                  <span className="truncate">{displayName}</span>
+                </div>
+              </div>
+            </button>
+
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                type="button"
+                id="btn-notifications-drawer"
+                onClick={() => {
+                  setIsNotificationDrawerOpen(true);
+                  setIsSidebarCollapsed(true);
+                }}
+                title="Notifications"
+                className={`relative w-9 h-9 rounded-2xl flex items-center justify-center transition active:scale-95 cursor-pointer shrink-0 ${
+                  hasUnreadNotifications
+                    ? 'bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 ring-1 ring-rose-300/70 dark:ring-rose-800/70'
+                    : 'bg-[#eef2fb] dark:bg-zinc-800/90 hover:bg-indigo-100/80 dark:hover:bg-zinc-700/80 text-slate-700 dark:text-zinc-300'
+                }`}
+              >
+                <Bell className="w-4 h-4" />
+                {hasUnreadNotifications && (
+                  <span className="absolute top-1.5 right-1.5 inline-flex rounded-full h-2.5 w-2.5 bg-rose-500 ring-2 ring-white dark:ring-zinc-900" />
+                )}
+              </button>
+
+              <button
+                type="button"
+                id="btn-close-sidebar"
+                onClick={() => setIsSidebarCollapsed(true)}
+                title="Close Panel (Ctrl+B)"
+                className="w-9 h-9 rounded-2xl bg-[#eef2fb] dark:bg-zinc-800/90 hover:bg-indigo-100/80 dark:hover:bg-zinc-700/80 text-slate-700 dark:text-zinc-300 flex items-center justify-center transition active:scale-95 cursor-pointer shrink-0"
+              >
+                <PanelLeftClose className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* 2. SCROLLABLE MATERIAL 3 EXPRESSIVE BODY (overscroll-contain locks scroll inside drawer) */}
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain no-scrollbar space-y-2 pr-0.5">
+            {/* ONEPLUS-STYLE DIGITAL CLOCK + DATE (LEFT ~3/4) & FULL-HEIGHT LIVE ANALOG CLOCK (RIGHT ~1/4) */}
+            <div className="px-3 py-2.5 rounded-[22px] bg-white dark:bg-zinc-900/95 border border-slate-200/80 dark:border-zinc-800/80 shadow-2xs flex items-center justify-between gap-2">
+              {/* Left ~3/4 Section: Enlarged Digital Clock on Top + Full Date Strip Below */}
+              <div className="min-w-0 flex-1 flex flex-col justify-between gap-1.5 pr-1">
+                {/* Digital Clock Row */}
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <div className="text-[42px] sm:text-[45px] font-black tracking-tighter tabular-nums leading-[0.9] flex items-baseline">
+                    <span className="text-rose-600 dark:text-rose-500">{clockParts.hours}</span>
+                    <span className="text-slate-900 dark:text-white">:{clockParts.minutes}</span>
                   </div>
 
-                  {item.badge !== undefined && (
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold shrink-0 ${
-                        isActive
-                          ? 'bg-indigo-600 text-white'
-                          : 'bg-slate-200/80 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300'
-                      }`}
-                    >
-                      {item.badge}
+                  {/* Stacked :SS and AM/PM badge scaled to match larger clock */}
+                  <div className="flex flex-col justify-between h-[36px] sm:h-[38px] py-0.5 leading-none shrink-0">
+                    <span className="text-[12.5px] sm:text-[13px] font-mono font-extrabold text-indigo-600 dark:text-indigo-400 tabular-nums">
+                      :{clockParts.seconds}
                     </span>
+                    <span className="px-1.5 py-[2px] rounded-md bg-slate-100 dark:bg-zinc-800 text-[9.5px] font-black tracking-wider text-slate-600 dark:text-zinc-300 uppercase leading-none">
+                      {clockParts.period}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Date Row Directly Below Digital Clock inside Left 3/4 Section */}
+                <div className="flex items-center gap-1 pt-1.5 border-t border-slate-100 dark:border-zinc-800/80 text-[11px] sm:text-[11.5px] font-extrabold tracking-tight whitespace-nowrap min-w-0">
+                  <span className="text-rose-600 dark:text-rose-400 uppercase tracking-wider shrink-0">
+                    {clockParts.weekday}
+                  </span>
+                  <span className="text-slate-300 dark:text-zinc-700 shrink-0">•</span>
+                  <span className="text-slate-700 dark:text-zinc-200 truncate">
+                    {clockParts.dayNum} {clockParts.monthLong}
+                  </span>
+                  <span className="text-indigo-600 dark:text-indigo-400 font-black tabular-nums shrink-0">
+                    {clockParts.yearNum}
+                  </span>
+                </div>
+              </div>
+
+              {/* Right Section: Larger Full-Height Live Analog Clock Face with Numbers 1-12 */}
+              <div className="shrink-0 flex items-center justify-center pl-2 border-l border-slate-100 dark:border-zinc-800/80 self-stretch">
+                <svg
+                  width="86"
+                  height="86"
+                  viewBox="0 0 86 86"
+                  className="w-[82px] h-[82px] sm:w-[86px] sm:h-[86px] overflow-visible select-none"
+                  aria-label="Live analog clock"
+                >
+                  {/* Outer Bezel */}
+                  <circle
+                    cx="43"
+                    cy="43"
+                    r="41"
+                    className="fill-[#f4f7fc] dark:fill-zinc-950 stroke-slate-200/95 dark:stroke-zinc-800"
+                    strokeWidth="2"
+                  />
+
+                  {/* Subtle Minute/Hour Rim Ticks */}
+                  {Array.from({ length: 12 }).map((_, idx) => {
+                    const angleRad = ((idx * 30 - 90) * Math.PI) / 180;
+                    const x1 = 43 + 37.5 * Math.cos(angleRad);
+                    const y1 = 43 + 37.5 * Math.sin(angleRad);
+                    const x2 = 43 + 39.5 * Math.cos(angleRad);
+                    const y2 = 43 + 39.5 * Math.sin(angleRad);
+                    return (
+                      <line
+                        key={`tick_${idx}`}
+                        x1={x1}
+                        y1={y1}
+                        x2={x2}
+                        y2={y2}
+                        className="stroke-slate-300 dark:stroke-zinc-700"
+                        strokeWidth="1.2"
+                        strokeLinecap="round"
+                      />
+                    );
+                  })}
+
+                  {/* 12 Hour Numbers */}
+                  {Array.from({ length: 12 }).map((_, idx) => {
+                    const num = idx === 0 ? 12 : idx;
+                    const angleRad = ((idx * 30 - 90) * Math.PI) / 180;
+                    const rNum = 31.2;
+                    const x = 43 + rNum * Math.cos(angleRad);
+                    const y = 43 + rNum * Math.sin(angleRad);
+                    return (
+                      <text
+                        key={num}
+                        x={x}
+                        y={y}
+                        textAnchor="middle"
+                        dominantBaseline="central"
+                        fontSize="7.8"
+                        fontWeight="800"
+                        className={
+                          num === 12
+                            ? 'fill-rose-600 dark:fill-rose-500 font-mono'
+                            : 'fill-slate-700 dark:fill-zinc-300 font-mono'
+                        }
+                      >
+                        {num}
+                      </text>
+                    );
+                  })}
+
+                  {/* Hour Hand */}
+                  <line
+                    x1="43"
+                    y1="43"
+                    x2="43"
+                    y2="25"
+                    transform={`rotate(${clockParts.hourAngle} 43 43)`}
+                    className="stroke-slate-900 dark:stroke-white"
+                    strokeWidth="2.8"
+                    strokeLinecap="round"
+                  />
+
+                  {/* Minute Hand */}
+                  <line
+                    x1="43"
+                    y1="43"
+                    x2="43"
+                    y2="18.5"
+                    transform={`rotate(${clockParts.minuteAngle} 43 43)`}
+                    className="stroke-indigo-600 dark:stroke-indigo-400"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                  />
+
+                  {/* Second Hand (OnePlus Red) */}
+                  <line
+                    x1="43"
+                    y1="48"
+                    x2="43"
+                    y2="15"
+                    transform={`rotate(${clockParts.secondAngle} 43 43)`}
+                    className="stroke-rose-600 dark:stroke-rose-500"
+                    strokeWidth="1.25"
+                    strokeLinecap="round"
+                  />
+
+                  {/* Center Cap */}
+                  <circle cx="43" cy="43" r="3" className="fill-rose-600 dark:fill-rose-500" />
+                  <circle cx="43" cy="43" r="1.25" className="fill-white dark:fill-zinc-900" />
+                </svg>
+              </div>
+            </div>
+
+            {/* SECONDARY STACKABLE SWIPE-UP / SWIPE-DOWN NOTIFICATION & ALERT STACK CARD */}
+            {currentAlertCard && (
+              <div
+                data-no-drawer-swipe="true"
+                onTouchStart={e => {
+                  if (e.touches.length === 1) {
+                    stackTouchStartYRef.current = e.touches[0].clientY;
+                  }
+                }}
+                onTouchEnd={e => {
+                  if (stackTouchStartYRef.current === null || e.changedTouches.length === 0) return;
+                  const dy = e.changedTouches[0].clientY - stackTouchStartYRef.current;
+                  stackTouchStartYRef.current = null;
+                  if (Math.abs(dy) >= 18) {
+                    if (dy < 0) cycleStackNext();
+                    else cycleStackPrev();
+                  }
+                }}
+                onClick={currentAlertCard.onClick}
+                className="relative group cursor-pointer select-none pt-0.5 pb-1"
+                title="Swipe up/down or tap arrows to cycle notifications"
+              >
+                {/* Stacked Deck Layer Illusion Behind Card when multiple alerts exist */}
+                {alertStack.length > 1 && (
+                  <div
+                    aria-hidden="true"
+                    className="absolute inset-x-2.5 -bottom-0.5 h-3 rounded-b-[18px] bg-white/70 dark:bg-zinc-800/70 border border-slate-200/70 dark:border-zinc-700/70 z-0 transition-transform"
+                  />
+                )}
+
+                <div
+                  className={`relative z-10 px-3 py-2 rounded-[18px] border shadow-2xs flex items-center justify-between gap-2 transition ${
+                    currentAlertCard.tone === 'amber'
+                      ? 'bg-amber-50/95 dark:bg-amber-950/75 border-amber-300/90 dark:border-amber-800/80 text-amber-900 dark:text-amber-100'
+                      : currentAlertCard.tone === 'rose'
+                      ? 'bg-rose-50/95 dark:bg-rose-950/75 border-rose-300/90 dark:border-rose-800/80 text-rose-900 dark:text-rose-100'
+                      : 'bg-indigo-50/95 dark:bg-indigo-950/75 border-indigo-200/90 dark:border-indigo-800/80 text-indigo-950 dark:text-indigo-100'
+                  }`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      {currentAlertCard.tone === 'amber' ? (
+                        <AlertCircle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                      ) : currentAlertCard.tone === 'rose' ? (
+                        <ReceiptText className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400 shrink-0" />
+                      ) : (
+                        <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                      )}
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider opacity-85 truncate">
+                        {currentAlertCard.badge}
+                      </span>
+                    </div>
+                    <div className="text-xs font-bold truncate mt-0.5">
+                      {currentAlertCard.title}
+                    </div>
+                    <div className="text-[10.5px] opacity-80 truncate">
+                      {currentAlertCard.subtitle}
+                    </div>
+                  </div>
+
+                  {/* Stack Counter & Vertical Swipe / Cycle Buttons */}
+                  {alertStack.length > 1 && (
+                    <div
+                      onClick={e => e.stopPropagation()}
+                      className="flex flex-col items-center justify-center gap-0.5 pl-1.5 border-l border-current/15 shrink-0"
+                    >
+                      <button
+                        type="button"
+                        onClick={cycleStackPrev}
+                        className="p-0.5 rounded hover:bg-black/10 dark:hover:bg-white/10 transition cursor-pointer"
+                        title="Previous notification"
+                      >
+                        <ChevronUp className="w-3 h-3" />
+                      </button>
+                      <span className="text-[9.5px] font-mono font-black tabular-nums leading-none">
+                        {stackIndex + 1}/{alertStack.length}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={cycleStackNext}
+                        className="p-0.5 rounded hover:bg-black/10 dark:hover:bg-white/10 transition cursor-pointer"
+                        title="Next notification"
+                      >
+                        <ChevronDown className="w-3 h-3" />
+                      </button>
+                    </div>
                   )}
+                </div>
+              </div>
+            )}
+
+            {/* M3 EXPRESSIVE 2-IN-A-ROW NAVIGATION & UTILITY GRID (App APK Removed) */}
+            <div className="space-y-1.5">
+              {/* Row 1: Quotes | Analytics */}
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  id="sidebar-nav-quotes"
+                  type="button"
+                  onClick={() => handleNavigate('quotes')}
+                  className={`flex items-center gap-2.5 px-3 py-2.5 min-h-[46px] rounded-l-[20px] rounded-r-[10px] text-[13px] transition-all duration-200 active:scale-[0.97] cursor-pointer border ${
+                    activeTab === 'quotes'
+                      ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-xs'
+                      : 'bg-white dark:bg-zinc-900/95 hover:bg-indigo-50/70 dark:hover:bg-zinc-800 text-slate-800 dark:text-zinc-100 border-slate-200/80 dark:border-zinc-800/80 font-semibold'
+                  }`}
+                >
+                  <span
+                    className={`w-7 h-7 rounded-xl flex items-center justify-center shrink-0 ${
+                      activeTab === 'quotes'
+                        ? 'bg-white/20 text-white'
+                        : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400'
+                    }`}
+                  >
+                    <Quote className="w-4 h-4" />
+                  </span>
+                  <span className="truncate">Quotes</span>
                 </button>
-              );
-            })}
-          </div>
 
-          {/* Connected Group 2: Quick Utility Cards (AI Assistant, Tags & Backup) */}
-          <div className="space-y-[3px]">
-            {/* AI Assistant Pop Up Card Trigger */}
-            <button
-              type="button"
-              id="sidebar-btn-ai"
-              onClick={() => {
-                setIsAIChatOpen(true);
-                setIsSidebarCollapsed(true);
-              }}
-              className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-t-[20px] rounded-b-[5px] text-[13px] font-semibold bg-white dark:bg-zinc-900/95 hover:bg-slate-100 dark:hover:bg-zinc-800/90 text-slate-700 dark:text-zinc-200 border border-slate-200/75 dark:border-zinc-800/80 transition-all duration-200 active:scale-[0.985] cursor-pointer"
-            >
-              <div className="flex items-center gap-3">
-                <Sparkles className="w-[17px] h-[17px] text-indigo-600 dark:text-indigo-400 shrink-0" />
-                <span>Jivan AI</span>
+                <button
+                  id="sidebar-nav-analytics"
+                  type="button"
+                  onClick={() => handleNavigate('analytics')}
+                  className={`flex items-center gap-2.5 px-3 py-2.5 min-h-[46px] rounded-r-[20px] rounded-l-[10px] text-[13px] transition-all duration-200 active:scale-[0.97] cursor-pointer border ${
+                    activeTab === 'analytics'
+                      ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-xs'
+                      : 'bg-white dark:bg-zinc-900/95 hover:bg-indigo-50/70 dark:hover:bg-zinc-800 text-slate-800 dark:text-zinc-100 border-slate-200/80 dark:border-zinc-800/80 font-semibold'
+                  }`}
+                >
+                  <span
+                    className={`w-7 h-7 rounded-xl flex items-center justify-center shrink-0 ${
+                      activeTab === 'analytics'
+                        ? 'bg-white/20 text-white'
+                        : 'bg-sky-50 dark:bg-sky-950/60 text-sky-600 dark:text-sky-400'
+                    }`}
+                  >
+                    <BarChart3 className="w-4 h-4" />
+                  </span>
+                  <span className="truncate">Analytics</span>
+                </button>
               </div>
-            </button>
 
-            {/* Tags Page Link */}
-            <button
-              type="button"
-              id="sidebar-btn-entities"
-              onClick={() => handleNavigate('tags')}
-              className={`w-full flex items-center justify-between px-3.5 py-2 rounded-[5px] text-[13px] transition-all duration-200 active:scale-[0.985] cursor-pointer ${
-                activeTab === 'tags'
-                  ? 'bg-indigo-500/20 dark:bg-indigo-400/25 text-indigo-700 dark:text-indigo-200 font-bold border border-indigo-400/35'
-                  : 'font-semibold bg-white dark:bg-zinc-900/95 hover:bg-slate-100 dark:hover:bg-zinc-800/90 text-slate-700 dark:text-zinc-200 border border-slate-200/75 dark:border-zinc-800/80'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <FolderKanban className="w-[17px] h-[17px] text-indigo-600 dark:text-indigo-400 shrink-0" />
-                <span>Tags</span>
+              {/* Row 2: Jivan AI | Tags */}
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  id="sidebar-btn-ai"
+                  onClick={() => {
+                    setIsAIChatOpen(true);
+                    setIsSidebarCollapsed(true);
+                  }}
+                  className="flex items-center gap-2.5 px-3 py-2.5 min-h-[46px] rounded-l-[20px] rounded-r-[10px] text-[13px] font-semibold bg-white dark:bg-zinc-900/95 hover:bg-violet-50/70 dark:hover:bg-zinc-800 text-slate-800 dark:text-zinc-100 border border-slate-200/80 dark:border-zinc-800/80 transition-all duration-200 active:scale-[0.97] cursor-pointer"
+                >
+                  <span className="w-7 h-7 rounded-xl bg-violet-50 dark:bg-violet-950/60 text-violet-600 dark:text-violet-400 flex items-center justify-center shrink-0">
+                    <Sparkles className="w-4 h-4" />
+                  </span>
+                  <span className="truncate">Jivan AI</span>
+                </button>
+
+                <button
+                  type="button"
+                  id="sidebar-btn-entities"
+                  onClick={() => handleNavigate('tags')}
+                  className={`flex items-center gap-2.5 px-3 py-2.5 min-h-[46px] rounded-r-[20px] rounded-l-[10px] text-[13px] transition-all duration-200 active:scale-[0.97] cursor-pointer border ${
+                    activeTab === 'tags'
+                      ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-xs'
+                      : 'bg-white dark:bg-zinc-900/95 hover:bg-indigo-50/70 dark:hover:bg-zinc-800 text-slate-800 dark:text-zinc-100 border-slate-200/80 dark:border-zinc-800/80 font-semibold'
+                  }`}
+                >
+                  <span
+                    className={`w-7 h-7 rounded-xl flex items-center justify-center shrink-0 ${
+                      activeTab === 'tags'
+                        ? 'bg-white/20 text-white'
+                        : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400'
+                    }`}
+                  >
+                    <FolderKanban className="w-4 h-4" />
+                  </span>
+                  <span className="truncate">Tags</span>
+                </button>
               </div>
-            </button>
+            </div>
 
-            {/* Dashboard Widgets Customizer Card */}
-            <button
-              type="button"
-              id="sidebar-btn-widgets"
-              onClick={() => {
-                setIsWidgetModalOpen(true);
-                setIsSidebarCollapsed(true);
-              }}
-              className="w-full flex items-center justify-between px-3.5 py-2 rounded-[5px] text-[13px] font-semibold bg-white dark:bg-zinc-900/95 hover:bg-slate-100 dark:hover:bg-zinc-800/90 text-slate-700 dark:text-zinc-200 border border-slate-200/75 dark:border-zinc-800/80 transition-all duration-200 active:scale-[0.985] cursor-pointer"
-            >
-              <div className="flex items-center gap-3">
-                <LayoutGrid className="w-[17px] h-[17px] text-indigo-600 dark:text-indigo-400 shrink-0" />
-                <span>Widgets</span>
-              </div>
-            </button>
-
-            {/* Cloud Sync & Backup Card */}
-            <div className="flex items-stretch gap-[3px]">
+            {/* BACKUP & CLOUD SYNC CARD */}
+            <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-[20px] bg-white dark:bg-zinc-900/95 border border-slate-200/80 dark:border-zinc-800/80 shadow-2xs">
               <button
                 type="button"
                 id="sidebar-btn-backup"
@@ -352,130 +805,415 @@ export const Sidebar: React.FC = () => {
                   setIsBackupModalOpen(true);
                   setIsSidebarCollapsed(true);
                 }}
-                className="flex-1 flex items-center justify-between px-3.5 py-2 rounded-tl-[5px] rounded-tr-[5px] rounded-bl-[20px] rounded-br-[5px] text-[13px] font-semibold bg-white dark:bg-zinc-900/95 hover:bg-slate-100 dark:hover:bg-zinc-800/90 text-slate-700 dark:text-zinc-200 border border-slate-200/75 dark:border-zinc-800/80 transition-all duration-200 active:scale-[0.985] cursor-pointer min-w-0"
+                className="flex items-center gap-2.5 min-w-0 flex-1 text-left cursor-pointer hover:opacity-90 transition"
               >
-                <div className="flex items-center gap-3 min-w-0">
-                  <Database className="w-[17px] h-[17px] text-indigo-600 dark:text-indigo-400 shrink-0" />
-                  <div className="truncate text-left">
-                    <div className="leading-tight truncate">Backup</div>
-                    <div className="text-[9.5px] text-slate-400 dark:text-zinc-500 font-mono truncate">
-                      {!isOnline ? 'Offline' : syncStatus === 'syncing' ? 'Syncing...' : syncEmail}
-                    </div>
+                <span className="w-7 h-7 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+                  <Database className="w-4 h-4" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[12.5px] font-semibold text-slate-800 dark:text-zinc-100 leading-tight truncate">
+                    Backup
+                  </div>
+                  <div className="text-[10px] text-slate-500 dark:text-zinc-400 truncate">
+                    {syncEmail || firebaseUser?.email || 'Local Only'}
                   </div>
                 </div>
               </button>
 
+              {/* Cloud Sync / Sign In Action Pill */}
               <button
                 type="button"
-                onClick={() => syncWithCloud()}
-                title="Sync Now"
-                className="px-3 rounded-tl-[5px] rounded-bl-[5px] rounded-tr-[5px] rounded-br-[20px] bg-white dark:bg-zinc-900/95 hover:bg-slate-100 dark:hover:bg-zinc-800/90 border border-slate-200/75 dark:border-zinc-800/80 text-slate-600 dark:text-zinc-300 flex items-center justify-center transition active:scale-95 cursor-pointer shrink-0"
+                id="btn-sidebar-sync-status"
+                onClick={() => {
+                  if (!isAuthenticated) {
+                    setIsAuthModalOpen(true);
+                    setIsSidebarCollapsed(true);
+                  } else {
+                    syncWithCloud();
+                  }
+                }}
+                title={
+                  !isAuthenticated
+                    ? 'Sign in to enable Cloud Sync'
+                    : syncStatus === 'syncing'
+                    ? 'Syncing with Cloud...'
+                    : !isOnline || syncStatus === 'offline'
+                    ? 'Offline Mode — Tap to retry'
+                    : 'Cloud Synced — Tap to Sync Now'
+                }
+                className={`px-2 py-1.5 rounded-xl border text-[10.5px] font-bold flex items-center gap-1 transition active:scale-95 cursor-pointer shrink-0 ${
+                  !isAuthenticated
+                    ? 'bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border-slate-200 dark:border-zinc-700'
+                    : syncStatus === 'syncing'
+                    ? 'bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800/70'
+                    : !isOnline || syncStatus === 'offline'
+                    ? 'bg-amber-50 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/70'
+                    : syncStatus === 'error'
+                    ? 'bg-rose-50 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800/70'
+                    : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200/90 dark:border-emerald-800/70'
+                }`}
               >
-                {!isOnline ? (
-                  <CloudOff className="w-4 h-4 text-amber-500" />
+                {!isAuthenticated ? (
+                  <>
+                    <Cloud className="w-3 h-3 text-indigo-500" />
+                    <span>Sign In</span>
+                  </>
                 ) : syncStatus === 'syncing' ? (
-                  <RefreshCw className="w-4 h-4 text-indigo-600 dark:text-indigo-400 animate-spin" />
+                  <>
+                    <RefreshCw className="w-3 h-3 animate-spin text-indigo-600 dark:text-indigo-400" />
+                    <span>Sync</span>
+                  </>
+                ) : !isOnline || syncStatus === 'offline' ? (
+                  <>
+                    <CloudOff className="w-3 h-3 text-amber-500" />
+                    <span>Offline</span>
+                  </>
+                ) : syncStatus === 'error' ? (
+                  <>
+                    <Cloud className="w-3 h-3 text-rose-500" />
+                    <span>Retry</span>
+                  </>
                 ) : (
-                  <CheckCircle2 className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                  <>
+                    <Cloud className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                    <span>Synced</span>
+                  </>
                 )}
               </button>
             </div>
-          </div>
 
-          {lowStockMeds.length > 0 && (
+            {/* DE-BLOATED INTERACTIVE FOCUS CLOCK WIDGET */}
             <div
-              onClick={() => handleNavigate('medications')}
-              className="p-2.5 rounded-[18px] bg-amber-50 dark:bg-amber-950/80 border border-amber-300 dark:border-amber-800 text-xs cursor-pointer hover:opacity-95 transition"
+              data-no-drawer-swipe="true"
+              className="relative p-3 rounded-[22px] bg-white dark:bg-zinc-900/95 border border-slate-200/80 dark:border-zinc-800/80 shadow-2xs space-y-2"
             >
-              <div className="flex items-center gap-1.5 font-bold text-amber-800 dark:text-amber-200">
-                <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
-                <span>Refill Alert ({lowStockMeds.length})</span>
+              {/* Clock Header: Full Title + Focus/Break Switcher */}
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-zinc-200 whitespace-nowrap">
+                  Focus Timer
+                </span>
+
+                <div className="flex items-center p-0.5 rounded-xl bg-[#eef2fb] dark:bg-zinc-800 border border-slate-200/70 dark:border-zinc-700/70 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => switchPomodoroMode('work')}
+                    className={`px-2.5 py-0.5 rounded-[9px] text-[10px] font-bold transition cursor-pointer ${
+                      pomodoro.mode === 'work'
+                        ? 'bg-indigo-600 text-white shadow-2xs'
+                        : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    Focus
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => switchPomodoroMode('break')}
+                    className={`px-2.5 py-0.5 rounded-[9px] text-[10px] font-bold transition cursor-pointer ${
+                      pomodoro.mode === 'break'
+                        ? 'bg-emerald-600 text-white shadow-2xs'
+                        : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    Break
+                  </button>
+                </div>
               </div>
-              <p className="text-[11px] text-amber-700 dark:text-amber-300 mt-0.5 font-medium">
-                {lowStockMeds[0].name} ({lowStockMeds[0].remainingPills} left)
-              </p>
-            </div>
-          )}
-        </div>
 
-        {/* 3. PINNED BOTTOM CONTROLS STACK (Exact Namida Bottom Architecture) */}
-        <div className="pt-1.5 border-t border-slate-200/75 dark:border-zinc-800/80 space-y-1.5 shrink-0">
-          {/* Collapsible Theme & Material You Palette Drawer (Triggered by Theme button) */}
-          {/* Row B: Namida Full-Width Focus Timer Pill Button */}
-          <button
-            type="button"
-            id="btn-sidebar-focus-timer"
-            onClick={() => {
-              if (pomodoro.isRunning) {
-                pausePomodoro();
-              } else {
-                startPomodoro(undefined, 25);
-              }
-            }}
-            className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-[14px] text-xs font-bold transition-all duration-200 active:scale-[0.98] cursor-pointer border ${
-              pomodoro.isRunning
-                ? 'bg-indigo-500/20 dark:bg-indigo-400/25 text-indigo-700 dark:text-indigo-200 border-indigo-400/35'
-                : 'bg-white dark:bg-zinc-900/95 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-200 border-slate-200/70 dark:border-zinc-800/80'
-            }`}
-          >
-            <div className="flex items-center gap-2.5">
-              <Timer className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-              <span>{pomodoro.isRunning ? 'Focus Session Active' : 'Focus Timer'}</span>
-            </div>
-            <div className="flex items-center gap-1.5 font-mono text-[11px]">
-              <span>{formatTimer(pomodoro.timeRemaining)}</span>
-              {pomodoro.isRunning ? (
-                <Pause className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-              ) : (
-                <Play className="w-3.5 h-3.5 text-slate-400" />
-              )}
-            </div>
-          </button>
+              {/* Sleek Unbloated Dial + Action Controls */}
+              <div className="flex items-center justify-between gap-3">
+                <div className="relative shrink-0 flex items-center justify-center">
+                  <svg
+                    ref={dialRef}
+                    width={dialSize}
+                    height={dialSize}
+                    viewBox={`0 0 ${dialSize} ${dialSize}`}
+                    onPointerDown={handleDialPointerDown}
+                    onPointerMove={handleDialPointerMove}
+                    onPointerUp={handleDialPointerUp}
+                    onPointerCancel={handleDialPointerUp}
+                    className={`touch-none select-none ${
+                      pomodoro.isRunning ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'
+                    }`}
+                    aria-label="Interactive focus timer clock dial"
+                  >
+                    <circle
+                      cx={dialCenter}
+                      cy={dialCenter}
+                      r={dialRadius + 5}
+                      className="fill-[#f5f7fc] dark:fill-zinc-950/80 stroke-slate-200/70 dark:stroke-zinc-800"
+                      strokeWidth="1"
+                    />
 
-          {/* Row C: 2-Column Action Buttons: [ 1-Tap Quick Theme Toggle ] [ System Settings ] */}
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              id="btn-sidebar-theme-toggle"
-              onClick={() => {
-                const nextTheme = theme === 'dark' ? 'light' : 'dark';
-                setTheme(nextTheme);
-                try { soundEngine.playClick(); } catch {}
-                pushNotification('Theme Switched', `Active: ${nextTheme === 'dark' ? 'Dark Mode 🌙' : 'Light Mode ☀️'}`, 'system');
-              }}
-              title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
-              className="py-2.5 px-3 rounded-[14px] flex items-center justify-center gap-2 text-xs font-bold transition-all duration-200 active:scale-[0.97] cursor-pointer border bg-white dark:bg-zinc-900/95 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-200 border-slate-200/70 dark:border-zinc-800/80 shadow-2xs"
-            >
-              {theme === 'dark' ? (
-                <>
-                  <Sun className="w-4 h-4 text-amber-500" />
-                  <span>Light</span>
-                </>
-              ) : (
-                <>
-                  <Moon className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                  <span>Dark</span>
-                </>
-              )}
-            </button>
+                    {Array.from({ length: 12 }).map((_, i) => {
+                      const a = ((i * 30 - 90) * Math.PI) / 180;
+                      const rOuter = dialRadius + 2;
+                      const rInner = dialRadius - (i % 3 === 0 ? 4 : 2);
+                      return (
+                        <line
+                          key={i}
+                          x1={dialCenter + rInner * Math.cos(a)}
+                          y1={dialCenter + rInner * Math.sin(a)}
+                          x2={dialCenter + rOuter * Math.cos(a)}
+                          y2={dialCenter + rOuter * Math.sin(a)}
+                          className="stroke-slate-300 dark:stroke-zinc-700"
+                          strokeWidth={i % 3 === 0 ? '1.6' : '1'}
+                          strokeLinecap="round"
+                        />
+                      );
+                    })}
 
-            <button
-              type="button"
-              id="btn-sidebar-settings"
-              onClick={() => handleNavigate('settings')}
-              title="Open System Settings"
-              className={`py-2.5 px-3 rounded-[14px] flex items-center justify-center gap-2 text-xs font-bold transition-all duration-200 active:scale-[0.97] cursor-pointer border ${
-                activeTab === 'settings'
-                  ? 'bg-indigo-500/20 dark:bg-indigo-400/25 text-indigo-700 dark:text-indigo-200 border-indigo-400/35'
-                  : 'bg-white dark:bg-zinc-900/95 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-200 border-slate-200/70 dark:border-zinc-800/80 shadow-2xs'
-              }`}
-            >
-              <Settings className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-              <span>Settings</span>
-            </button>
+                    <circle
+                      cx={dialCenter}
+                      cy={dialCenter}
+                      r={dialRadius}
+                      fill="none"
+                      className="stroke-slate-200/80 dark:stroke-zinc-800"
+                      strokeWidth="5.5"
+                    />
+
+                    <circle
+                      cx={dialCenter}
+                      cy={dialCenter}
+                      r={dialRadius}
+                      fill="none"
+                      strokeWidth="5.5"
+                      strokeLinecap="round"
+                      strokeDasharray={dialCircumference}
+                      strokeDashoffset={strokeOffset}
+                      transform={`rotate(-90 ${dialCenter} ${dialCenter})`}
+                      className={
+                        pomodoro.mode === 'break'
+                          ? 'stroke-emerald-500 transition-[stroke-dashoffset] duration-300'
+                          : 'stroke-indigo-600 dark:stroke-indigo-500 transition-[stroke-dashoffset] duration-300'
+                      }
+                    />
+
+                    <line
+                      x1={dialCenter}
+                      y1={dialCenter}
+                      x2={handEndX}
+                      y2={handEndY}
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      className={
+                        pomodoro.mode === 'break' ? 'stroke-emerald-500/70' : 'stroke-indigo-500/70'
+                      }
+                    />
+                    <circle
+                      cx={dialCenter}
+                      cy={dialCenter}
+                      r="2.8"
+                      className={
+                        pomodoro.mode === 'break'
+                          ? 'fill-emerald-500'
+                          : 'fill-indigo-600 dark:fill-indigo-400'
+                      }
+                    />
+
+                    {!pomodoro.isRunning && (
+                      <circle
+                        cx={thumbX}
+                        cy={thumbY}
+                        r="5"
+                        className={`stroke-white dark:stroke-zinc-900 ${
+                          pomodoro.mode === 'break'
+                            ? 'fill-emerald-500'
+                            : 'fill-indigo-600 dark:fill-indigo-400'
+                        }`}
+                        strokeWidth="2"
+                      />
+                    )}
+                  </svg>
+
+                  <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                    <span className="text-[17px] font-black tracking-tight text-slate-900 dark:text-white tabular-nums leading-none">
+                      {formatTimer(pomodoro.timeRemaining)}
+                    </span>
+                    <span className="text-[8px] font-extrabold uppercase tracking-widest text-slate-400 dark:text-zinc-500 mt-1">
+                      {pomodoro.isRunning ? 'ACTIVE' : 'DRAG DIAL'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Right Side: Duration Dropdown Picker + Primary Play/Pause & Reset */}
+                <div className="flex-1 min-w-0 flex flex-col justify-center gap-2">
+                  <div className="relative">
+                    <button
+                      type="button"
+                      disabled={pomodoro.isRunning}
+                      onClick={() => setIsDurationMenuOpen(prev => !prev)}
+                      className="w-full px-2.5 py-2 rounded-xl bg-[#f4f7fc] dark:bg-zinc-800/70 hover:bg-indigo-50/70 dark:hover:bg-zinc-800 border border-slate-200/70 dark:border-zinc-700/70 flex items-center justify-between gap-1.5 text-left transition cursor-pointer disabled:opacity-70 disabled:cursor-default"
+                      title="Select preset or custom timer duration"
+                    >
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <Clock className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                        <span className="text-xs font-extrabold text-slate-800 dark:text-zinc-100 tabular-nums truncate">
+                          {pomodoro.isRunning ? 'Running' : `${currentSetMinutes} min`}
+                        </span>
+                      </div>
+                      <ChevronDown
+                        className={`w-3.5 h-3.5 text-slate-500 dark:text-zinc-400 shrink-0 transition-transform ${
+                          isDurationMenuOpen ? 'rotate-180' : ''
+                        }`}
+                      />
+                    </button>
+
+                    {isDurationMenuOpen && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-30"
+                          onClick={() => setIsDurationMenuOpen(false)}
+                        />
+                        <div className="absolute right-0 bottom-full mb-1.5 w-48 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-xl p-2.5 z-40 space-y-2 animate-view-enter">
+                          <div className="text-[9.5px] font-bold uppercase tracking-wider text-slate-400 dark:text-zinc-500">
+                            Quick Presets
+                          </div>
+                          <div className="grid grid-cols-4 gap-1">
+                            {quickPresets.map(mins => (
+                              <button
+                                key={mins}
+                                type="button"
+                                onClick={() => {
+                                  setPomodoroDuration(mins);
+                                  setIsDurationMenuOpen(false);
+                                }}
+                                className={`py-1 rounded-lg text-[10.5px] font-bold tabular-nums transition cursor-pointer ${
+                                  currentSetMinutes === mins
+                                    ? 'bg-indigo-600 text-white'
+                                    : 'bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 hover:bg-slate-200 dark:hover:bg-zinc-700'
+                                }`}
+                              >
+                                {mins}m
+                              </button>
+                            ))}
+                          </div>
+
+                          <form
+                            onSubmit={e => {
+                              e.preventDefault();
+                              const parsed = parseInt(customMinutesInput, 10);
+                              if (!isNaN(parsed) && parsed >= 1 && parsed <= 180) {
+                                setPomodoroDuration(parsed);
+                                setCustomMinutesInput('');
+                                setIsDurationMenuOpen(false);
+                              }
+                            }}
+                            className="pt-1.5 border-t border-slate-100 dark:border-zinc-800 flex items-center gap-1"
+                          >
+                            <input
+                              type="number"
+                              min={1}
+                              max={180}
+                              value={customMinutesInput}
+                              onChange={e => setCustomMinutesInput(e.target.value)}
+                              placeholder="Custom (1-180m)"
+                              className="w-full px-2 py-1 rounded-lg bg-slate-100 dark:bg-zinc-800 text-[11px] font-semibold text-slate-900 dark:text-white outline-hidden"
+                            />
+                            <button
+                              type="submit"
+                              className="px-2 py-1 rounded-lg bg-indigo-600 text-white text-[10.5px] font-bold shrink-0 cursor-pointer"
+                            >
+                              Set
+                            </button>
+                          </form>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      id="btn-sidebar-focus-timer"
+                      onClick={() => {
+                        if (pomodoro.isRunning) {
+                          pausePomodoro();
+                        } else {
+                          startPomodoro(undefined, currentSetMinutes);
+                        }
+                      }}
+                      className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer shadow-2xs ${
+                        pomodoro.isRunning
+                          ? 'bg-amber-500 hover:bg-amber-600 text-white'
+                          : pomodoro.mode === 'break'
+                          ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                          : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                      }`}
+                    >
+                      {pomodoro.isRunning ? (
+                        <>
+                          <Pause className="w-3.5 h-3.5" />
+                          <span>Pause</span>
+                        </>
+                      ) : (
+                        <>
+                          <Play className="w-3.5 h-3.5" />
+                          <span>Start</span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => resetPomodoro({ restart: false, clearTask: true })}
+                      title="Reset Focus Clock"
+                      className="p-2 rounded-xl bg-[#eef2fb] dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-600 dark:text-zinc-300 transition active:scale-95 cursor-pointer shrink-0"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 3. PINNED BOTTOM 2-IN-A-ROW CONTROLS: Theme Toggle | Settings */}
+          <div className="pt-1.5 border-t border-slate-200/80 dark:border-zinc-800/80 shrink-0">
+            <div className="grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                id="btn-sidebar-theme-toggle"
+                onClick={() => {
+                  const nextTheme = theme === 'dark' ? 'light' : 'dark';
+                  setTheme(nextTheme);
+                  try {
+                    soundEngine.playClick();
+                  } catch {}
+                  showAndroidToast(nextTheme === 'dark' ? 'Dark mode' : 'Light mode');
+                }}
+                title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
+                className="py-2.5 px-3 min-h-[44px] rounded-l-[18px] rounded-r-[10px] flex items-center justify-center gap-2 text-xs font-bold transition-all duration-200 active:scale-[0.97] cursor-pointer border bg-white dark:bg-zinc-900/95 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-800 dark:text-zinc-200 border-slate-200/80 dark:border-zinc-800/80 shadow-2xs"
+              >
+                {theme === 'dark' ? (
+                  <>
+                    <Sun className="w-4 h-4 text-amber-500" />
+                    <span>Light</span>
+                  </>
+                ) : (
+                  <>
+                    <Moon className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                    <span>Dark</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                id="btn-sidebar-settings"
+                onClick={() => handleNavigate('settings')}
+                title="Open System Settings"
+                className={`py-2.5 px-3 min-h-[44px] rounded-r-[18px] rounded-l-[10px] flex items-center justify-center gap-2 text-xs font-bold transition-all duration-200 active:scale-[0.97] cursor-pointer border ${
+                  activeTab === 'settings'
+                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                    : 'bg-white dark:bg-zinc-900/95 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-800 dark:text-zinc-200 border-slate-200/80 dark:border-zinc-800/80 shadow-2xs'
+                }`}
+              >
+                <Settings className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                <span>Settings</span>
+              </button>
+            </div>
           </div>
         </div>
-      </div>
       </aside>
     </>
   );

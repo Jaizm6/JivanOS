@@ -61,10 +61,10 @@ function resolveAccountKey(email?: string, userId?: string): string {
   if (email && typeof email === 'string' && email.trim()) {
     return email.trim().toLowerCase();
   }
-  if (userId && typeof userId === 'string' && userId.trim() && userId !== 'default_user' && userId !== 'usr_demo_789') {
+  if (userId && typeof userId === 'string' && userId.trim() && userId !== 'default_user' && userId !== 'usr_demo_789' && userId !== 'usr_guest') {
     return userId.trim().toLowerCase();
   }
-  return 'jaiprakashog@gmail.com';
+  return '';
 }
 
 const cloudBackups: Record<string, CloudUserBackup[]> = {};
@@ -1296,6 +1296,7 @@ Your Objective:
   const port = isDev ? 3000 : (process.env.PORT ? parseInt(process.env.PORT, 10) : 8080);
 
   let viteMiddleware: any = null;
+  let viteServer: any = null;
   let viteReadyPromise: Promise<void> | null = null;
 
   if (isDev) {
@@ -1335,13 +1336,12 @@ Your Objective:
           server: {
             middlewareMode: true,
             hmr: false,
+            ws: false,
             watch: null,
-          },
-          optimizeDeps: {
-            holdUntilCrawlEnd: false,
           },
           appType: 'spa',
         });
+        viteServer = vite;
         viteMiddleware = vite.middlewares;
       } catch (viteErr: any) {
         console.error('Vite middleware initialization error:', viteErr?.message || viteErr);
@@ -1359,23 +1359,37 @@ Your Objective:
 
   server.on('error', (err: any) => {
     console.error(`Primary port ${port} error:`, err?.message);
+    if (err?.code === 'EADDRINUSE') {
+      setTimeout(() => {
+        try {
+          server.close();
+          server.listen(port, '0.0.0.0');
+        } catch {}
+      }, 400);
+    }
   });
 
-  // Graceful shutdown handling for Cloud Run container lifecycle
-  process.on('SIGTERM', () => {
-    console.log('SIGTERM signal received: closing HTTP server gracefully');
-    server.close(() => {
-      console.log('HTTP server closed');
+  const shutdown = async (signal: string) => {
+    console.log(`${signal} signal received: closing HTTP server gracefully`);
+    try {
+      if (viteServer && typeof viteServer.close === 'function') {
+        await viteServer.close();
+      }
+    } catch {}
+    try {
+      server.closeAllConnections?.();
+      server.close(() => {
+        console.log('HTTP server closed');
+        process.exit(0);
+      });
+    } catch {
       process.exit(0);
-    });
-  });
+    }
+    setTimeout(() => process.exit(0), 500).unref();
+  };
 
-  process.on('SIGINT', () => {
-    console.log('SIGINT signal received: closing HTTP server');
-    server.close(() => {
-      process.exit(0);
-    });
-  });
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+  process.on('SIGINT', () => void shutdown('SIGINT'));
 }
 
 startServer();

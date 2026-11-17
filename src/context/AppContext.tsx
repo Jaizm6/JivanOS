@@ -264,6 +264,7 @@ interface AppContextType {
   stopPomodoro: (taskId?: string) => void;
   clearTaskTimer: (taskId: string) => void;
   switchPomodoroMode: (mode: 'work' | 'break') => void;
+  setPomodoroDuration: (minutes: number) => void;
   completePomodoroSession: () => void;
   setPomodoroTask: (taskId: string | null) => void;
   incrementTaskPomodoro: (taskId: string) => void;
@@ -432,10 +433,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (typeof window !== 'undefined') {
         const saved = localStorage.getItem('omniplan_theme');
         if (saved === 'dark' || saved === 'light') return saved;
-        return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
       }
     } catch {}
-    return 'dark';
+    return 'light';
   });
 
   const [themeStyle, setThemeStyleState] = useState<ThemeStyle>(() => {
@@ -590,21 +590,22 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // Core Data States with LocalStorage Persistence
   const [profile, setProfile] = useState<UserProfile>(() => {
     try {
+      const hasExplicitAuth = localStorage.getItem('omniplan_user_explicit_login') === 'true';
       const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_profile`);
-      if (saved) {
+      if (saved && hasExplicitAuth) {
         const parsed = JSON.parse(saved);
         return {
           ...initialProfile,
           ...parsed,
-          name: parsed.name && parsed.name !== 'Alex Rivera' && parsed.name !== 'Alex' ? parsed.name : 'Jaiprakash',
-          nickname: parsed.nickname || 'Jaiz',
-          identifier: parsed.identifier && parsed.identifier !== 'alex@example.com' ? parsed.identifier : 'jaiprakashog@gmail.com',
+          name: parsed.name || 'Guest',
+          nickname: parsed.nickname || '',
+          identifier: parsed.identifier || '',
           dateOfBirth: parsed.dateOfBirth || '1998-05-15',
           heightCm: parsed.heightCm || 175,
           weightKg: parsed.weightKg || 68,
           gender: parsed.gender || 'male',
           preferredCurrency: parsed.preferredCurrency || 'INR',
-          avatarPhoto: parsed.avatarPhoto || initialProfile.avatarPhoto || '',
+          avatarPhoto: parsed.avatarPhoto || '',
           bio: parsed.bio || '',
         };
       }
@@ -1111,25 +1112,29 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // E2E Encryption state
   const [masterPassphrase, setMasterPassphrase] = useState<string | null>(null);
 
-  // Sync state & Selected Account Email
+  // Sync state & Selected Account Email (empty until user explicitly logs in or sets sync email)
   const [syncEmail, setSyncEmailState] = useState<string>(() => {
     try {
+      const hasExplicitAuth = localStorage.getItem('omniplan_user_explicit_login') === 'true';
+      if (!hasExplicitAuth) return '';
       const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_sync_email`);
-      return saved || profile?.identifier || 'jaiprakashog@gmail.com';
+      return saved || profile?.identifier || '';
     } catch {
-      return 'jaiprakashog@gmail.com';
+      return '';
     }
   });
 
   const [savedSyncEmails, setSavedSyncEmails] = useState<string[]>(() => {
     try {
+      const hasExplicitAuth = localStorage.getItem('omniplan_user_explicit_login') === 'true';
+      if (!hasExplicitAuth) return [];
       const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_saved_sync_emails`);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       }
     } catch {}
-    return ['jaiprakashog@gmail.com'];
+    return [];
   });
 
   // Open Source Cloud Configuration (Nextcloud / WebDAV / MinIO S3)
@@ -1144,7 +1149,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       provider: 'nextcloud',
       enabled: false,
       serverUrl: 'https://cloud.nextcloud.example/remote.php/dav/files/user/',
-      username: 'jaiprakashog@gmail.com',
+      username: '',
       authSecret: '',
       remotePath: '/JivanOS_Backups',
       s3Bucket: 'jivanos-backups',
@@ -1176,6 +1181,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       if (user && user.email) {
         const emailLower = user.email.toLowerCase();
+        localStorage.setItem('omniplan_user_explicit_login', 'true');
         setSyncEmailState(emailLower);
         setSavedSyncEmails(prev => (prev.includes(emailLower) ? prev : [...prev, emailLower]));
         localStorage.setItem(`${LOCAL_STORAGE_KEY}_sync_email`, emailLower);
@@ -1185,7 +1191,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           ...prev,
           id: user.uid,
           identifier: emailLower,
-          name: user.displayName || prev.name || 'Jaiprakash',
+          name: user.displayName || (prev.name && prev.name !== 'Guest' ? prev.name : emailLower.split('@')[0]),
           avatarPhoto: user.photoURL || prev.avatarPhoto,
           type: 'email',
         }));
@@ -1237,9 +1243,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
   }, []);
 
-  // Initial pull & real-time listener from Firestore + backend /api/sync on startup and when window becomes active
+  // Initial pull & real-time listener from Firestore + backend /api/sync ONLY when user is signed in
   useEffect(() => {
-    const targetEmail = (syncEmail || 'jaiprakashog@gmail.com').trim().toLowerCase();
+    const targetEmail = (syncEmail || firebaseUser?.email || profile?.identifier || '').trim().toLowerCase();
+    if (!targetEmail) {
+      return;
+    }
     const emailDocId = targetEmail.replace(/[^a-zA-Z0-9_-]/g, '_');
     let emailFirestoreUnsub: (() => void) | null = null;
 
@@ -1785,6 +1794,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                     },
                   })
                 );
+                notificationService.notify(`🚨 Medication Due: ${med.name}`, {
+                  body: `Scheduled for ${sched.label || sched.time} (${med.dosage}). ${med.instructions}`,
+                  sound: 'alarm',
+                  category: 'medication',
+                  tag: `alarm_med_${med.id}_${sched.time}`,
+                  isAlarm: true,
+                });
               } else {
                 pushNotification(
                   `Medication Due: ${med.name}`,
@@ -1819,6 +1835,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                     },
                   })
                 );
+                notificationService.notify(`🚨 Scheduled Medication: ${med.name}`, {
+                  body: `${cdt.date} @ ${cdt.time} (${med.dosage}). ${med.instructions}`,
+                  sound: 'alarm',
+                  category: 'medication',
+                  tag: `alarm_med_custom_${med.id}_${cdt.id}`,
+                  isAlarm: true,
+                });
               } else if (med.reminderType !== 'none') {
                 pushNotification(
                   `Scheduled Medication: ${med.name}`,
@@ -1868,6 +1891,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                     },
                   })
                 );
+                notificationService.notify(`🚨 Task Alert: ${task.title}`, {
+                  body: `Due at ${task.dueTime} • ${task.category || task.project || 'Personal'}${task.location ? ` @ ${task.location}` : ''}`,
+                  sound: 'alarm',
+                  category: 'task',
+                  taskId: task.id,
+                  tag: `alarm_task_${task.id}`,
+                  isAlarm: true,
+                });
               } else {
                 pushNotification(
                   `⏰ Task Due: ${task.title}`,
@@ -1929,6 +1960,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                       },
                     })
                   );
+                  notificationService.notify(`🚨 Task Alert: ${task.title}`, {
+                    body: `${alert.label || 'Task reminder'} • Due at ${alert.time || task.dueTime || 'today'}`,
+                    sound: 'alarm',
+                    category: 'task',
+                    taskId: task.id,
+                    tag: `alarm_task_alert_${task.id}_${alert.id || alert.type}`,
+                    isAlarm: true,
+                  });
                 } else if (finalReminderType === 'notification') {
                   pushNotification(
                     `🔔 Reminder: ${task.title}`,
@@ -1978,6 +2017,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                           },
                         })
                       );
+                      notificationService.notify(`🚨 Task Alert: ${task.title}`, {
+                        body: `${alert.label || 'Task reminder'} • ${ds.date} at ${alertTime}`,
+                        sound: 'alarm',
+                        category: 'task',
+                        taskId: task.id,
+                        tag: `alarm_task_ds_${task.id}_${ds.date}`,
+                        isAlarm: true,
+                      });
                     } else {
                       pushNotification(
                         `🔔 Reminder: ${task.title}`,
@@ -2036,6 +2083,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 },
               })
             );
+            notificationService.notify(`⏰ Schedule Alarm: ${item.title}`, {
+              body: `${item.startTime} - ${item.endTime} • ${item.category || 'Schedule'}`,
+              sound: 'alarm',
+              category: 'schedule',
+              tag: `alarm_sched_${item.id}`,
+              isAlarm: true,
+            });
           } else {
             pushNotification(
               `🔔 Task Reminder: ${item.title}`,
@@ -2071,6 +2125,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 },
               })
             );
+            notificationService.notify(`⏰ Habit Alarm: ${habit.name}`, {
+              body: 'Time to complete your scheduled daily habit!',
+              sound: 'alarm',
+              category: 'habit',
+              tag: `alarm_habit_${habit.id}`,
+              isAlarm: true,
+            });
           } else {
             pushNotification(
               `🔔 Habit Reminder: ${habit.name}`,
@@ -2113,6 +2174,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                   },
                 })
               );
+              notificationService.notify(`🚨 Bill Alarm: ${bill.title}`, {
+                body: `Due on ${bill.dueDate} • Amount: ₹${bill.amount}`,
+                sound: 'alarm',
+                category: 'bill',
+                tag: `alarm_bill_${bill.id}`,
+                isAlarm: true,
+              });
             } else {
               pushNotification(
                 `🔔 Bill Reminder: ${bill.title}`,
@@ -2203,11 +2271,125 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     window.addEventListener('omnilifeos_snooze_task', handleSnooze);
     window.addEventListener('omnilifeos_complete_task', handleComplete);
+
+    // Handle cold-start notification actions launched from OS tray (?notifAction=complete|snooze&taskId=...)
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const action = params.get('notifAction');
+      const taskId = params.get('taskId');
+      if (action && taskId) {
+        if (action === 'snooze') {
+          handleSnooze(new CustomEvent('omnilifeos_snooze_task', { detail: { taskId } }));
+        } else if (action === 'complete') {
+          handleComplete(new CustomEvent('omnilifeos_complete_task', { detail: { taskId } }));
+        }
+        params.delete('notifAction');
+        params.delete('taskId');
+        const nextUrl = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ''}${window.location.hash}`;
+        window.history.replaceState({}, '', nextUrl);
+      }
+    } catch {}
+
     return () => {
       window.removeEventListener('omnilifeos_snooze_task', handleSnooze);
       window.removeEventListener('omnilifeos_complete_task', handleComplete);
     };
   }, [pushNotification]);
+
+  // Synchronize upcoming due tasks/habits/meds/schedule/bills with native Android AlarmManager & exact Web timers
+  useEffect(() => {
+    const syncTimer = setTimeout(() => {
+      const upcoming: Array<{
+        id: string;
+        entityId?: string;
+        title: string;
+        body: string;
+        targetTs: number;
+        category: 'task' | 'medication' | 'habit' | 'bill' | 'schedule';
+        isAlarm?: boolean;
+        sound?: 'pill' | 'water' | 'task' | 'alarm' | 'drop' | 'drip';
+      }> = [];
+
+      const nowTs = Date.now();
+      const todayDate = new Date();
+      const todayStr = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, '0')}-${String(todayDate.getDate()).padStart(2, '0')}`;
+
+      tasks.forEach(task => {
+        if (task.completed || task.archived || task.status === 'archived') return;
+        if (!task.reminderType || task.reminderType === 'none') return;
+        if (task.dueDate && task.dueTime) {
+          const ts = parseDateTimeToTimestamp(task.dueDate, task.dueTime);
+          if (ts && ts > nowTs) {
+            upcoming.push({
+              id: `task_due_${task.id}_${task.dueDate}_${task.dueTime}`,
+              entityId: task.id,
+              title: `${task.reminderType === 'alarm' ? '🚨' : '⏰'} ${task.title}`,
+              body: `Due at ${task.dueTime} • ${task.category || task.project || 'Task'}`,
+              targetTs: ts,
+              category: 'task',
+              isAlarm: task.reminderType === 'alarm',
+              sound: task.reminderType === 'alarm' ? 'alarm' : 'drop',
+            });
+          }
+        }
+      });
+
+      medications.forEach(med => {
+        if (!med.active || med.archived || med.reminderType === 'none') return;
+        med.schedules.forEach(sched => {
+          const ts = parseDateTimeToTimestamp(todayStr, sched.time);
+          if (ts && ts > nowTs) {
+            upcoming.push({
+              id: `med_${med.id}_${todayStr}_${sched.time}`,
+              title: `💊 Medication: ${med.name}`,
+              body: `${sched.label || sched.time} • ${med.dosage}`,
+              targetTs: ts,
+              category: 'medication',
+              isAlarm: med.reminderType === 'alarm',
+              sound: 'pill',
+            });
+          }
+        });
+      });
+
+      habits.forEach(habit => {
+        if (habit.archived || !habit.reminderTime || !habit.reminderType || habit.reminderType === 'none') return;
+        const ts = parseDateTimeToTimestamp(todayStr, habit.reminderTime);
+        if (ts && ts > nowTs) {
+          upcoming.push({
+            id: `habit_${habit.id}_${todayStr}_${habit.reminderTime}`,
+            title: `🔥 Habit: ${habit.name}`,
+            body: 'Time to complete your daily habit!',
+            targetTs: ts,
+            category: 'habit',
+            isAlarm: habit.reminderType === 'alarm',
+            sound: 'water',
+          });
+        }
+      });
+
+      scheduleItems.forEach(item => {
+        if (item.completed || !item.reminderType || item.reminderType === 'none' || item.reminderTiming === 'none') return;
+        if (!isScheduleItemOnDate(item, todayStr)) return;
+        const ts = parseDateTimeToTimestamp(todayStr, item.startTime || '09:00');
+        if (ts && ts > nowTs) {
+          upcoming.push({
+            id: `sched_${item.id}_${todayStr}_${item.startTime}`,
+            title: `📅 ${item.title}`,
+            body: `${item.startTime} - ${item.endTime} • ${item.category || 'Schedule'}`,
+            targetTs: ts,
+            category: 'schedule',
+            isAlarm: item.reminderType === 'alarm',
+            sound: 'task',
+          });
+        }
+      });
+
+      notificationService.syncScheduledReminders(upcoming);
+    }, 800);
+
+    return () => clearTimeout(syncTimer);
+  }, [tasks, medications, habits, scheduleItems, bills]);
 
   // Auth Methods
   const login = async (identifier: string, isPhone: boolean, require2FA: boolean = true) => {
@@ -2222,10 +2404,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         return { need2FA: true, devCode: data.devHintCode };
       }
       if (data.user) {
+        const cleanIdentifier = String(data.user.identifier || identifier).trim().toLowerCase();
+        localStorage.setItem('omniplan_user_explicit_login', 'true');
+        if (cleanIdentifier.includes('@')) {
+          setSyncEmailState(cleanIdentifier);
+          localStorage.setItem(`${LOCAL_STORAGE_KEY}_sync_email`, cleanIdentifier);
+          setSavedSyncEmails(prev => (prev.includes(cleanIdentifier) ? prev : [...prev, cleanIdentifier]));
+        }
         setProfile(prev => ({
           ...prev,
           id: data.user.id,
-          identifier: data.user.identifier,
+          identifier: cleanIdentifier,
           name: data.user.name,
           type: data.user.type,
           twoFactorEnabled: false,
@@ -2234,10 +2423,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return { need2FA: false };
     } catch {
       // Offline fallback
+      const cleanIdentifier = identifier.trim().toLowerCase();
+      localStorage.setItem('omniplan_user_explicit_login', 'true');
+      if (cleanIdentifier.includes('@')) {
+        setSyncEmailState(cleanIdentifier);
+        localStorage.setItem(`${LOCAL_STORAGE_KEY}_sync_email`, cleanIdentifier);
+        setSavedSyncEmails(prev => (prev.includes(cleanIdentifier) ? prev : [...prev, cleanIdentifier]));
+      }
       setProfile(prev => ({
         ...prev,
-        identifier,
-        name: isPhone ? `User ${identifier.slice(-4)}` : identifier.split('@')[0],
+        identifier: cleanIdentifier,
+        name: isPhone ? `User ${cleanIdentifier.slice(-4)}` : cleanIdentifier.split('@')[0],
         type: isPhone ? 'phone' : 'email',
       }));
       return { need2FA: false };
@@ -2253,6 +2449,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       });
       const data = await res.json();
       if (data.status === 'authenticated') {
+        localStorage.setItem('omniplan_user_explicit_login', 'true');
         setProfile(prev => ({
           ...prev,
           twoFactorEnabled: true,
@@ -2270,6 +2467,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     try {
       const user = await signInWithGoogle();
       if (user) {
+        localStorage.setItem('omniplan_user_explicit_login', 'true');
         pushNotification(
           'Google Account Connected',
           `Signed in as ${user.displayName || user.email}. Cloud sync active.`,
@@ -2289,8 +2487,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const logout = () => {
     try {
       firebaseSignOut(auth).catch(() => {});
+      localStorage.removeItem('omniplan_user_explicit_login');
+      localStorage.removeItem(`${LOCAL_STORAGE_KEY}_sync_email`);
+      localStorage.removeItem(`${LOCAL_STORAGE_KEY}_profile`);
     } catch {}
     setFirebaseUser(null);
+    setSyncEmailState('');
     setProfile(initialProfile);
     pushNotification('Logged Out', 'You have signed out of your account.', 'system');
   };
@@ -2821,6 +3023,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       reminderType: taskData.reminderType || 'none',
     };
     setTasks(prev => [newTask, ...prev]);
+    if (newTask.reminderType && newTask.reminderType !== 'none') {
+      notificationService.ensurePermissionSilentlyOnAction();
+    }
     soundEngine.playSuccessChime();
     pushNotification('Task Created', `"${newTask.title}" added to ${newTask.category || newTask.project || 'Tasks'}.`, 'task', { sound: 'drop' });
     return newTask;
@@ -3590,6 +3795,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setPomodoro(prev => ({
       ...prev,
       mode,
+      isRunning: false,
+      timeRemaining: duration,
+      initialDuration: duration,
+    }));
+  };
+
+  const setPomodoroDuration = (minutes: number) => {
+    const clamped = Math.max(1, Math.min(90, Math.round(minutes)));
+    const duration = clamped * 60;
+    setPomodoro(prev => ({
+      ...prev,
       isRunning: false,
       timeRemaining: duration,
       initialDuration: duration,
@@ -5062,8 +5278,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const setSyncEmail = (email: string) => {
     const clean = email.trim().toLowerCase();
     if (!clean) return;
+    localStorage.setItem('omniplan_user_explicit_login', 'true');
     setSyncEmailState(clean);
     localStorage.setItem(`${LOCAL_STORAGE_KEY}_sync_email`, clean);
+    setProfile(prev => ({
+      ...prev,
+      identifier: prev.identifier || clean,
+      email: prev.email || clean,
+      name: !prev.name || prev.name === 'Guest' ? clean.split('@')[0] : prev.name,
+    }));
     if (!savedSyncEmails.includes(clean)) {
       const updated = [...savedSyncEmails, clean];
       setSavedSyncEmails(updated);
@@ -5127,9 +5350,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setSyncStatus('offline');
       return;
     }
+    const targetEmail = (syncEmail || firebaseUser?.email || profile?.identifier || '').trim().toLowerCase();
+    if (!targetEmail) {
+      // Do not push to a shared or personal email when the user has not signed in
+      setSyncStatus('idle');
+      return;
+    }
     setSyncStatus('syncing');
     const payload = compilePayload();
-    const targetEmail = (syncEmail || firebaseUser?.email || 'jaiprakashog@gmail.com').trim().toLowerCase();
     const emailDocId = targetEmail.replace(/[^a-zA-Z0-9_-]/g, '_');
     const nowIso = new Date().toISOString();
 
@@ -5196,13 +5424,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   ) => {
     try {
       const payload = compilePayload();
-      const targetEmail = (syncEmail || firebaseUser?.email || 'jaiprakashog@gmail.com').trim().toLowerCase();
-      const emailDocId = targetEmail.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const targetEmail = (syncEmail || firebaseUser?.email || profile?.identifier || '').trim().toLowerCase();
 
-      if (provider === 'local') {
+      if (provider === 'local' || !targetEmail) {
         downloadLocalBackupFile();
         return true;
       }
+      const emailDocId = targetEmail.replace(/[^a-zA-Z0-9_-]/g, '_');
 
       const providerName =
         provider === 'firebase' ? 'Firebase Cloud' :
@@ -5653,6 +5881,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         stopPomodoro,
         clearTaskTimer,
         switchPomodoroMode,
+        setPomodoroDuration,
         completePomodoroSession,
         setPomodoroTask,
         incrementTaskPomodoro,

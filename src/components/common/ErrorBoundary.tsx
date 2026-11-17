@@ -29,6 +29,27 @@ export class ErrorBoundary extends React.Component<Props, State> {
 
   public componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
     console.error('Uncaught error in component tree:', error, errorInfo);
+    const msg = error?.message || '';
+    const isStaleChunkOrReactMismatch =
+      msg.includes("reading 'useState'") ||
+      msg.includes("reading 'useEffect'") ||
+      msg.includes("reading 'useContext'") ||
+      msg.includes('Invalid hook call') ||
+      msg.includes('dynamically imported module');
+
+    if (isStaleChunkOrReactMismatch && typeof window !== 'undefined') {
+      try {
+        const key = 'jivanos_chunk_reload_at';
+        const lastReload = Number(sessionStorage.getItem(key) || '0');
+        if (Date.now() - lastReload > 10000) {
+          sessionStorage.setItem(key, String(Date.now()));
+          window.location.reload();
+          return;
+        }
+      } catch {
+        // Fallback to normal error UI
+      }
+    }
     this.setState({ errorInfo });
   }
 

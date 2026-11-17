@@ -108,28 +108,39 @@ self.addEventListener('push', event => {
 
   const options = {
     body: data.body,
-    icon: data.icon || '/icon.svg',
-    badge: data.badge || '/icon.svg',
+    icon: data.icon || '/pwa-192x192.png',
+    badge: data.badge || '/pwa-192x192.png',
     tag: data.tag || 'omnilifeos-task-alert',
     renotify: true,
     requireInteraction: true,
-    vibrate: [300, 150, 300, 150, 400],
+    vibrate: [250, 120, 250, 120, 350],
     data: data.data || {},
     actions: [
-      { action: 'open', title: '👀 View Task' },
+      { action: 'complete', title: '✓ Complete' },
       { action: 'snooze', title: '⏱ Snooze 5m' },
+      { action: 'open', title: '👀 Open' },
     ],
   };
 
   event.waitUntil(self.registration.showNotification(data.title, options));
 });
 
-// Handle Notification Clicks (Focus app or handle snooze/open)
+// Allow main app to delegate showing system OS notifications reliably through SW
+self.addEventListener('message', event => {
+  const msg = event.data || {};
+  if (msg.type === 'SHOW_SYSTEM_NOTIFICATION' && msg.title) {
+    event.waitUntil(
+      self.registration.showNotification(msg.title, msg.options || {})
+    );
+  }
+});
+
+// Handle Notification Clicks (Focus app or open with action params)
 self.addEventListener('notificationclick', event => {
   event.notification.close();
 
-  const action = event.action;
-  const taskId = event.notification.data?.taskId;
+  const action = event.action || 'open';
+  const taskId = event.notification.data?.taskId || '';
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientList => {
@@ -145,7 +156,11 @@ self.addEventListener('notificationclick', event => {
         }
       }
       if (self.clients.openWindow) {
-        return self.clients.openWindow('/');
+        const targetUrl =
+          taskId && (action === 'snooze' || action === 'complete')
+            ? `/?notifAction=${encodeURIComponent(action)}&taskId=${encodeURIComponent(taskId)}`
+            : '/';
+        return self.clients.openWindow(targetUrl);
       }
     })
   );

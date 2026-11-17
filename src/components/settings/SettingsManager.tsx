@@ -41,6 +41,7 @@ import {
   Moon,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { showAndroidToast } from '../common/AndroidToast';
 import {
   soundEngine,
   playLockSound,
@@ -478,18 +479,6 @@ export const SettingsManager: React.FC = () => {
       shape: 'clover',
     },
     {
-      id: 'phone_install',
-      category: 'Apps, Cloud & Portability',
-      title: 'Phone Installation & Web Access',
-      subtitle: 'Install standalone app on Android or iOS, QR code, desktop PWA',
-      icon: <Smartphone className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />,
-      iconBg: 'bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200/80 dark:border-emerald-800/80',
-      fillClass: 'text-emerald-100/90 dark:text-emerald-950/80',
-      strokeClass: 'text-emerald-300/80 dark:text-emerald-800/80',
-      shape: 'cookie9',
-      badge: 'PWA Ready',
-    },
-    {
       id: 'export',
       category: 'Apps, Cloud & Portability',
       title: 'Universal Data Export Hub',
@@ -516,7 +505,7 @@ export const SettingsManager: React.FC = () => {
       id: 'profile',
       category: 'Personal & Security',
       title: 'Account Profile & Preferences',
-      subtitle: `${userProfile.name || 'Jivan User'} • Avatar, nickname, bio & 2FA protection`,
+      subtitle: `${userProfile.name || 'Guest'} • Avatar, nickname, bio & 2FA protection`,
       icon: <User className="w-5 h-5 text-purple-600 dark:text-purple-400" />,
       iconBg: 'bg-purple-50 dark:bg-purple-950/60 border border-purple-200/80 dark:border-purple-800/80',
       fillClass: 'text-purple-100/90 dark:text-purple-950/80',
@@ -589,7 +578,7 @@ export const SettingsManager: React.FC = () => {
                   Settings
                 </h1>
                 <p className="text-[11px] text-slate-500 dark:text-zinc-400 mt-0.5 truncate">
-                  Compact Material 4 / Material You, Cloud &amp; Security
+                  Material 3 Expressive, Cloud Sync &amp; Security
                 </p>
               </div>
             </div>
@@ -598,7 +587,12 @@ export const SettingsManager: React.FC = () => {
             <div className="flex items-center gap-0.5 p-0.5 rounded-full bg-slate-200/80 dark:bg-zinc-900 border border-slate-300/60 dark:border-zinc-800 shrink-0">
               <button
                 type="button"
-                onClick={() => setTheme('light')}
+                onClick={() => {
+                  if (theme !== 'light') {
+                    setTheme('light');
+                    showAndroidToast('Light mode');
+                  }
+                }}
                 className={`px-2 py-1 rounded-full text-[10.5px] font-bold flex items-center gap-1 transition cursor-pointer ${
                   theme === 'light'
                     ? 'bg-white text-slate-900 shadow-2xs'
@@ -610,7 +604,12 @@ export const SettingsManager: React.FC = () => {
               </button>
               <button
                 type="button"
-                onClick={() => setTheme('dark')}
+                onClick={() => {
+                  if (theme !== 'dark') {
+                    setTheme('dark');
+                    showAndroidToast('Dark mode');
+                  }
+                }}
                 className={`px-2 py-1 rounded-full text-[10.5px] font-bold flex items-center gap-1 transition cursor-pointer ${
                   theme === 'dark'
                     ? 'bg-indigo-600 text-white shadow-2xs'
@@ -667,21 +666,27 @@ export const SettingsManager: React.FC = () => {
                       sizeClass="w-11 h-11"
                     >
                       <span className="text-white font-extrabold text-sm">
-                        {(userProfile.name || 'U').charAt(0).toUpperCase()}
+                        {(userProfile.name || 'G').charAt(0).toUpperCase()}
                       </span>
                     </PetalShapeBadge>
                   )}
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <h3 className="text-sm font-bold text-slate-900 dark:text-white truncate group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition">
-                        {userProfile.name || 'Jivan Account'}
+                        {userProfile.name || 'Guest'}
                       </h3>
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300">
-                        {syncEmail ? 'Cloud Synced' : 'Local'}
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          syncEmail
+                            ? 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300'
+                            : 'bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300'
+                        }`}
+                      >
+                        {syncEmail ? 'Cloud Synced' : 'Sign In Required for Cloud'}
                       </span>
                     </div>
                     <p className="text-xs text-slate-500 dark:text-zinc-400 truncate mt-0.5">
-                      {userProfile.email || syncEmail || 'Tap to customize profile, avatar & 2FA'}
+                      {userProfile.email || syncEmail || 'Tap to sign in with your account & enable cloud sync'}
                     </p>
                   </div>
                 </div>
@@ -796,6 +801,75 @@ export const SettingsManager: React.FC = () => {
                   </div>
                 );
               })}
+
+              {/* About & Open Source Card */}
+              <div className="space-y-1 w-full min-w-0 pt-1">
+                <span className="text-[10.5px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 px-2.5 block">
+                  About &amp; Open Source
+                </span>
+                <div className="rounded-[22px] bg-white dark:bg-zinc-900 border border-slate-200/90 dark:border-zinc-800/90 p-3.5 sm:p-4 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-10 h-10 rounded-2xl bg-slate-900 dark:bg-zinc-800 border border-slate-800 dark:border-zinc-700 flex items-center justify-center shrink-0 shadow-xs">
+                      <svg viewBox="0 0 24 24" className="w-5.5 h-5.5 text-white" fill="none">
+                        <polygon
+                          points="12,2.2 20.5,7.1 20.5,16.9 12,21.8 3.5,16.9 3.5,7.1"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinejoin="round"
+                        />
+                        <polygon
+                          points="12,6.8 16.5,9.4 16.5,14.6 12,17.2 7.5,14.6 7.5,9.4"
+                          stroke="currentColor"
+                          strokeWidth="1.4"
+                          strokeLinejoin="round"
+                          opacity="0.72"
+                        />
+                        <line x1="12" y1="2.2" x2="12" y2="6.8" stroke="currentColor" strokeWidth="1.4" />
+                        <line x1="20.5" y1="7.1" x2="16.5" y2="9.4" stroke="currentColor" strokeWidth="1.4" />
+                        <line x1="20.5" y1="16.9" x2="16.5" y2="14.6" stroke="currentColor" strokeWidth="1.4" />
+                        <line x1="12" y1="21.8" x2="12" y2="17.2" stroke="currentColor" strokeWidth="1.4" />
+                        <line x1="3.5" y1="16.9" x2="7.5" y2="14.6" stroke="currentColor" strokeWidth="1.4" />
+                        <line x1="3.5" y1="7.1" x2="7.5" y2="9.4" stroke="currentColor" strokeWidth="1.4" />
+                        <circle cx="12" cy="12" r="1.6" fill="#e11d48" />
+                      </svg>
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">
+                          JivanOS Open-Source Project
+                        </h3>
+                        <span className="px-2 py-0.5 rounded-full text-[9.5px] font-bold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300">
+                          GrapheneOS Inspired
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-zinc-400 mt-0.5">
+                        Source code, issues, and signed in-place upgradable Android APK releases on GitHub
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                    <a
+                      href="https://github.com/Jaizm6/JivanOS"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-700 text-slate-800 dark:text-zinc-200 text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <span>GitHub Repo</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                    <a
+                      href="https://github.com/Jaizm6/JivanOS/releases/tag/latest-apk"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold shadow-2xs transition flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Download className="w-3 h-3" />
+                      <span>Latest Android APK</span>
+                    </a>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -843,83 +917,6 @@ export const SettingsManager: React.FC = () => {
               All Settings
             </button>
           </div>
-
-          {/* Dedicated Section Configuration */}
-          {activeSection === 'phone_install' && (
-            <div className="rounded-2xl border border-indigo-200/90 dark:border-indigo-800/80 bg-gradient-to-br from-indigo-50/40 via-white to-emerald-50/30 dark:from-slate-900 dark:via-slate-900 dark:to-emerald-950/20 p-3.5 sm:p-5 shadow-2xs space-y-3.5 w-full min-w-0 overflow-hidden">
-              <div className="flex flex-wrap items-center justify-between gap-2.5 pb-3 border-b border-indigo-100 dark:border-indigo-900/40">
-                <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                  <div className="w-8 h-8 rounded-xl bg-indigo-600/10 dark:bg-indigo-400/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
-                    <Smartphone className="w-4.5 h-4.5 stroke-[2.2]" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">
-                        Phone Installation &amp; Web Access
-                      </h3>
-                      <span className="px-1.5 py-0.5 rounded-full text-[9.5px] font-bold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
-                        Universal PWA
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Install as a standalone mobile app on Android or iOS, and access from any browser
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <a
-                    href={typeof window !== 'undefined' ? window.location.origin : '#'}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-2.5 py-1.5 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-white dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 text-[11px] font-semibold shadow-2xs transition flex items-center gap-1.5 cursor-pointer"
-                    title="Open Jivan in a clean standalone browser tab outside the AI Studio frame"
-                  >
-                    <span>Open Standalone</span>
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
-
-                  <button
-                    type="button"
-                    id="btn-settings-open-install-modal"
-                    onClick={() => setIsInstallModalOpen(true)}
-                    className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-[11px] font-bold shadow-2xs transition flex items-center gap-1.5 cursor-pointer shrink-0"
-                  >
-                    <Download className="w-3 h-3" />
-                    <span>Install / QR Code</span>
-                  </button>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
-                <div className="p-2.5 rounded-xl bg-white/90 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/80 space-y-1">
-                  <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1">
-                    📱 Android Phone
-                  </span>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Open link in Chrome &gt; tap &quot;Add to Home Screen&quot; or &quot;Install app&quot; for full standalone app experience.
-                  </p>
-                </div>
-
-                <div className="p-2.5 rounded-xl bg-white/90 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/80 space-y-1">
-                  <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1">
-                    🍏 iPhone &amp; iPad
-                  </span>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Open link in Safari &gt; tap Share button &gt; tap &quot;Add to Home Screen&quot;.
-                  </p>
-                </div>
-
-                <div className="p-2.5 rounded-xl bg-white/90 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/80 space-y-1">
-                  <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1">
-                    💻 Web Browser / PC
-                  </span>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Instant access in any modern desktop browser. Click the Install icon in the address bar.
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
 
           {activeSection === 'export' && (
             <UniversalExportHub />
@@ -1851,7 +1848,12 @@ export const SettingsManager: React.FC = () => {
                     <div className="flex items-center gap-1 p-1 rounded-xl bg-slate-100 dark:bg-zinc-800 border border-slate-200/80 dark:border-zinc-700 shrink-0">
                       <button
                         type="button"
-                        onClick={() => setTheme('light')}
+                        onClick={() => {
+                          if (theme !== 'light') {
+                            setTheme('light');
+                            showAndroidToast('Light mode');
+                          }
+                        }}
                         className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition cursor-pointer ${
                           theme === 'light'
                             ? 'bg-white text-slate-900 shadow-2xs'
@@ -1863,7 +1865,12 @@ export const SettingsManager: React.FC = () => {
                       </button>
                       <button
                         type="button"
-                        onClick={() => setTheme('dark')}
+                        onClick={() => {
+                          if (theme !== 'dark') {
+                            setTheme('dark');
+                            showAndroidToast('Dark mode');
+                          }
+                        }}
                         className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition cursor-pointer ${
                           theme === 'dark'
                             ? 'bg-indigo-600 text-white shadow-2xs'

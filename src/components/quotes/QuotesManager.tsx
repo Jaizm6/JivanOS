@@ -931,33 +931,37 @@ export const QuotesManager: React.FC = () => {
                 key={`${q.id}-${transitionStyle}`}
                 data-m3-tonal-card="true"
                 data-tonal-tone="neutral"
-                className={`group relative w-full min-w-0 overflow-hidden flex flex-col justify-between p-2 sm:p-2.5 ${petalRadius} sm:rounded-[18px] gap-1 transition-all duration-200 text-left ${
+                style={{
+                  borderLeftWidth: '2.5px',
+                  borderLeftColor: catTheme.hex,
+                }}
+                className={`group relative w-full min-w-0 overflow-hidden flex flex-col justify-between p-2.5 sm:p-3.5 lg:p-4 ${petalRadius} sm:rounded-[20px] lg:rounded-[22px] gap-1.5 sm:gap-2.5 transition-all duration-200 text-left hover:shadow-xs ${
                   isFocused ? 'ring-2 ring-indigo-500' : ''
                 }`}
               >
                 {/* Compact Material 3 Expressive Header: Petal Badge + Category & Unclipped Source + Index */}
                 <div className="flex items-center justify-between gap-1.5 min-w-0">
-                  <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
                     <PetalShapeBadge
                       shape={badgeShape}
-                      sizeClass="w-6 h-6"
+                      sizeClass="w-6 h-6 sm:w-7 sm:h-7"
                       fillColor={`${catTheme.hex}${isDark ? '26' : '18'}`}
                       strokeColor={`${catTheme.hex}${isDark ? '60' : '42'}`}
                     >
                       <Quote
-                        className="w-2.5 h-2.5"
+                        className="w-2.5 h-2.5 sm:w-3 sm:h-3"
                         style={{ color: catTheme.hex }}
                       />
                     </PetalShapeBadge>
-                    <div className="flex flex-wrap items-center gap-x-1 gap-y-0 min-w-0 flex-1 pr-1 leading-tight">
-                      <span className={`text-[10.5px] font-bold capitalize tracking-tight shrink-0 ${catTheme.text}`}>
+                    <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0 min-w-0 flex-1 pr-1 leading-tight">
+                      <span className={`text-[10.5px] sm:text-[11px] font-bold capitalize tracking-tight shrink-0 ${catTheme.text}`}>
                         {q.category}
                       </span>
                       {q.source && (
                         <>
                           <span aria-hidden="true" className="text-slate-300 dark:text-zinc-600 text-[10.5px] shrink-0">·</span>
                           <span
-                            className="text-[10.5px] font-medium text-slate-500 dark:text-zinc-400 break-words leading-tight"
+                            className="text-[10.5px] sm:text-[11px] font-medium text-slate-500 dark:text-zinc-400 break-words leading-tight"
                             title={q.source}
                           >
                             {q.source}
@@ -966,16 +970,16 @@ export const QuotesManager: React.FC = () => {
                       )}
                     </div>
                   </div>
-                  <span className="text-[10.5px] font-bold text-slate-500 dark:text-zinc-400 tabular-nums shrink-0">
+                  <span className="text-[10.5px] font-mono font-bold text-slate-400 dark:text-zinc-500 tabular-nums shrink-0">
                     #{quoteNum}
                   </span>
                 </div>
 
-                {/* Compact Editorial Quote Body */}
+                {/* Editorial Quote Body (Compact on phone, expressive on PC) */}
                 <p
-                  className="font-medium text-slate-900 dark:text-zinc-50 leading-[1.36] break-words px-0.5"
+                  className="font-medium text-slate-900 dark:text-zinc-50 leading-[1.38] sm:leading-[1.46] break-words px-0.5"
                   style={{
-                    fontSize: `${Math.max(0.78, quoteFontScale * 0.81)}rem`,
+                    fontSize: `${Math.max(0.8, quoteFontScale * 0.84)}rem`,
                     fontFamily: quoteFontFamily,
                   }}
                 >
@@ -983,8 +987,8 @@ export const QuotesManager: React.FC = () => {
                 </p>
 
                 {/* Slim Material 3 Tonal Action & Attribution Strip */}
-                <div className="flex items-center justify-between gap-1.5 px-2 py-0.5 rounded-[10px] bg-[#f4f7fc] dark:bg-zinc-900/90 min-w-0 w-full">
-                  <span className="text-[11px] font-bold text-slate-800 dark:text-zinc-200 truncate min-w-0 flex-1">
+                <div className="flex items-center justify-between gap-1.5 px-2.5 py-1 sm:py-1.5 rounded-[12px] bg-[#f4f7fc] dark:bg-zinc-900/90 border border-slate-200/60 dark:border-zinc-800/80 min-w-0 w-full">
+                  <span className="text-[11px] sm:text-[11.5px] font-bold text-slate-800 dark:text-zinc-200 truncate min-w-0 flex-1">
                     — {q.author}
                   </span>
 

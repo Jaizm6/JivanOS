@@ -1,7 +1,7 @@
 import React from 'react';
 import { Pill, Check, X, AlertTriangle, ArrowRight, Clock, Plus } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
-import { IconRenderer } from '../../common/IconRenderer';
+import { MedIconRenderer } from '../../medications/MedicationFormModal';
 
 export const MedsWidget: React.FC = () => {
   const { medications, doseLogs, logDose, setActiveTab } = useApp();
@@ -76,7 +76,7 @@ export const MedsWidget: React.FC = () => {
                   className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 font-bold text-xs"
                   style={{ backgroundColor: `${med.color}20`, color: med.color }}
                 >
-                  <IconRenderer icon={med.iconType} className="w-4 h-4" fallback={<Pill className="w-4 h-4" />} />
+                  <MedIconRenderer icon={med.iconType} className="w-4 h-4" />
                 </div>
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5 flex-wrap">

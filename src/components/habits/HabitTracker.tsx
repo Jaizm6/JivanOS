@@ -887,7 +887,7 @@ export const HabitTracker: React.FC = () => {
                             }}
                             onClick={() => setSelectedDetailHabit(habit)}
                             style={themeStyles.cardStyle}
-                            className={`group relative w-full min-w-0 max-w-full overflow-visible ${petalRadius} sm:rounded-[18px] transition-[opacity,border-color,box-shadow] duration-200 px-2 pt-1.5 pb-1.5 sm:px-2.5 sm:pt-2 sm:pb-1.5 flex flex-col cursor-pointer ${
+                            className={`group relative w-full min-w-0 max-w-full overflow-visible ${petalRadius} sm:rounded-[18px] lg:rounded-[22px] transition-[opacity,border-color,box-shadow,transform] duration-200 px-2 pt-1.5 pb-1.5 sm:px-3 sm:pt-2.5 sm:pb-2 lg:px-3.5 lg:py-3 flex flex-col cursor-pointer hover:shadow-xs ${
                               celebratingHabitId === habit.id ? 'z-20' : ''
                             } ${
                               !isScheduledForDate
@@ -899,25 +899,25 @@ export const HabitTracker: React.FC = () => {
                                 : ''
                             } ${habitSort === 'custom' ? 'cursor-grab active:cursor-grabbing' : ''}`}
                           >
-                            <div className="flex items-center justify-between gap-1.5 min-w-0 w-full">
+                            <div className="flex items-center justify-between gap-1.5 sm:gap-2.5 min-w-0 w-full">
                               {/* Left: Compact Material 3 Expressive Shape Icon, Title & Single-Line Metadata */}
-                              <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
+                              <div className="flex items-center gap-2 sm:gap-2.5 min-w-0 flex-1 overflow-hidden">
                                 <div className={isCheckedToday ? 'opacity-75 transition-opacity' : ''}>
                                   <PetalShapeBadge
                                     shape={getHabitExpressiveShape(habit.id, groupIdx * 3 + habitIdx)}
-                                    sizeClass="w-7 h-7"
+                                    sizeClass="w-7 h-7 sm:w-8 sm:h-8 lg:w-9 lg:h-9"
                                     fillColor={themeStyles.iconBox.backgroundColor as string | undefined}
                                     strokeColor={themeStyles.iconBox.borderColor as string | undefined}
                                   >
                                     <span style={{ color: themeStyles.iconBox.color }}>
-                                      <IconRenderer icon={habit.icon} className="w-3.5 h-3.5" fallback="🎯" />
+                                      <IconRenderer icon={habit.icon} className="w-3.5 h-3.5 sm:w-4 sm:h-4" fallback="🎯" />
                                     </span>
                                   </PetalShapeBadge>
                                 </div>
                                 <div className="min-w-0 flex-1 overflow-hidden">
-                                  <div className="flex items-center gap-1 min-w-0 w-full">
+                                  <div className="flex items-center gap-1.5 min-w-0 w-full">
                                     <h4
-                                      className={`font-bold text-[13px] sm:text-[13.5px] font-sans tracking-tight truncate min-w-0 leading-tight transition-colors ${
+                                      className={`font-bold text-[13px] sm:text-[13.5px] lg:text-[14.5px] font-sans tracking-tight truncate min-w-0 leading-tight transition-colors ${
                                         isCheckedToday
                                           ? 'text-slate-500 dark:text-zinc-400 line-through decoration-slate-400/50'
                                           : getSafeFontColor(habit.fontColor, isDarkMode) ? '' : 'text-slate-900 dark:text-white'
@@ -938,7 +938,7 @@ export const HabitTracker: React.FC = () => {
                                       </span>
                                     )}
                                   </div>
-                                  <div className="flex items-center gap-1 text-[10.5px] leading-none font-medium text-slate-500 dark:text-zinc-400 pt-0.5 flex-nowrap overflow-hidden min-w-0">
+                                  <div className="flex items-center gap-1 text-[10.5px] lg:text-[11px] leading-none font-medium text-slate-500 dark:text-zinc-400 pt-0.5 flex-nowrap overflow-hidden min-w-0">
                                     <AnimatedStreakBadge
                                       streak={habit.currentStreak || 0}
                                       isCompleted={isCheckedToday}
@@ -968,6 +968,26 @@ export const HabitTracker: React.FC = () => {
                                         </span>
                                       </>
                                     )}
+                                    {/* Desktop M3 Expressive 7-day consistency indicator */}
+                                    <div className="hidden lg:inline-flex items-center gap-0.5 ml-1 pl-1.5 border-l border-slate-200 dark:border-zinc-700/80 shrink-0" title={`${weekCompletedCount}/7 days completed this week`}>
+                                      {weekDays.map((wd) => {
+                                        const doneOnDay = Boolean(habit.completionHistory?.[wd.dateStr]);
+                                        return (
+                                          <span
+                                            key={wd.dateStr}
+                                            className={`w-1.5 h-1.5 rounded-full transition-colors ${
+                                              doneOnDay
+                                                ? ''
+                                                : 'bg-slate-200 dark:bg-zinc-700/80'
+                                            }`}
+                                            style={doneOnDay ? { backgroundColor: habitAccent } : undefined}
+                                          />
+                                        );
+                                      })}
+                                      <span className="text-[9.5px] font-mono font-bold text-slate-400 dark:text-zinc-500 ml-0.5 tabular-nums">
+                                        {weekCompletedCount}/7
+                                      </span>
+                                    </div>
                                     <span aria-hidden="true" className="opacity-45 shrink-0">·</span>
                                     <button
                                       type="button"

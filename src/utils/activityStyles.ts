@@ -177,7 +177,7 @@ export function getCardThemeStyles(accentColor?: string, _cardTheme?: string, pa
       accentColor: color,
       cardTheme: 'clean' as const,
       borderLeftColor: accentLeftColor,
-      borderLeftWidth: '3.5px',
+      borderLeftWidth: '2.5px',
       borderTopColor: neutralBorder,
       borderRightColor: neutralBorder,
       borderBottomColor: neutralBorder,
@@ -190,7 +190,7 @@ export function getCardThemeStyles(accentColor?: string, _cardTheme?: string, pa
         borderTopWidth: '1px',
         borderRightWidth: '1px',
         borderBottomWidth: '1px',
-        borderLeftWidth: '3.5px',
+        borderLeftWidth: '2.5px',
         borderTopColor: neutralBorder,
         borderRightColor: neutralBorder,
         borderBottomColor: neutralBorder,
@@ -219,10 +219,10 @@ export function getCardThemeStyles(accentColor?: string, _cardTheme?: string, pa
   const borderRightColor = boldBorderColor;
   const borderBottomColor = boldBorderColor;
 
-  const borderLeftWidth = '4px';
-  const borderTopWidth = '1.25px';
-  const borderRightWidth = '1.25px';
-  const borderBottomWidth = '1.25px';
+  const borderLeftWidth = '2.5px';
+  const borderTopWidth = '1px';
+  const borderRightWidth = '1px';
+  const borderBottomWidth = '1px';
 
   const cardStyle: React.CSSProperties = {
     borderTopWidth,

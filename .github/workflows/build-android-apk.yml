@@ -47,10 +47,22 @@ jobs:
           yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses > /dev/null 2>&1 || true
           "$SDKMANAGER" --sdk_root="$SDK_ROOT" "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
-      - name: Install Dependencies & Build Web App
+      - name: Install Dependencies, Generate GrapheneOS Icons & Build Web App
         run: |
           npm install --legacy-peer-deps
           npm install --no-save --legacy-peer-deps react-is postcss
+          node -e '
+            const sharp = require("sharp");
+            const fs = require("fs");
+            const svg = fs.readFileSync("public/icon.svg");
+            Promise.all([
+              sharp(svg).resize(64, 64).png().toFile("public/favicon.png"),
+              sharp(svg).resize(180, 180).png().toFile("public/apple-touch-icon.png"),
+              sharp(svg).resize(192, 192).png().toFile("public/pwa-192x192.png"),
+              sharp(svg).resize(512, 512).png().toFile("public/pwa-512x512.png"),
+              sharp(svg).resize(512, 512).png().toFile("public/pwa-maskable-512x512.png")
+            ]).then(() => console.log("Web & PWA icons generated from public/icon.svg"));
+          '
           npm run build
 
       - name: Package Web Bundle into Native Android Project (Capacitor 6)
@@ -61,9 +73,55 @@ jobs:
           cp "$GITHUB_WORKSPACE/capacitor.config.json" /tmp/cap-project/capacitor.config.json
           cd /tmp/cap-project
           npm init -y
-          npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
+          npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6 @capacitor/local-notifications@6
           npx cap add android
           npx cap sync android
+
+          # Apply GrapheneOS custom launcher icon across all Android mipmap densities
+          node -e '
+            const sharp = require("'"$GITHUB_WORKSPACE"'/node_modules/sharp");
+            const fs = require("fs");
+            const path = require("path");
+            const svg = fs.readFileSync("'"$GITHUB_WORKSPACE"'/public/icon.svg");
+            const resDir = "/tmp/cap-project/android/app/src/main/res";
+            const mipmaps = [
+              { dir: "mipmap-mdpi", size: 48, fg: 108 },
+              { dir: "mipmap-hdpi", size: 72, fg: 162 },
+              { dir: "mipmap-xhdpi", size: 96, fg: 216 },
+              { dir: "mipmap-xxhdpi", size: 144, fg: 324 },
+              { dir: "mipmap-xxxhdpi", size: 192, fg: 432 },
+            ];
+            (async () => {
+              for (const m of mipmaps) {
+                const targetDir = path.join(resDir, m.dir);
+                fs.mkdirSync(targetDir, { recursive: true });
+                await sharp(svg).resize(m.size, m.size).png().toFile(path.join(targetDir, "ic_launcher.png"));
+                await sharp(svg).resize(m.size, m.size).png().toFile(path.join(targetDir, "ic_launcher_round.png"));
+                await sharp(svg).resize(m.fg, m.fg).png().toFile(path.join(targetDir, "ic_launcher_foreground.png"));
+              }
+              const bgXml = path.join(resDir, "values/ic_launcher_background.xml");
+              if (fs.existsSync(bgXml)) {
+                fs.writeFileSync(bgXml, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<resources>\n    <color name=\"ic_launcher_background\">#090D16</color>\n</resources>\n");
+              }
+              console.log("Android native mipmap launcher icons updated with GrapheneOS emblem.");
+            })();
+          '
+
+          # Auto-increment versionCode & versionName and configure deterministic signing so APKs update in-place without uninstalling
+          VER_CODE=$((100 + ${GITHUB_RUN_NUMBER:-1}))
+          VER_NAME="2.1.${GITHUB_RUN_NUMBER:-1}"
+          BUILD_GRADLE="/tmp/cap-project/android/app/build.gradle"
+          if [ -f "$BUILD_GRADLE" ]; then
+            sed -i "s/versionCode 1/versionCode ${VER_CODE}/g" "$BUILD_GRADLE"
+            sed -i "s/versionName \"1.0\"/versionName \"${VER_NAME}\"/g" "$BUILD_GRADLE"
+          fi
+
+          # Ensure persistent deterministic debug keystore so every GitHub Actions build shares the same certificate
+          mkdir -p "$HOME/.android"
+          if [ -f "$GITHUB_WORKSPACE/android-signing/debug.keystore.b64" ]; then
+            base64 -d "$GITHUB_WORKSPACE/android-signing/debug.keystore.b64" > "$HOME/.android/debug.keystore"
+          fi
+
           MANIFEST="/tmp/cap-project/android/app/src/main/AndroidManifest.xml"
           if [ -f "$MANIFEST" ]; then
             sed -i 's|<application|<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.VIBRATE" />\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n    <application|g' "$MANIFEST"
@@ -90,5 +148,5 @@ jobs:
         run: |
           gh release delete latest-apk --yes --cleanup-tag 2>/dev/null || true
           gh release create latest-apk JivanOS.apk \
-            --title "JivanOS Android APK (Latest Build)" \
-            --notes "Download JivanOS.apk below under Assets on your Android phone and tap it to install."
+            --title "JivanOS Android APK (v2.1.${GITHUB_RUN_NUMBER:-1})" \
+            --notes "Download JivanOS.apk below under Assets on your Android phone and tap it to install or update in-place over your existing JivanOS app."

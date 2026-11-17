@@ -232,6 +232,8 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
   const [taskCelebrationKey, setTaskCelebrationKey] = useState<number>(0);
   const [completingTaskIds, setCompletingTaskIds] = useState<Set<string>>(new Set());
   const [fadingTaskIds, setFadingTaskIds] = useState<Set<string>>(new Set());
+  const [completingScheduleIds, setCompletingScheduleIds] = useState<Set<string>>(new Set());
+  const [fadingScheduleIds, setFadingScheduleIds] = useState<Set<string>>(new Set());
   const activeAnimTimeoutsRef = useRef<Record<string, NodeJS.Timeout[]>>({});
 
   // Cleanup timeouts on unmount
@@ -264,12 +266,15 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
         next.delete(taskId);
         return next;
       });
-      setAnimatingTaskId(prev => prev === taskId ? null : prev);
-      setCelebratingTaskId(prev => prev === taskId ? null : prev);
+      setAnimatingTaskId(prev => (prev === taskId ? null : prev));
+      setCelebratingTaskId(prev => (prev === taskId ? null : prev));
       toggleTask(taskId);
       haptics.toggle();
       return;
     }
+
+    // Prevent double-trigger while animation is already running
+    if (completingTaskIds.has(taskId)) return;
 
     // Clear any previous timers for this task
     if (activeAnimTimeoutsRef.current[taskId]) {
@@ -282,25 +287,97 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
       haptics.complete();
     } catch {}
 
-    // Snappy single-step visual tick + celebration badge, committing state in 280ms
+    // Step 1 (0ms): Fill circle + draw AnimatedCheckIcon + pulse ring + "Done✅" badge
     setAnimatingTaskId(taskId);
     setCelebratingTaskId(taskId);
     setTaskCelebrationKey(prev => prev + 1);
     setCompletingTaskIds(prev => new Set(prev).add(taskId));
 
-    const timeout = setTimeout(() => {
+    // Step 2 (500ms): Smoothly fade & slide task row out of active list
+    const fadeTimeout = setTimeout(() => {
+      setFadingTaskIds(prev => new Set(prev).add(taskId));
+    }, 500);
+
+    // Step 3 (760ms): Commit completion so task moves cleanly into Completed section
+    const commitTimeout = setTimeout(() => {
       toggleTask(taskId, { skipSound: true });
       setCompletingTaskIds(prev => {
         const next = new Set(prev);
         next.delete(taskId);
         return next;
       });
-      setAnimatingTaskId(prev => prev === taskId ? null : prev);
-      setCelebratingTaskId(prev => prev === taskId ? null : prev);
+      setFadingTaskIds(prev => {
+        const next = new Set(prev);
+        next.delete(taskId);
+        return next;
+      });
+      setAnimatingTaskId(prev => (prev === taskId ? null : prev));
+      setCelebratingTaskId(prev => (prev === taskId ? null : prev));
       delete activeAnimTimeoutsRef.current[taskId];
-    }, 280);
+    }, 760);
 
-    activeAnimTimeoutsRef.current[taskId] = [timeout];
+    activeAnimTimeoutsRef.current[taskId] = [fadeTimeout, commitTimeout];
+  };
+
+  const handleToggleScheduleWithAnim = (schedId: string) => {
+    const sched = scheduleItems.find(s => s.id === schedId);
+    if (!sched) return;
+    const key = `sched_${schedId}`;
+
+    if (sched.completed) {
+      if (activeAnimTimeoutsRef.current[key]) {
+        activeAnimTimeoutsRef.current[key].forEach(t => clearTimeout(t));
+        delete activeAnimTimeoutsRef.current[key];
+      }
+      setCompletingScheduleIds(prev => {
+        const next = new Set(prev);
+        next.delete(schedId);
+        return next;
+      });
+      setFadingScheduleIds(prev => {
+        const next = new Set(prev);
+        next.delete(schedId);
+        return next;
+      });
+      toggleScheduleItem(schedId);
+      haptics.toggle();
+      return;
+    }
+
+    if (completingScheduleIds.has(schedId)) return;
+
+    try {
+      soundEngine.playWaterDripNotification();
+      haptics.complete();
+    } catch {}
+
+    setAnimatingTaskId(key);
+    setCelebratingTaskId(key);
+    setTaskCelebrationKey(prev => prev + 1);
+    setCompletingScheduleIds(prev => new Set(prev).add(schedId));
+
+    const fadeTimeout = setTimeout(() => {
+      setFadingScheduleIds(prev => new Set(prev).add(schedId));
+    }, 500);
+
+    const commitTimeout = setTimeout(() => {
+      toggleScheduleItem(schedId);
+      setCompletingScheduleIds(prev => {
+        const next = new Set(prev);
+        next.delete(schedId);
+        return next;
+      });
+      setFadingScheduleIds(prev => {
+        const next = new Set(prev);
+        next.delete(schedId);
+        return next;
+      });
+      setAnimatingTaskId(prev => (prev === key ? null : prev));
+      setCelebratingTaskId(prev => (prev === key ? null : prev));
+      delete activeAnimTimeoutsRef.current[key];
+    }, 760);
+
+    activeAnimTimeoutsRef.current[key] = [fadeTimeout, commitTimeout];
   };
 
   const sortedStages = [...(workflowStages || [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
@@ -1190,8 +1267,9 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
   const matchesScheduleTab = useCallback((s: ScheduleItem, tab: 'all' | 'today' | 'upcoming' | 'completed' | 'date' | 'archived') => {
     if (tab === 'archived') return false;
     if (!matchesScheduleContext(s)) return false;
-    const isDone = Boolean(s.completed);
-    if (tab === 'completed') return isDone;
+    const isCompleting = completingScheduleIds.has(s.id);
+    const isDone = Boolean(s.completed) && !isCompleting;
+    if (tab === 'completed') return Boolean(s.completed) && !isCompleting;
     if (isDone) return false;
     if (tab === 'today') {
       return isScheduleItemOnDate(s, todayStr) || ((!s.repeatType || s.repeatType === 'none') && Boolean(s.date) && s.date <= todayStr);
@@ -1203,7 +1281,7 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
       return isScheduleItemOnDate(s, selectedTaskDate);
     }
     return true;
-  }, [matchesScheduleContext, todayStr, selectedTaskDate]);
+  }, [matchesScheduleContext, todayStr, selectedTaskDate, completingScheduleIds]);
 
   // Pre-computed memoized counts for filter buttons in a single pass
   const filterCounts = useMemo(() => {
@@ -2143,7 +2221,10 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
 
                 if (entry.kind === 'event') {
                   const sched = entry.event;
-                  const isVisuallyDone = Boolean(sched.completed);
+                  const schedAnimKey = `sched_${sched.id}`;
+                  const isCompletingSched = completingScheduleIds.has(sched.id);
+                  const isFadingSched = fadingScheduleIds.has(sched.id);
+                  const isVisuallyDone = Boolean(sched.completed) || isCompletingSched;
                   const rawP = (sched.priority || 'medium').toString().toUpperCase();
                   const pDisplay = rawP === 'HIGH' ? 'P1' : rawP === 'MEDIUM' ? 'P2' : rawP === 'LOW' ? 'P4' : rawP;
                   const pChipClass =
@@ -2183,8 +2264,14 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
                     <div
                       key={`event_${sched.id}`}
                       onClick={() => openEditEvent(sched)}
-                      className={`group border relative px-3 py-1.5 sm:px-3.5 sm:py-1.5 transition-all duration-150 cursor-pointer select-none ${groupRadiusClass} ${
-                        isVisuallyDone
+                      className={`group border relative px-3 py-1.5 sm:px-3.5 sm:py-1.5 transition-all duration-200 cursor-pointer select-none ${groupRadiusClass} ${
+                        isFadingSched
+                          ? 'opacity-0 translate-x-6 scale-[0.98] max-h-0 overflow-hidden py-0 my-0 border-transparent pointer-events-none'
+                          : ''
+                      } ${
+                        isCompletingSched
+                          ? 'border-emerald-400/80 dark:border-emerald-600/80 bg-emerald-50/75 dark:bg-emerald-950/30'
+                          : isVisuallyDone
                           ? 'border-slate-200/60 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/40 hover:bg-slate-50 dark:hover:bg-slate-800/50'
                           : isExpanded
                           ? 'border-indigo-200/90 dark:border-indigo-900/70 bg-white dark:bg-slate-900'
@@ -2192,20 +2279,43 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
                       }`}
                     >
                       <div className="flex items-start gap-2.5 w-full min-w-0">
-                        {/* Left Zone: 18px Priority Check Circle (P1 Rose, P2 Amber, P3 Blue, P4 Violet) */}
-                        <div className="flex items-center gap-1.5 shrink-0 h-[19px]">
+                        {/* Generous 40px touch/click zone centered on 20px Priority Check Circle */}
+                        <div className="relative flex items-center justify-center w-[20px] h-[20px] shrink-0">
+                          {celebratingTaskId === schedAnimKey && (
+                            <CheckmarkCelebration
+                              activeKey={taskCelebrationKey}
+                              badgeText="Done✔️"
+                              ringColor="border-blue-500"
+                              align="left"
+                            />
+                          )}
                           <motion.button
                             type="button"
-                            whileTap={{ scale: 0.84 }}
+                            whileTap={{ scale: 0.86 }}
+                            animate={animatingTaskId === schedAnimKey ? { scale: [1, 1.24, 0.92, 1] } : {}}
+                            transition={{ duration: 0.34, ease: 'easeOut' }}
+                            onPointerDown={e => e.stopPropagation()}
+                            onMouseDown={e => e.stopPropagation()}
+                            onTouchStart={e => e.stopPropagation()}
                             onClick={(e) => {
                               e.stopPropagation();
-                              toggleScheduleItem(sched.id);
-                              haptics.toggle();
+                              handleToggleScheduleWithAnim(sched.id);
                             }}
-                            className={`w-[18px] h-[18px] rounded-full flex items-center justify-center transition-all duration-150 shrink-0 cursor-pointer ${getTaskCheckboxPriorityClass({ priority: sched.priority, completed: sched.completed }, isVisuallyDone)}`}
+                            className="absolute -inset-2.5 flex items-center justify-center rounded-full cursor-pointer touch-manipulation z-10 hover:bg-slate-100/70 dark:hover:bg-slate-800/60 transition-colors"
                             title={`Time Block (${pDisplay}) — Click to toggle completion`}
+                            aria-label={isVisuallyDone ? 'Mark incomplete' : 'Mark complete'}
                           >
-                            {isVisuallyDone ? <Check className="w-3 h-3 text-white stroke-[3]" /> : null}
+                            <span
+                              className={`w-[20px] h-[20px] rounded-full flex items-center justify-center transition-all duration-150 ${getTaskCheckboxPriorityClass({ priority: sched.priority, completed: sched.completed }, isVisuallyDone)}`}
+                            >
+                              {isVisuallyDone ? (
+                                <AnimatedCheckIcon
+                                  className="w-3.5 h-3.5 text-white"
+                                  strokeWidth={3}
+                                  animate={animatingTaskId === schedAnimKey}
+                                />
+                              ) : null}
+                            </span>
                           </motion.button>
                         </div>
 
@@ -2419,9 +2529,9 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
                       }
                       openDetailTask(task);
                     }}
-                    className={`group border relative px-3 py-1.5 sm:px-3.5 sm:py-1.5 transition-all duration-150 cursor-pointer select-none ${groupRadiusClass} ${
+                    className={`group border relative px-3 py-1.5 sm:px-3.5 sm:py-1.5 transition-all duration-200 cursor-pointer select-none ${groupRadiusClass} ${
                       isFading
-                        ? 'opacity-0 translate-x-6 max-h-0 overflow-hidden py-0 my-0 border-transparent pointer-events-none transition-all duration-200'
+                        ? 'opacity-0 translate-x-6 scale-[0.98] max-h-0 overflow-hidden py-0 my-0 border-transparent pointer-events-none transition-all duration-250 ease-out'
                         : ''
                     } ${
                       draggedTaskId === task.id
@@ -2434,6 +2544,8 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
                         ? 'bg-indigo-50/80 dark:indigo-950/40 ring-2 ring-indigo-500/70 border-indigo-400'
                         : isTaskRunningInPiP
                         ? 'border-amber-400 dark:border-amber-500/80 ring-2 ring-amber-400/50 shadow-md bg-amber-50/20 dark:bg-amber-950/20'
+                        : completingTaskIds.has(task.id)
+                        ? 'border-emerald-400/80 dark:border-emerald-600/80 bg-emerald-50/75 dark:bg-emerald-950/30 ring-1 ring-emerald-400/35'
                         : isVisuallyDone
                         ? 'border-slate-200/60 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/40 hover:bg-slate-50 dark:hover:bg-slate-800/50'
                         : recentlyCreatedTaskId === task.id
@@ -2452,11 +2564,11 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
                     )}
 
                     {/* Two-Line Clean Task Layout:
-                        Line 1: [18px Check Circle] + [Task Title] + [Expand Chevron]
+                        Line 1: [40px tap target / 20px Check Circle] + [Task Title] + [Expand Chevron]
                         Line 2 (Bottom Separate Line): [Date & Time] + [Alarm Bell] + [Repeat Symbol] + [Subtask Counter 1/3] */}
                     <div className="flex items-start gap-2.5 w-full min-w-0">
-                      {/* Left Zone: 19px height box centering the 18px Priority Check Circle with the first line of text */}
-                      <div className="flex items-center gap-1.5 shrink-0 h-[19px]">
+                      {/* Left Zone: Generous 40px tap target around crisp 20px Priority Check Circle */}
+                      <div className="flex items-center gap-1.5 shrink-0 h-[20px]">
                         {isBulkSelectMode && (
                           <input
                             type="checkbox"
@@ -2467,7 +2579,7 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
                           />
                         )}
 
-                        <div className="relative flex items-center justify-center w-[18px] h-[18px] shrink-0">
+                        <div className="relative flex items-center justify-center w-[20px] h-[20px] shrink-0">
                           {celebratingTaskId === task.id && (
                             <CheckmarkCelebration
                               activeKey={taskCelebrationKey}
@@ -2478,23 +2590,31 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
                           )}
                           <motion.button
                             type="button"
-                            whileTap={{ scale: 0.84 }}
-                            animate={animatingTaskId === task.id ? { scale: [1, 1.24, 0.92, 1] } : {}}
-                            transition={{ duration: 0.32, ease: 'easeOut' }}
+                            whileTap={{ scale: 0.86 }}
+                            animate={animatingTaskId === task.id ? { scale: [1, 1.26, 0.92, 1] } : {}}
+                            transition={{ duration: 0.36, ease: 'easeOut' }}
+                            onPointerDown={e => e.stopPropagation()}
+                            onMouseDown={e => e.stopPropagation()}
+                            onTouchStart={e => e.stopPropagation()}
                             onClick={(e) => {
                               e.stopPropagation();
                               handleToggleTaskWithAnim(task.id);
                             }}
-                            className={`w-[18px] h-[18px] rounded-full flex items-center justify-center transition-all duration-150 shrink-0 cursor-pointer ${getTaskCheckboxPriorityClass(task, isVisuallyDone)}`}
+                            className="absolute -inset-2.5 flex items-center justify-center rounded-full cursor-pointer touch-manipulation z-10 hover:bg-slate-100/70 dark:hover:bg-slate-800/60 transition-colors"
                             title={`Priority: ${qLabel.name} — Click to toggle completion`}
+                            aria-label={isVisuallyDone ? 'Mark task incomplete' : 'Mark task complete'}
                           >
-                            {isVisuallyDone ? (
-                              <AnimatedCheckIcon
-                                className="w-3 h-3 text-white"
-                                strokeWidth={3}
-                                animate={animatingTaskId === task.id}
-                              />
-                            ) : null}
+                            <span
+                              className={`w-[20px] h-[20px] rounded-full flex items-center justify-center transition-all duration-150 ${getTaskCheckboxPriorityClass(task, isVisuallyDone)}`}
+                            >
+                              {isVisuallyDone ? (
+                                <AnimatedCheckIcon
+                                  className="w-3.5 h-3.5 text-white"
+                                  strokeWidth={3}
+                                  animate={animatingTaskId === task.id}
+                                />
+                              ) : null}
+                            </span>
                           </motion.button>
                         </div>
                       </div>
@@ -3001,14 +3121,21 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
                       className="flex items-center justify-between gap-2 px-2.5 py-1.5 hover:bg-white dark:hover:bg-slate-800/70 transition group"
                     >
                       <div className="flex items-center gap-2 min-w-0 flex-1">
-                        <button
-                          type="button"
-                          onClick={() => toggleTask(cTask.id)}
-                          title="Click to restore task"
-                          className="w-4 h-4 rounded-full bg-emerald-500/90 border border-emerald-500 text-white flex items-center justify-center shrink-0 cursor-pointer hover:bg-emerald-600 transition"
-                        >
-                          <Check className="w-2.5 h-2.5 stroke-[3]" />
-                        </button>
+                        <div className="relative w-[18px] h-[18px] shrink-0">
+                          <button
+                            type="button"
+                            onPointerDown={e => e.stopPropagation()}
+                            onMouseDown={e => e.stopPropagation()}
+                            onTouchStart={e => e.stopPropagation()}
+                            onClick={() => toggleTask(cTask.id)}
+                            title="Click to restore task"
+                            className="absolute -inset-2 flex items-center justify-center rounded-full cursor-pointer touch-manipulation hover:bg-emerald-500/10 transition"
+                          >
+                            <span className="w-[18px] h-[18px] rounded-full bg-emerald-500/90 border border-emerald-500 text-white flex items-center justify-center hover:bg-emerald-600 transition">
+                              <Check className="w-3 h-3 stroke-[3]" />
+                            </span>
+                          </button>
+                        </div>
 
                         <span
                           onClick={() => openDetailTask(cTask)}
@@ -3045,14 +3172,21 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
                       className="flex items-center justify-between gap-2 px-2.5 py-1.5 hover:bg-white dark:hover:bg-slate-800/70 transition group"
                     >
                       <div className="flex items-center gap-2 min-w-0 flex-1">
-                        <button
-                          type="button"
-                          onClick={() => toggleScheduleItem(cSched.id)}
-                          title="Click to restore time block"
-                          className="w-4 h-4 rounded-full bg-emerald-500/90 border border-emerald-500 text-white flex items-center justify-center shrink-0 cursor-pointer hover:bg-emerald-600 transition"
-                        >
-                          <Check className="w-2.5 h-2.5 stroke-[3]" />
-                        </button>
+                        <div className="relative w-[18px] h-[18px] shrink-0">
+                          <button
+                            type="button"
+                            onPointerDown={e => e.stopPropagation()}
+                            onMouseDown={e => e.stopPropagation()}
+                            onTouchStart={e => e.stopPropagation()}
+                            onClick={() => toggleScheduleItem(cSched.id)}
+                            title="Click to restore time block"
+                            className="absolute -inset-2 flex items-center justify-center rounded-full cursor-pointer touch-manipulation hover:bg-emerald-500/10 transition"
+                          >
+                            <span className="w-[18px] h-[18px] rounded-full bg-emerald-500/90 border border-emerald-500 text-white flex items-center justify-center hover:bg-emerald-600 transition">
+                              <Check className="w-3 h-3 stroke-[3]" />
+                            </span>
+                          </button>
+                        </div>
 
                         <span
                           onClick={() => openEditEvent(cSched)}

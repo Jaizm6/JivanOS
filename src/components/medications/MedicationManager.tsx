@@ -18,9 +18,8 @@ import {
 import { useApp } from '../../context/AppContext';
 import { Medication, MedicationFrequency } from '../../types';
 import { soundEngine } from '../../utils/audio';
-import { IconRenderer } from '../common/IconRenderer';
 import { MedicationDetailModal } from './MedicationDetailModal';
-import { MedicationFormModal } from './MedicationFormModal';
+import { MedicationFormModal, MedIconRenderer } from './MedicationFormModal';
 import { PetalShapeBadge, getPetalGroupRadiusClass } from '../common/PetalExpressive';
 import { ArchiveConfirmModal } from '../common/ArchiveConfirmModal';
 import { FORM_EASE, FORM_SPRING, FORM_EXIT_TRANSITION } from '../common/FormPrimitives';
@@ -487,10 +486,9 @@ export const MedicationManager: React.FC = () => {
                           strokeColor={`${accent}40`}
                         >
                           <span style={{ color: accent }}>
-                            <IconRenderer
+                            <MedIconRenderer
                               icon={med.iconType}
                               className="w-4 h-4"
-                              fallback={<Pill className="w-4 h-4" />}
                             />
                           </span>
                         </PetalShapeBadge>
@@ -537,14 +535,16 @@ export const MedicationManager: React.FC = () => {
                         >
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => setRefillMedId(med.id)}
-                          className="h-7 px-2 rounded-full bg-[#f5f7fb] dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 text-[10.5px] font-bold transition-colors cursor-pointer whitespace-nowrap"
-                          title="Refill Supply"
-                        >
-                          + Refill
-                        </button>
+                        {!med.endDate && (
+                          <button
+                            type="button"
+                            onClick={() => setRefillMedId(med.id)}
+                            className="h-7 px-2 rounded-full bg-[#f5f7fb] dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 text-[10.5px] font-bold transition-colors cursor-pointer whitespace-nowrap"
+                            title="Refill Supply"
+                          >
+                            + Refill
+                          </button>
+                        )}
                       </div>
                     </div>
 
@@ -622,54 +622,88 @@ export const MedicationManager: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Compact Tonal Stock & Supply Block */}
-                  <div
-                    data-m3-tonal-card="true"
-                    data-tonal-tone="subcard"
-                    className="px-2.5 py-1.5 rounded-[12px] space-y-1"
-                  >
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className="font-bold text-slate-700 dark:text-zinc-200">
-                        Supply
-                      </span>
-                      <span
-                        className={`font-bold tabular-nums ${
-                          isLowStock
-                            ? 'text-amber-600 dark:text-amber-400'
-                            : 'text-slate-700 dark:text-zinc-200'
-                        }`}
-                      >
-                        {med.remainingPills}/{med.totalPills} pills · ~{stats.daysRemaining}d left
-                      </span>
-                    </div>
-
-                    <div className="w-full bg-slate-200/90 dark:bg-zinc-800 rounded-full h-1.5 overflow-hidden">
+                  {/* Course Duration Block OR Compact Tonal Stock & Supply Block */}
+                  {med.endDate ? (() => {
+                    const startMs = new Date(`${med.startDate || todayStr}T00:00:00`).getTime();
+                    const endMs = new Date(`${med.endDate}T23:59:59`).getTime();
+                    const nowMs = Date.now();
+                    const totalCourseDays = Math.max(1, Math.ceil((endMs - startMs) / 86400000));
+                    const daysLeft = Math.max(0, Math.ceil((endMs - nowMs) / 86400000));
+                    const coursePct = Math.min(100, Math.max(5, Math.round(((totalCourseDays - daysLeft) / totalCourseDays) * 100)));
+                    return (
                       <div
-                        className="h-full rounded-full transition-[width] duration-300"
-                        style={{
-                          width: `${stockPct}%`,
-                          backgroundColor: isLowStock ? '#f59e0b' : accent,
-                        }}
-                      />
-                    </div>
-
-                    {isLowStock && (
-                      <div className="pt-1 border-t border-amber-500/20 flex items-center justify-between gap-2">
-                        <span className="text-[10.5px] font-semibold text-amber-700 dark:text-amber-300 truncate">
-                          Reorder by {stats.recommendedRefillDateStr}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => handleSendRefillReminder(med)}
-                          className="px-2 py-0.5 rounded-full bg-amber-600 hover:bg-amber-500 text-white font-bold text-[10px] transition-colors cursor-pointer shrink-0 flex items-center gap-1 whitespace-nowrap"
-                          title="Send notification reminder to refill"
-                        >
-                          <Bell className="w-2.5 h-2.5" />
-                          <span>Remind</span>
-                        </button>
+                        data-m3-tonal-card="true"
+                        data-tonal-tone="subcard"
+                        className="px-2.5 py-1.5 rounded-[12px] space-y-1"
+                      >
+                        <div className="flex items-center justify-between text-[11px]">
+                          <span className="font-bold text-violet-700 dark:text-violet-300">
+                            Course Deadline
+                          </span>
+                          <span className="font-bold tabular-nums text-slate-700 dark:text-zinc-200">
+                            Ends {med.endDate} · {daysLeft}d left
+                          </span>
+                        </div>
+                        <div className="w-full bg-slate-200/90 dark:bg-zinc-800 rounded-full h-1.5 overflow-hidden">
+                          <div
+                            className="h-full rounded-full transition-[width] duration-300"
+                            style={{
+                              width: `${coursePct}%`,
+                              backgroundColor: accent,
+                            }}
+                          />
+                        </div>
                       </div>
-                    )}
-                  </div>
+                    );
+                  })() : (
+                    <div
+                      data-m3-tonal-card="true"
+                      data-tonal-tone="subcard"
+                      className="px-2.5 py-1.5 rounded-[12px] space-y-1"
+                    >
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="font-bold text-slate-700 dark:text-zinc-200">
+                          Supply
+                        </span>
+                        <span
+                          className={`font-bold tabular-nums ${
+                            isLowStock
+                              ? 'text-amber-600 dark:text-amber-400'
+                              : 'text-slate-700 dark:text-zinc-200'
+                          }`}
+                        >
+                          {med.remainingPills}/{med.totalPills} pills · ~{stats.daysRemaining}d left
+                        </span>
+                      </div>
+
+                      <div className="w-full bg-slate-200/90 dark:bg-zinc-800 rounded-full h-1.5 overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-[width] duration-300"
+                          style={{
+                            width: `${stockPct}%`,
+                            backgroundColor: isLowStock ? '#f59e0b' : accent,
+                          }}
+                        />
+                      </div>
+
+                      {isLowStock && (
+                        <div className="pt-1 border-t border-amber-500/20 flex items-center justify-between gap-2">
+                          <span className="text-[10.5px] font-semibold text-amber-700 dark:text-amber-300 truncate">
+                            Reorder by {stats.recommendedRefillDateStr}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleSendRefillReminder(med)}
+                            className="px-2 py-0.5 rounded-full bg-amber-600 hover:bg-amber-500 text-white font-bold text-[10px] transition-colors cursor-pointer shrink-0 flex items-center gap-1 whitespace-nowrap"
+                            title="Send notification reminder to refill"
+                          >
+                            <Bell className="w-2.5 h-2.5" />
+                            <span>Remind</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -713,10 +747,9 @@ export const MedicationManager: React.FC = () => {
                             strokeColor={`${med.color || '#3b82f6'}38`}
                           >
                             <span style={{ color: med.color || '#3b82f6' }}>
-                              <IconRenderer
+                              <MedIconRenderer
                                 icon={med.iconType}
                                 className="w-3.5 h-3.5"
-                                fallback={<Pill className="w-3.5 h-3.5" />}
                               />
                             </span>
                           </PetalShapeBadge>
@@ -925,10 +958,9 @@ export const MedicationManager: React.FC = () => {
                       strokeColor={`${accent}40`}
                     >
                       <span style={{ color: accent }}>
-                        <IconRenderer
+                        <MedIconRenderer
                           icon={med.iconType}
                           className="w-4.5 h-4.5"
-                          fallback={<Pill className="w-4.5 h-4.5" />}
                         />
                       </span>
                     </PetalShapeBadge>

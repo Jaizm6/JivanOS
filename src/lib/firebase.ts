@@ -9,6 +9,11 @@ import {
 } from 'firebase/auth';
 import {
   getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  memoryLocalCache,
+  Firestore,
   doc,
   setDoc,
   getDoc,
@@ -23,9 +28,35 @@ export const auth = getAuth(app);
 
 // Use the databaseId provisioned in firebase-applet-config.json
 const firestoreDbId = (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
-export const db = firestoreDbId && firestoreDbId !== '(default)'
-  ? getFirestore(app, firestoreDbId)
-  : getFirestore(app);
+const targetDbId = firestoreDbId && firestoreDbId !== '(default)' ? firestoreDbId : undefined;
+
+function createResilientFirestore(): Firestore {
+  try {
+    return initializeFirestore(
+      app,
+      {
+        experimentalAutoDetectLongPolling: true,
+        localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+      },
+      targetDbId
+    );
+  } catch {
+    try {
+      return initializeFirestore(
+        app,
+        {
+          experimentalAutoDetectLongPolling: true,
+          localCache: memoryLocalCache(),
+        },
+        targetDbId
+      );
+    } catch {
+      return targetDbId ? getFirestore(app, targetDbId) : getFirestore(app);
+    }
+  }
+}
+
+export const db = createResilientFirestore();
 
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
@@ -90,6 +121,50 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   throw new Error(JSON.stringify(errInfo));
 }
 
+function isTransientFirestoreError(error: any): boolean {
+  const code = String(error?.code || '').toLowerCase();
+  const msg = String(error?.message || '').toLowerCase();
+  return (
+    code === 'unavailable' ||
+    code === 'deadline-exceeded' ||
+    code === 'resource-exhausted' ||
+    code === 'aborted' ||
+    code === 'cancelled' ||
+    msg.includes('temporarily unavailable') ||
+    msg.includes('exponential backoff') ||
+    msg.includes('offline') ||
+    msg.includes('failed to fetch') ||
+    msg.includes('network')
+  );
+}
+
+async function withExponentialBackoff<T>(
+  operation: () => Promise<T>,
+  maxRetries = 3,
+  baseDelayMs = 600
+): Promise<T> {
+  let lastError: any;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error: any) {
+      lastError = error;
+      if (
+        attempt === maxRetries ||
+        error?.code === 'permission-denied' ||
+        error?.message?.includes('permission') ||
+        !isTransientFirestoreError(error)
+      ) {
+        throw error;
+      }
+      const jitter = Math.floor(Math.random() * 250);
+      const delayMs = baseDelayMs * Math.pow(2, attempt) + jitter;
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+  throw lastError;
+}
+
 /**
  * Persist app payload snapshot directly to Firestore
  */
@@ -97,17 +172,30 @@ export async function saveUserDataToFirestore(userId: string, data: any): Promis
   const path = `users/${userId}`;
   try {
     if (!userId) return false;
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return false;
+    }
     const docRef = doc(db, 'users', userId);
-    await setDoc(docRef, {
-      ...data,
-      updatedAt: new Date().toISOString(),
-    }, { merge: true });
+    await withExponentialBackoff(() =>
+      setDoc(
+        docRef,
+        {
+          ...data,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      )
+    );
     return true;
   } catch (error: any) {
     if (error?.code === 'permission-denied' || error?.message?.includes('permission')) {
       handleFirestoreError(error, OperationType.WRITE, path);
     }
-    console.error('Error saving data to Firestore:', error);
+    if (isTransientFirestoreError(error)) {
+      console.warn('Firestore temporarily unavailable during save; cached locally for sync.');
+      return false;
+    }
+    console.warn('Firestore save warning:', error?.message || error);
     return false;
   }
 }
@@ -119,8 +207,11 @@ export async function getUserDataFromFirestore(userId: string): Promise<any | nu
   const path = `users/${userId}`;
   try {
     if (!userId) return null;
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return null;
+    }
     const docRef = doc(db, 'users', userId);
-    const snap = await getDoc(docRef);
+    const snap = await withExponentialBackoff(() => getDoc(docRef));
     if (snap.exists()) {
       return snap.data();
     }
@@ -129,7 +220,11 @@ export async function getUserDataFromFirestore(userId: string): Promise<any | nu
     if (error?.code === 'permission-denied' || error?.message?.includes('permission')) {
       handleFirestoreError(error, OperationType.GET, path);
     }
-    console.error('Error fetching data from Firestore:', error);
+    if (isTransientFirestoreError(error)) {
+      console.warn('Firestore temporarily unavailable during fetch; falling back to local cache.');
+      return null;
+    }
+    console.warn('Firestore fetch warning:', error?.message || error);
     return null;
   }
 }

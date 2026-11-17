@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { Medication, DoseLog } from '../../types';
 import { useApp } from '../../context/AppContext';
-import { IconRenderer } from '../common/IconRenderer';
+import { MedIconRenderer } from './MedicationFormModal';
 import { CardCalendarButton } from '../common/CardReminderCalendarModal';
 import { PetalShapeBadge, getPetalGroupRadiusClass } from '../common/PetalExpressive';
 import { ArchiveConfirmModal } from '../common/ArchiveConfirmModal';
@@ -111,10 +111,9 @@ export const MedicationDetailModal: React.FC<MedicationDetailModalProps> = ({
               strokeColor={`${accent}40`}
             >
               <span style={{ color: accent }}>
-                <IconRenderer
+                <MedIconRenderer
                   icon={medication.iconType}
                   className="w-4.5 h-4.5"
-                  fallback={<Pill className="w-4.5 h-4.5" />}
                 />
               </span>
             </PetalShapeBadge>

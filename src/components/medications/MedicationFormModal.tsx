@@ -58,8 +58,22 @@ export const MedIconRenderer: React.FC<{
       return <Syringe className={className} />;
     case 'inhaler':
       return <Wind className={className} />;
-    case 'capsule':
     case 'pill':
+      return (
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.1"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className={className}
+        >
+          <circle cx="12" cy="12" r="8.5" />
+          <line x1="6.3" y1="17.7" x2="17.7" y2="6.3" />
+        </svg>
+      );
+    case 'capsule':
     default:
       return <Pill className={className} />;
   }
@@ -160,6 +174,15 @@ export const MedicationFormModal: React.FC<MedicationFormModalProps> = ({
     } else if (freq === 'as_needed') {
       setSchedules([]);
     }
+  };
+
+  const applyCourseDaysPreset = (days: number) => {
+    const base = startDate ? new Date(`${startDate}T00:00:00`) : new Date();
+    base.setDate(base.getDate() + days);
+    const yyyy = base.getFullYear();
+    const mm = String(base.getMonth() + 1).padStart(2, '0');
+    const dd = String(base.getDate()).padStart(2, '0');
+    setEndDate(`${yyyy}-${mm}-${dd}`);
   };
 
   const handleSave = () => {
@@ -279,7 +302,8 @@ export const MedicationFormModal: React.FC<MedicationFormModalProps> = ({
                 )
               ) : (
                 <div className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400 truncate tabular-nums">
-                  {dosage} · {freqLabelMap[frequency] || frequency} · {remainingPills} left
+                  {dosage} · {freqLabelMap[frequency] || frequency} ·{' '}
+                  {endDate ? `Until ${endDate}` : `${remainingPills} left`}
                 </div>
               )}
             </div>
@@ -375,7 +399,7 @@ export const MedicationFormModal: React.FC<MedicationFormModalProps> = ({
             label="Form & Instructions"
             value={
               <span className="capitalize">
-                {iconType} · {dosage} ({instructions})
+                {iconType === 'pill' ? 'Tablet (Pill)' : iconType} · {dosage} ({instructions})
               </span>
             }
             onClick={() => setActivePopup('dosage')}
@@ -387,7 +411,9 @@ export const MedicationFormModal: React.FC<MedicationFormModalProps> = ({
             iconBgClass="bg-violet-500/10 text-violet-600 dark:text-violet-400"
             iconShape="clover"
             label="Frequency & Course"
-            value={`${freqLabelMap[frequency] || frequency}${endDate ? ` · Until ${endDate}` : ''}`}
+            value={`${freqLabelMap[frequency] || frequency}${
+              endDate ? ` · Course until ${endDate}` : ' · Ongoing'
+            }`}
             onClick={() => setActivePopup('frequency')}
           />
 
@@ -411,20 +437,22 @@ export const MedicationFormModal: React.FC<MedicationFormModalProps> = ({
             onClick={() => setActivePopup('schedule')}
           />
 
-          {/* 4. Pill Inventory & Refill Threshold */}
-          <FormDisclosureRow
-            icon={<Package size={14} />}
-            iconBgClass="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-            iconShape="arch"
-            label="Stock & Refill Tracker"
-            value={`${remainingPills}/${totalPills} left (Alert ≤ ${refillThreshold})`}
-            valueClass={
-              remainingPills <= refillThreshold
-                ? 'text-amber-600 dark:text-amber-400 font-bold tabular-nums'
-                : 'text-emerald-600 dark:text-emerald-400 font-bold tabular-nums'
-            }
-            onClick={() => setActivePopup('inventory')}
-          />
+          {/* 4. Pill Inventory & Refill Threshold (Hidden when Fixed Course / End Date is active) */}
+          {!endDate && (
+            <FormDisclosureRow
+              icon={<Package size={14} />}
+              iconBgClass="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+              iconShape="arch"
+              label="Stock & Refill Tracker"
+              value={`${remainingPills}/${totalPills} left (Alert ≤ ${refillThreshold})`}
+              valueClass={
+                remainingPills <= refillThreshold
+                  ? 'text-amber-600 dark:text-amber-400 font-bold tabular-nums'
+                  : 'text-emerald-600 dark:text-emerald-400 font-bold tabular-nums'
+              }
+              onClick={() => setActivePopup('inventory')}
+            />
+          )}
         </FormSectionGroup>
       </UnifiedFormModal>
 
@@ -459,7 +487,7 @@ export const MedicationFormModal: React.FC<MedicationFormModalProps> = ({
             <div className="grid grid-cols-5 gap-1.5">
               {(
                 [
-                  { id: 'pill', label: 'Pill' },
+                  { id: 'pill', label: 'Tablet' },
                   { id: 'capsule', label: 'Capsule' },
                   { id: 'drop', label: 'Drops' },
                   { id: 'injection', label: 'Syringe' },
@@ -633,29 +661,84 @@ export const MedicationFormModal: React.FC<MedicationFormModalProps> = ({
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-2.5">
-            <div>
-              <label className="text-[10px] uppercase font-bold tracking-wider text-zinc-400 mb-1 block">
-                Start Date
+          {/* Course Mode: Ongoing vs Fixed Course / Deadline */}
+          <div className="space-y-2.5 pt-1 border-t border-zinc-200/60 dark:border-zinc-800">
+            <div className="flex items-center justify-between">
+              <label className="text-[10px] uppercase font-bold tracking-wider text-zinc-400">
+                Course Duration Mode
               </label>
-              <input
-                type="date"
-                value={startDate}
-                onChange={e => setStartDate(e.target.value)}
-                className="w-full px-3 py-2 rounded-[14px] bg-[#f3f5fa] dark:bg-[#111116] text-xs font-bold text-zinc-900 dark:text-white outline-none"
-              />
+              <div className="inline-flex p-0.5 rounded-full bg-[#f3f5fa] dark:bg-[#111116]">
+                <button
+                  type="button"
+                  onClick={() => setEndDate('')}
+                  className={`px-2.5 py-1 rounded-full text-[10.5px] font-bold transition cursor-pointer ${
+                    !endDate
+                      ? 'bg-indigo-600 text-white shadow-2xs'
+                      : 'text-zinc-500 dark:text-zinc-400'
+                  }`}
+                >
+                  Ongoing (Refill)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!endDate) applyCourseDaysPreset(7);
+                  }}
+                  className={`px-2.5 py-1 rounded-full text-[10.5px] font-bold transition cursor-pointer ${
+                    endDate
+                      ? 'bg-indigo-600 text-white shadow-2xs'
+                      : 'text-zinc-500 dark:text-zinc-400'
+                  }`}
+                >
+                  Fixed Course / Deadline
+                </button>
+              </div>
             </div>
-            <div>
-              <label className="text-[10px] uppercase font-bold tracking-wider text-zinc-400 mb-1 block">
-                End Date (Optional)
-              </label>
-              <input
-                type="date"
-                value={endDate}
-                onChange={e => setEndDate(e.target.value)}
-                className="w-full px-3 py-2 rounded-[14px] bg-[#f3f5fa] dark:bg-[#111116] text-xs font-bold text-zinc-900 dark:text-white outline-none"
-              />
+
+            {endDate && (
+              <div className="flex flex-wrap gap-1.5">
+                {[3, 5, 7, 10, 14, 30].map(d => (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => applyCourseDaysPreset(d)}
+                    className="px-2.5 py-1 rounded-full bg-violet-50 dark:bg-violet-950/40 hover:bg-violet-100 dark:hover:bg-violet-900/50 text-violet-700 dark:text-violet-300 text-[10.5px] font-bold transition cursor-pointer"
+                  >
+                    {d} Days
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-2.5">
+              <div>
+                <label className="text-[10px] uppercase font-bold tracking-wider text-zinc-400 mb-1 block">
+                  Start Date
+                </label>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={e => setStartDate(e.target.value)}
+                  className="w-full px-3 py-2 rounded-[14px] bg-[#f3f5fa] dark:bg-[#111116] text-xs font-bold text-zinc-900 dark:text-white outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] uppercase font-bold tracking-wider text-zinc-400 mb-1 block">
+                  {endDate ? 'Course End Date' : 'End Date (Optional)'}
+                </label>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={e => setEndDate(e.target.value)}
+                  className="w-full px-3 py-2 rounded-[14px] bg-[#f3f5fa] dark:bg-[#111116] text-xs font-bold text-zinc-900 dark:text-white outline-none"
+                />
+              </div>
             </div>
+            {endDate && (
+              <p className="text-[11px] text-violet-600 dark:text-violet-400 font-medium">
+                Fixed course active: Stock &amp; Refill Tracker is hidden and replaced with a Course Deadline countdown.
+              </p>
+            )}
           </div>
         </div>
       </UnifiedSubModal>
