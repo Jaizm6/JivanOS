@@ -15,7 +15,12 @@
 
 import { JoplinSyncSettings, SyncDriveConfig, SyncDriveId, UserProfile } from '../types';
 import { encryptText, decryptText } from './crypto';
-import { saveUserDataToFirestore, getUserDataFromFirestore, firebaseConfig } from '../lib/firebase';
+import {
+  saveUserDataToFirestore,
+  getUserDataFromFirestore,
+  getInMemoryGDriveToken,
+  isRunningInIframe,
+} from '../lib/firebase';
 
 export const DEFAULT_JOPLIN_SYNC_SETTINGS: JoplinSyncSettings = {
   primaryTarget: 'none',
@@ -57,7 +62,7 @@ export const DEFAULT_JOPLIN_SYNC_SETTINGS: JoplinSyncSettings = {
       enabled: false,
       autoBackupEnabled: false,
       label: 'Google Drive',
-      clientId: (firebaseConfig as any)?.oAuthClientId || '',
+      clientId: '',
       accessToken: '',
       lastStatus: 'idle',
     },
@@ -161,12 +166,19 @@ export async function getSavedDirectoryHandle(): Promise<any | null> {
 
 export async function pickLocalSyncDirectory(): Promise<{ success: boolean; folderName?: string; error?: string }> {
   try {
+    if (isRunningInIframe()) {
+      return {
+        success: false,
+        error:
+          'Local folder access is blocked inside embedded preview frames. Open JivanOS in a full browser tab, or use JivanOS Private Vault / Google Drive.',
+      };
+    }
     const win = window as any;
     if (typeof win.showDirectoryPicker !== 'function') {
       return {
         success: false,
         error:
-          'Direct folder access requires Chromium/Edge/Android Chrome outside restricted iframes. Open the app in a full browser tab or use WebDAV/OneDrive/Google Drive.',
+          'Direct folder access requires Chromium/Edge/Android Chrome outside embedded frames. Use JivanOS Private Vault or Google Drive here.',
       };
     }
     const dirHandle = await win.showDirectoryPicker({
@@ -604,6 +616,10 @@ async function oneDrivePush(cfg: SyncDriveConfig, content: string, fileName = 'j
   return true;
 }
 
+function resolveGoogleDriveToken(cfg: SyncDriveConfig): string {
+  return (cfg.accessToken || getInMemoryGDriveToken() || '').trim();
+}
+
 async function googleDriveFindSyncFile(token: string, fileName = 'jivanos-sync.json'): Promise<string | null> {
   const q = encodeURIComponent(`name = '${fileName}' and trashed = false`);
   const res = await fetch(
@@ -613,7 +629,7 @@ async function googleDriveFindSyncFile(token: string, fileName = 'jivanos-sync.j
     }
   );
   if (!res.ok) {
-    throw new Error(`Google Drive HTTP ${res.status}: Please reconnect your Google Drive token.`);
+    throw new Error(`Google Drive HTTP ${res.status}: Please reconnect Google Drive.`);
   }
   const data = await res.json();
   if (Array.isArray(data.files) && data.files.length > 0) {
@@ -623,19 +639,20 @@ async function googleDriveFindSyncFile(token: string, fileName = 'jivanos-sync.j
 }
 
 async function googleDrivePull(cfg: SyncDriveConfig): Promise<string | null> {
-  if (!cfg.accessToken) throw new Error('Google Drive access token not connected.');
-  const fileId = await googleDriveFindSyncFile(cfg.accessToken, 'jivanos-sync.json');
+  const token = resolveGoogleDriveToken(cfg);
+  if (!token) throw new Error('Google Drive is not connected for this session. Click Sign in with Google first.');
+  const fileId = await googleDriveFindSyncFile(token, 'jivanos-sync.json');
   if (!fileId) return null;
   const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
-    headers: { Authorization: `Bearer ${cfg.accessToken.trim()}` },
+    headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) return null;
   return await res.text();
 }
 
 async function googleDrivePush(cfg: SyncDriveConfig, content: string, fileName = 'jivanos-sync.json'): Promise<boolean> {
-  if (!cfg.accessToken) throw new Error('Google Drive access token not connected.');
-  const token = cfg.accessToken.trim();
+  const token = resolveGoogleDriveToken(cfg);
+  if (!token) throw new Error('Google Drive is not connected for this session. Click Sign in with Google first.');
   const existingId = fileName === 'jivanos-sync.json' ? await googleDriveFindSyncFile(token, fileName) : null;
 
   if (existingId) {
@@ -768,14 +785,14 @@ export async function fetchServerOAuthDefaults(): Promise<{
     if (res.ok) {
       const data = await res.json();
       return {
-        gdriveClientId: data.gdriveClientId || (firebaseConfig as any)?.oAuthClientId || '',
+        gdriveClientId: data.gdriveClientId || '',
         onedriveClientId: data.onedriveClientId || '',
         dropboxClientId: data.dropboxClientId || '',
       };
     }
   } catch {}
   return {
-    gdriveClientId: (firebaseConfig as any)?.oAuthClientId || '',
+    gdriveClientId: '',
     onedriveClientId: '',
     dropboxClientId: '',
   };
@@ -1038,19 +1055,20 @@ export async function testDriveConnection(
         };
       }
       case 'gdrive': {
-        if (!cfg.accessToken?.trim()) {
-          return { success: false, message: 'Google Drive is not connected yet. Connect via OAuth Popup or paste an Access Token.' };
+        const token = resolveGoogleDriveToken(cfg);
+        if (!token) {
+          return { success: false, message: 'Google Drive is not connected for this session. Click Sign in with Google first.' };
         }
         const res = await fetch('https://www.googleapis.com/drive/v3/about?fields=user', {
-          headers: { Authorization: `Bearer ${cfg.accessToken.trim()}` },
+          headers: { Authorization: `Bearer ${token}` },
         });
         if (!res.ok) {
-          return { success: false, message: `Google Drive rejected token (HTTP ${res.status}). Reconnect OAuth or paste a fresh token.` };
+          return { success: false, message: `Google Drive authorization expired (HTTP ${res.status}). Sign in with Google again to reconnect.` };
         }
         const data = await res.json();
         return {
           success: true,
-          message: `Success! Google Drive reachable (${data.user?.emailAddress || data.user?.displayName || 'Authorized'}).`,
+          message: `Connected to Google Drive (${data.user?.emailAddress || data.user?.displayName || 'Authorized'}).`,
         };
       }
       case 'dropbox': {

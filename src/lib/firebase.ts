@@ -76,6 +76,41 @@ testConnection();
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
+export const GOOGLE_DRIVE_SCOPES = ['https://www.googleapis.com/auth/drive.file'] as const;
+export const googleDriveProvider = new GoogleAuthProvider();
+GOOGLE_DRIVE_SCOPES.forEach((scope) => googleDriveProvider.addScope(scope));
+googleDriveProvider.setCustomParameters({ prompt: 'select_account' });
+
+// Strict in-memory cache for Google Workspace OAuth access tokens (never stored in localStorage/sessionStorage)
+let cachedGDriveAccessToken: string | null = null;
+let cachedGDriveEmail: string | null = null;
+
+onAuthStateChanged(auth, (user) => {
+  if (!user) {
+    cachedGDriveAccessToken = null;
+    cachedGDriveEmail = null;
+  }
+});
+
+export function getInMemoryGDriveToken(): string | null {
+  return cachedGDriveAccessToken;
+}
+
+export function getInMemoryGDriveEmail(): string | null {
+  return cachedGDriveEmail;
+}
+
+export function setInMemoryGDriveToken(token: string | null, email?: string | null): void {
+  const clean = token ? token.trim() : '';
+  cachedGDriveAccessToken = clean || null;
+  cachedGDriveEmail = clean ? (email ?? cachedGDriveEmail) : null;
+}
+
+export function clearInMemoryGDriveToken(): void {
+  cachedGDriveAccessToken = null;
+  cachedGDriveEmail = null;
+}
+
 export function isRunningInIframe(): boolean {
   try {
     return typeof window !== 'undefined' && window.self !== window.top;
@@ -135,6 +170,57 @@ export async function signInWithGoogle(): Promise<FirebaseUser | null> {
     }
     if (code === 'auth/popup-closed-by-user') {
       throw new Error('Google sign-in window was closed before completing.');
+    }
+    throw error;
+  }
+}
+
+/**
+ * Connect Google Drive via Firebase Auth GoogleAuthProvider using least-privilege drive.file scope.
+ * Avoids redirect_uri_mismatch on dynamic preview URLs and keeps the access token strictly in memory.
+ */
+export async function connectGoogleDriveWithFirebase(): Promise<{
+  accessToken: string;
+  user: FirebaseUser;
+  email: string;
+}> {
+  if (isCapacitorNative()) {
+    throw new Error(
+      'Google Drive sign-in popup is restricted inside the Android APK WebView. Open JivanOS in your mobile browser to sync Google Drive, or use JivanOS Private Vault / Syncthing Folder on Android.'
+    );
+  }
+
+  try {
+    const result = await signInWithPopup(auth, googleDriveProvider);
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    if (!credential?.accessToken) {
+      throw new Error(
+        'Google Drive permission was not returned. Please grant Google Drive file access when signing in.'
+      );
+    }
+    cachedGDriveAccessToken = credential.accessToken;
+    cachedGDriveEmail = result.user?.email || '';
+    return {
+      accessToken: cachedGDriveAccessToken,
+      user: result.user,
+      email: cachedGDriveEmail,
+    };
+  } catch (error: any) {
+    const code = String(error?.code || '');
+    console.error('Google Drive Firebase Auth error:', code, error);
+
+    if (code === 'auth/popup-blocked') {
+      throw new Error(
+        'Google Drive sign-in popup was blocked by your browser. Please allow popups for this site and try again.'
+      );
+    }
+    if (code === 'auth/popup-closed-by-user') {
+      throw new Error('Google Drive sign-in window was closed before completing.');
+    }
+    if (code === 'auth/unauthorized-domain') {
+      throw new Error(
+        `Domain "${window.location.hostname}" is not authorized for Google Sign-In. Use JivanOS Private Vault or Local Folder instead.`
+      );
     }
     throw error;
   }

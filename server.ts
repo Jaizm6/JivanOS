@@ -151,7 +151,7 @@ async function startServer() {
   // Expose public OAuth Client IDs configured on server/project (never secrets)
   app.get('/api/sync/oauth-config', (_req, res) => {
     res.json({
-      gdriveClientId: process.env.GOOGLE_DRIVE_CLIENT_ID || getFirebaseOAuthClientId() || '',
+      gdriveClientId: process.env.GOOGLE_DRIVE_CLIENT_ID || '',
       onedriveClientId: process.env.ONEDRIVE_CLIENT_ID || '',
       dropboxClientId: process.env.DROPBOX_CLIENT_ID || '',
     });

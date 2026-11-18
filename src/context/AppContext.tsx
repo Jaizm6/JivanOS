@@ -65,11 +65,16 @@ import {
   doc,
   onSnapshot,
   signInWithGoogle,
+  connectGoogleDriveWithFirebase,
+  getInMemoryGDriveToken,
+  setInMemoryGDriveToken,
+  clearInMemoryGDriveToken,
   getRedirectResult,
   firebaseSignOut,
   onAuthStateChanged,
   saveUserDataToFirestore,
   getUserDataFromFirestore,
+  firebaseConfig,
   FirebaseUser,
 } from '../lib/firebase';
 import {
@@ -362,6 +367,9 @@ interface AppContextType {
   checkDriveConfiguration: (driveId: SyncDriveId) => Promise<{ success: boolean; message: string }>;
   pickLocalFolderForSync: () => Promise<{ success: boolean; folderName?: string; error?: string }>;
   connectDriveOAuth: (driveId: 'onedrive' | 'gdrive' | 'dropbox', clientId?: string) => Promise<{ success: boolean; error?: string }>;
+  isGDriveConnected: boolean;
+  setGDriveManualToken: (token: string) => void;
+  disconnectGDrive: () => void;
   isOnline: boolean;
   offlinePendingQueue: any[];
   retryOfflineQueue: () => Promise<void>;
@@ -1188,13 +1196,36 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     });
   }, []);
 
+  // Strip any Google Workspace OAuth access tokens (must remain memory-only) and stale Firebase oAuthClientId before persisting
+  const sanitizeJoplinSettingsForStorage = useCallback((settings: JoplinSyncSettings): JoplinSyncSettings => {
+    const firebaseOAuthId = (firebaseConfig as any)?.oAuthClientId || '';
+    const gdriveCfg = settings.drives?.gdrive;
+    if (!gdriveCfg) return settings;
+    return {
+      ...settings,
+      drives: {
+        ...settings.drives,
+        gdrive: {
+          ...gdriveCfg,
+          accessToken: '',
+          clientId:
+            gdriveCfg.clientId &&
+            (gdriveCfg.clientId === firebaseOAuthId || gdriveCfg.clientId.includes('keejp4ga2s286scae8aq90a6vv532mfn'))
+              ? ''
+              : gdriveCfg.clientId || '',
+        },
+      },
+    };
+  }, []);
+
   // Joplin-Style Multi-Drive Sync & Auto-Backup Configuration
+  const [isGDriveConnected, setIsGDriveConnected] = useState<boolean>(() => Boolean(getInMemoryGDriveToken()));
   const [joplinSyncSettings, setJoplinSyncSettings] = useState<JoplinSyncSettings>(() => {
     try {
       const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_joplin_sync_settings`);
       if (saved) {
         const parsed = JSON.parse(saved);
-        return {
+        const merged: JoplinSyncSettings = {
           ...DEFAULT_JOPLIN_SYNC_SETTINGS,
           ...parsed,
           drives: {
@@ -1202,6 +1233,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             ...(parsed.drives || {}),
           },
         };
+        const firebaseOAuthId = (firebaseConfig as any)?.oAuthClientId || '';
+        if (merged.drives.gdrive) {
+          merged.drives.gdrive = {
+            ...merged.drives.gdrive,
+            accessToken: '',
+            clientId:
+              merged.drives.gdrive.clientId &&
+              (merged.drives.gdrive.clientId === firebaseOAuthId ||
+                merged.drives.gdrive.clientId.includes('keejp4ga2s286scae8aq90a6vv532mfn'))
+                ? ''
+                : merged.drives.gdrive.clientId || '',
+          };
+        }
+        return merged;
       }
     } catch {}
     return DEFAULT_JOPLIN_SYNC_SETTINGS;
@@ -1215,11 +1260,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         drives: cfg.drives ? { ...prev.drives, ...cfg.drives } : prev.drives,
       };
       try {
-        localStorage.setItem(`${LOCAL_STORAGE_KEY}_joplin_sync_settings`, JSON.stringify(next));
+        localStorage.setItem(
+          `${LOCAL_STORAGE_KEY}_joplin_sync_settings`,
+          JSON.stringify(sanitizeJoplinSettingsForStorage(next))
+        );
       } catch {}
       return next;
     });
-  }, []);
+  }, [sanitizeJoplinSettingsForStorage]);
 
   const updateDriveConfig = useCallback((driveId: SyncDriveId, cfg: Partial<SyncDriveConfig>) => {
     setJoplinSyncSettings(prev => {
@@ -1231,15 +1279,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           [driveId]: {
             ...currentDrive,
             ...cfg,
+            ...(driveId === 'gdrive' ? { accessToken: '' } : {}),
           },
         },
       };
       try {
-        localStorage.setItem(`${LOCAL_STORAGE_KEY}_joplin_sync_settings`, JSON.stringify(next));
+        localStorage.setItem(
+          `${LOCAL_STORAGE_KEY}_joplin_sync_settings`,
+          JSON.stringify(sanitizeJoplinSettingsForStorage(next))
+        );
       } catch {}
       return next;
     });
-  }, []);
+  }, [sanitizeJoplinSettingsForStorage]);
 
   // Open Source Cloud Configuration (Nextcloud / WebDAV / MinIO S3)
   const [openSourceCloudConfig, setOpenSourceCloudConfig] = useState<OpenSourceCloudConfig>(() => {
@@ -1417,6 +1469,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         } catch (e) {
           console.warn('Error attaching Firestore realtime listener:', e);
         }
+      } else {
+        clearInMemoryGDriveToken();
+        setIsGDriveConnected(false);
       }
     });
 
@@ -5493,11 +5548,65 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return res;
   };
 
+  const setGDriveManualToken = useCallback((token: string) => {
+    const clean = token.trim();
+    setInMemoryGDriveToken(clean || null);
+    setIsGDriveConnected(Boolean(clean));
+    updateDriveConfig('gdrive', {
+      enabled: Boolean(clean),
+      accessToken: '',
+      lastStatus: clean ? 'idle' : 'idle',
+      lastError: undefined,
+    });
+  }, [updateDriveConfig]);
+
+  const disconnectGDrive = useCallback(() => {
+    clearInMemoryGDriveToken();
+    setIsGDriveConnected(false);
+    updateDriveConfig('gdrive', {
+      enabled: false,
+      accessToken: '',
+      lastStatus: 'idle',
+      lastError: undefined,
+    });
+  }, [updateDriveConfig]);
+
   const connectDriveOAuth = async (
     driveId: 'onedrive' | 'gdrive' | 'dropbox',
     customClientId?: string
   ): Promise<{ success: boolean; error?: string }> => {
     try {
+      if (driveId === 'gdrive') {
+        const overrideClientId = (customClientId !== undefined ? customClientId : joplinSyncSettings.drives.gdrive?.clientId || '').trim();
+        if (overrideClientId) {
+          const { accessToken } = await launchDriveOAuthPopup('gdrive', overrideClientId);
+          setInMemoryGDriveToken(accessToken);
+          setIsGDriveConnected(true);
+          updateDriveConfig('gdrive', {
+            enabled: true,
+            clientId: overrideClientId,
+            accessToken: '',
+            lastStatus: 'synced',
+            lastError: undefined,
+          });
+        } else {
+          const res = await connectGoogleDriveWithFirebase();
+          setIsGDriveConnected(true);
+          updateDriveConfig('gdrive', {
+            enabled: true,
+            clientId: '',
+            accessToken: '',
+            accountEmail: res.email || undefined,
+            lastStatus: 'synced',
+            lastError: undefined,
+          });
+        }
+        if (joplinSyncSettings.primaryTarget === 'none') {
+          updateJoplinSyncSettings({ primaryTarget: 'gdrive' });
+        }
+        return { success: true };
+      }
+
       const effectiveClientId = customClientId || joplinSyncSettings.drives[driveId]?.clientId || '';
       const { accessToken } = await launchDriveOAuthPopup(driveId, effectiveClientId);
       updateDriveConfig(driveId, {
@@ -5514,9 +5623,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     } catch (err: any) {
       updateDriveConfig(driveId, {
         lastStatus: 'error',
-        lastError: err?.message || 'OAuth failed',
+        lastError: err?.message || 'Sign-in failed',
       });
-      return { success: false, error: err?.message || 'OAuth failed' };
+      return { success: false, error: err?.message || 'Sign-in failed' };
     }
   };
 
@@ -5720,6 +5829,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             ? Boolean(dCfg?.serverUrl)
             : mappedDrive === 's3'
             ? Boolean(dCfg?.s3Endpoint && dCfg?.s3Bucket)
+            : mappedDrive === 'gdrive'
+            ? Boolean(dCfg?.accessToken || getInMemoryGDriveToken())
             : Boolean(dCfg?.accessToken);
 
         if (isConfigured) {
@@ -6274,6 +6385,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         checkDriveConfiguration,
         pickLocalFolderForSync,
         connectDriveOAuth,
+        isGDriveConnected,
+        setGDriveManualToken,
+        disconnectGDrive,
         syncWithCloud,
         createCloudBackup,
         restoreCloudBackup,

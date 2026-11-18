@@ -159,12 +159,21 @@ jobs:
               ""
             ].join("\n");
 
-            gradle = gradle.replace(/buildTypes\s*\{/, signingBlock + "\n    buildTypes {");
-            gradle = gradle.replace(/(release\s*\{)/, "$1\n            signingConfig signingConfigs.release");
-            gradle = gradle.replace(/(debug\s*\{)/, "$1\n            signingConfig signingConfigs.debug");
-            if (!gradle.includes("debug {")) {
-              gradle = gradle.replace(/buildTypes\s*\{/, "buildTypes {\n        debug {\n            signingConfig signingConfigs.debug\n        }");
+            const btMatch = gradle.match(/buildTypes\s*\{/);
+            if (!btMatch || btMatch.index === undefined) {
+              throw new Error("Could not find buildTypes block in build.gradle");
             }
+            const beforeBt = gradle.slice(0, btMatch.index).replace(/[ \t]+$/, "");
+            let fromBt = gradle.slice(btMatch.index);
+
+            fromBt = fromBt.replace(/(\brelease\s*\{)/, "$1\n            signingConfig signingConfigs.release");
+            if (/\bdebug\s*\{/.test(fromBt)) {
+              fromBt = fromBt.replace(/(\bdebug\s*\{)/, "$1\n            signingConfig signingConfigs.debug");
+            } else {
+              fromBt = fromBt.replace(/buildTypes\s*\{/, "buildTypes {\n        debug {\n            signingConfig signingConfigs.debug\n        }");
+            }
+
+            gradle = beforeBt + signingBlock + "\n    " + fromBt;
             fs.writeFileSync(gradlePath, gradle, "utf8");
             console.log("Updated build.gradle -> versionCode=" + verCode + ", versionName=" + verName + ", explicit signingConfigs attached");
           '
