@@ -23,9 +23,13 @@ import {
   Eye,
   ExternalLink,
   Smartphone,
+  Lock,
+  Copy,
+  UserCheck,
+  Sparkles,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { CloudBackupProvider, OpenSourceCloudConfig } from '../../types';
+import { CloudBackupProvider, SyncDriveId } from '../../types';
 import { ProviderLogo } from './ProviderLogo';
 import { SnapshotInspectorModal } from './SnapshotInspectorModal';
 
@@ -37,6 +41,62 @@ interface BackupSnapshot {
   accountEmail?: string;
   sizeBytes: number;
 }
+
+const JOPLIN_DRIVE_META: Array<{
+  id: SyncDriveId;
+  name: string;
+  subtitle: string;
+  protocol: string;
+}> = [
+  {
+    id: 'local_folder',
+    name: 'Local / Syncthing Folder',
+    subtitle: 'Device Folder • Syncthing • iCloud',
+    protocol: 'File System API',
+  },
+  {
+    id: 'onedrive',
+    name: 'Microsoft OneDrive',
+    subtitle: 'Joplin AppRoot Sync',
+    protocol: 'Graph REST v1.0',
+  },
+  {
+    id: 'gdrive',
+    name: 'Google Drive',
+    subtitle: 'Personal Drive Vault',
+    protocol: 'Drive API v3',
+  },
+  {
+    id: 'dropbox',
+    name: 'Dropbox',
+    subtitle: 'App Folder Sync',
+    protocol: 'Dropbox API v2',
+  },
+  {
+    id: 'nextcloud',
+    name: 'Nextcloud',
+    subtitle: 'Self-Hosted Cloud',
+    protocol: 'WebDAV DAV',
+  },
+  {
+    id: 'webdav',
+    name: 'WebDAV / Koofr / NAS',
+    subtitle: 'Synology • pCloud • Koofr',
+    protocol: 'Standard WebDAV',
+  },
+  {
+    id: 's3',
+    name: 'S3 / R2 / MinIO / B2',
+    subtitle: 'AWS • Cloudflare R2 • MinIO',
+    protocol: 'AWS SigV4 S3',
+  },
+  {
+    id: 'firebase',
+    name: 'JivanOS Cloud',
+    subtitle: 'Optional Google Auth DB',
+    protocol: 'Firestore Live',
+  },
+];
 
 export const BackupModal: React.FC = () => {
   const {
@@ -57,7 +117,17 @@ export const BackupModal: React.FC = () => {
     habits,
     tasks,
     scheduleItems,
+    firebaseUser,
+    loginWithGoogle,
+    joplinSyncSettings,
+    updateJoplinSyncSettings,
+    updateDriveConfig,
+    syncDriveNow,
+    pickLocalFolderForSync,
+    connectDriveOAuth,
   } = useApp();
+
+  const activeAccountIdentifier = syncEmail || firebaseUser?.email || 'local_vault';
 
   const downloadCSV = (filename: string, csvContent: string) => {
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -72,21 +142,23 @@ export const BackupModal: React.FC = () => {
 
   const exportHabitsCSV = () => {
     const headers = ['Habit Name', 'Category', 'Type', 'Target Days/Week', 'Current Streak', 'Completion Dates'];
-    const rows = habits.map(h => [
+    const rows = habits.map((h) => [
       `"${h.name.replace(/"/g, '""')}"`,
       h.category,
       h.habitType || 'boolean',
       h.targetDaysPerWeek || 7,
       h.currentStreak || 0,
-      `"${Object.keys(h.completionHistory || {}).filter(d => h.completionHistory[d]).join(', ')}"`,
+      `"${Object.keys(h.completionHistory || {})
+        .filter((d) => h.completionHistory[d])
+        .join(', ')}"`,
     ]);
-    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const csv = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
     downloadCSV(`habits_export_${new Date().toISOString().split('T')[0]}.csv`, csv);
   };
 
   const exportTasksCSV = () => {
     const headers = ['Task Title', 'Category', 'Priority', 'Status', 'Project', 'Due Date', 'Completed'];
-    const rows = tasks.map(t => [
+    const rows = tasks.map((t) => [
       `"${t.title.replace(/"/g, '""')}"`,
       t.category,
       t.priority || 'P2',
@@ -95,13 +167,13 @@ export const BackupModal: React.FC = () => {
       t.dueDate || '',
       t.completed ? 'Yes' : 'No',
     ]);
-    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const csv = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
     downloadCSV(`tasks_export_${new Date().toISOString().split('T')[0]}.csv`, csv);
   };
 
   const exportScheduleCSV = () => {
     const headers = ['Title', 'Date', 'Start Time', 'End Time', 'Category', 'Priority', 'Completed'];
-    const rows = scheduleItems.map(s => [
+    const rows = scheduleItems.map((s) => [
       `"${s.title.replace(/"/g, '""')}"`,
       s.date,
       s.startTime,
@@ -110,7 +182,7 @@ export const BackupModal: React.FC = () => {
       s.priority || 'P2',
       s.completed ? 'Yes' : 'No',
     ]);
-    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const csv = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
     downloadCSV(`schedule_export_${new Date().toISOString().split('T')[0]}.csv`, csv);
   };
 
@@ -131,7 +203,15 @@ export const BackupModal: React.FC = () => {
     document.body.removeChild(link);
   };
 
-  const [activeTab, setActiveTab] = useState<'cloud' | 'opensource' | 'local' | 'history' | 'mobile_apk'>('cloud');
+  const [activeTab, setActiveTab] = useState<
+    'joplin_sync' | 'cloud' | 'opensource' | 'local' | 'history' | 'mobile_apk'
+  >('joplin_sync');
+  const [selectedDriveId, setSelectedDriveId] = useState<SyncDriveId>(
+    joplinSyncSettings.primaryTarget === 'none' ? 'onedrive' : joplinSyncSettings.primaryTarget
+  );
+  const [isSyncingDrive, setIsSyncingDrive] = useState(false);
+  const [copiedCallback, setCopiedCallback] = useState(false);
+
   const [loadingProvider, setLoadingProvider] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -146,14 +226,16 @@ export const BackupModal: React.FC = () => {
 
   // Open source test state
   const [isTestingOpenSource, setIsTestingOpenSource] = useState(false);
-  const [testResult, setTestResult] = useState<{ success: boolean; message?: string; error?: string } | null>(null);
+  const [testResult, setTestResult] = useState<{ success: boolean; message?: string; error?: string } | null>(
+    null
+  );
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchSnapshots = async () => {
     try {
       setIsLoadingSnapshots(true);
-      const res = await fetch(`/api/backup/list/${encodeURIComponent(syncEmail || 'jaiprakashog@gmail.com')}`);
+      const res = await fetch(`/api/backup/list/${encodeURIComponent(activeAccountIdentifier)}`);
       const data = await res.json();
       if (data.success && Array.isArray(data.backups)) {
         setSnapshots(data.backups);
@@ -172,9 +254,51 @@ export const BackupModal: React.FC = () => {
       setErrorMessage(null);
       setTestResult(null);
     }
-  }, [isBackupModalOpen, syncEmail]);
+  }, [isBackupModalOpen, activeAccountIdentifier]);
 
   if (!isBackupModalOpen) return null;
+
+  const selectedDriveConfig = joplinSyncSettings.drives[selectedDriveId];
+  const selectedDriveMeta =
+    JOPLIN_DRIVE_META.find((d) => d.id === selectedDriveId) || JOPLIN_DRIVE_META[0];
+  const oauthCallbackUrl = `${window.location.origin}/auth/oauth-callback`;
+
+  const handleCopyCallbackUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(oauthCallbackUrl);
+      setCopiedCallback(true);
+      setTimeout(() => setCopiedCallback(false), 2000);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleSyncSelectedDrive = async (target?: SyncDriveId) => {
+    setIsSyncingDrive(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    try {
+      const ok = await syncDriveNow(target);
+      if (ok) {
+        setSuccessMessage(
+          target
+            ? `Synced tasks, habits, meds, bills & personal profile with ${
+                JOPLIN_DRIVE_META.find((d) => d.id === target)?.name || target
+              }.`
+            : 'All enabled drives & auto-backup mirrors synchronized!'
+        );
+      } else {
+        const err = target ? joplinSyncSettings.drives[target]?.lastError : null;
+        setErrorMessage(
+          err || 'Sync could not complete. Check the selected drive credentials or folder permission below.'
+        );
+      }
+    } catch (e: any) {
+      setErrorMessage(e?.message || 'Drive sync failed.');
+    } finally {
+      setIsSyncingDrive(false);
+    }
+  };
 
   const handleProviderBackup = async (providerId: CloudBackupProvider) => {
     setLoadingProvider(providerId);
@@ -195,7 +319,9 @@ export const BackupModal: React.FC = () => {
           minio_s3: 'MinIO S3',
           omni_cloud: 'Omni Cloud Vault',
         };
-        setSuccessMessage(`Encrypted snapshot uploaded to ${nameMap[providerId] || providerId} for account: ${syncEmail}`);
+        setSuccessMessage(
+          `Encrypted snapshot uploaded to ${nameMap[providerId] || providerId} for vault: ${activeAccountIdentifier}`
+        );
         await fetchSnapshots();
       } else {
         setErrorMessage(`Unable to upload backup to ${providerId}. Please try again.`);
@@ -208,10 +334,6 @@ export const BackupModal: React.FC = () => {
   };
 
   const handleRestoreSnapshot = async (version: number) => {
-    if (!window.confirm(`Are you sure you want to restore Snapshot Version ${version}? Current data will be replaced by this backup snapshot.`)) {
-      return;
-    }
-
     setRestoringVersion(version);
     setErrorMessage(null);
     setSuccessMessage(null);
@@ -219,7 +341,7 @@ export const BackupModal: React.FC = () => {
     try {
       const success = await restoreCloudBackup(version);
       if (success) {
-        setSuccessMessage(`Snapshot #${version} restored successfully for ${syncEmail}.`);
+        setSuccessMessage(`Snapshot #${version} restored successfully.`);
       } else {
         setErrorMessage(`Failed to restore snapshot #${version}.`);
       }
@@ -232,12 +354,12 @@ export const BackupModal: React.FC = () => {
 
   const handleAddEmail = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newEmailInput || !newEmailInput.trim() || !newEmailInput.includes('@')) {
-      setErrorMessage('Please enter a valid email address (e.g. user@example.com)');
+    if (!newEmailInput || !newEmailInput.trim()) {
+      setErrorMessage('Please enter a valid vault identifier or email address.');
       return;
     }
     addSyncEmail(newEmailInput.trim());
-    setSuccessMessage(`Sync target account switched to: ${newEmailInput.trim()}`);
+    setSuccessMessage(`Vault identifier switched to: ${newEmailInput.trim()}`);
     setNewEmailInput('');
     setIsAddingEmail(false);
   };
@@ -336,21 +458,30 @@ export const BackupModal: React.FC = () => {
     },
   ];
 
+  const activeMirrorCount = Object.values(joplinSyncSettings.drives).filter(
+    (d) => d.enabled || d.autoBackupEnabled
+  ).length;
+
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs p-3 sm:p-4 md:p-6 flex min-h-full items-center justify-center animate-in fade-in duration-150">
       <div className="w-full max-w-3xl rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl flex flex-col max-h-[92vh] overflow-hidden">
         {/* Header */}
-        <div className="p-5 sm:p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
+        <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-indigo-500 to-cyan-500 text-white flex items-center justify-center shadow-xs">
-              <Database className="w-5 h-5" />
+              <FolderSync className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white">
-                Backup & Cloud Storage
-              </h3>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white">
+                  Local-First &amp; Multi-Drive Sync Hub
+                </h3>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300">
+                  Joplin Architecture
+                </span>
+              </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Sync with open-source Nextcloud, MinIO, WebDAV, or commercial cloud drives
+                Zero mandatory login &bull; Sync tasks, habits, meds, bills &amp; personal profile across any drive
               </p>
             </div>
           </div>
@@ -363,128 +494,18 @@ export const BackupModal: React.FC = () => {
           </button>
         </div>
 
-        {/* Selected Email Identity Bar - Prominent & Visible */}
-        <div className="px-5 py-3.5 bg-indigo-50/70 dark:bg-indigo-950/40 border-b border-indigo-100/80 dark:border-indigo-900/40 shrink-0">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="w-7 h-7 rounded-lg bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-xs">
-                <Mail className="w-3.5 h-3.5" />
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                    Selected Sync Account:
-                  </span>
-                  <span className="text-xs font-bold text-indigo-700 dark:text-indigo-300 font-mono truncate bg-white dark:bg-slate-900 px-2 py-0.5 rounded-md border border-indigo-200 dark:border-indigo-800 shadow-xs">
-                    {syncEmail}
-                  </span>
-                  <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950 px-1.5 py-0.5 rounded-full">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    Active Target
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Email Switcher Controls */}
-            <div className="flex items-center gap-2 self-start sm:self-auto">
-              <div className="relative">
-                <select
-                  value={syncEmail}
-                  onChange={(e) => setSyncEmail(e.target.value)}
-                  className="text-xs font-medium bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 border border-indigo-200 dark:border-indigo-800 rounded-lg px-2.5 py-1.5 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 shadow-xs cursor-pointer"
-                  title="Switch target email account"
-                >
-                  {savedSyncEmails.map((em) => (
-                    <option key={em} value={em}>
-                      {em}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {!isAddingEmail ? (
-                <button
-                  type="button"
-                  onClick={() => setIsAddingEmail(true)}
-                  className="px-2 py-1.5 rounded-lg text-xs font-semibold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 transition flex items-center gap-1 shrink-0"
-                  title="Add another email ID to sync/backup"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Add Email</span>
-                </button>
-              ) : (
-                <form onSubmit={handleAddEmail} className="flex items-center gap-1.5">
-                  <input
-                    type="email"
-                    placeholder="name@email.com"
-                    value={newEmailInput}
-                    onChange={(e) => setNewEmailInput(e.target.value)}
-                    className="w-36 sm:w-44 text-xs px-2 py-1 bg-white dark:bg-slate-900 border border-indigo-300 dark:border-indigo-700 rounded-lg text-slate-800 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
-                    autoFocus
-                  />
-                  <button
-                    type="submit"
-                    className="px-2 py-1 bg-indigo-600 text-white text-xs font-semibold rounded-lg hover:bg-indigo-500 shadow-xs"
-                  >
-                    Save
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsAddingEmail(false);
-                      setNewEmailInput('');
-                    }}
-                    className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </form>
-              )}
-
-              {savedSyncEmails.length > 1 && (
-                <button
-                  type="button"
-                  onClick={() => removeSyncEmail(syncEmail)}
-                  title={`Remove ${syncEmail} from list`}
-                  className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-
         {/* Tab Navigation */}
-        <div className="px-6 pt-3 flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 shrink-0 overflow-x-auto">
+        <div className="px-5 pt-2.5 flex items-center gap-1.5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 shrink-0 overflow-x-auto no-scrollbar">
           <button
-            onClick={() => setActiveTab('cloud')}
+            onClick={() => setActiveTab('joplin_sync')}
             className={`pb-2.5 px-3 text-xs font-bold transition border-b-2 flex items-center gap-1.5 shrink-0 ${
-              activeTab === 'cloud'
+              activeTab === 'joplin_sync'
                 ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
                 : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
             }`}
           >
-            <Cloud className="w-4 h-4" />
-            <span>Commercial Cloud</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('opensource')}
-            className={`pb-2.5 px-3 text-xs font-bold transition border-b-2 flex items-center gap-1.5 shrink-0 ${
-              activeTab === 'opensource'
-                ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
-                : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-            }`}
-          >
-            <Server className="w-4 h-4 text-emerald-500" />
-            <span className="flex items-center gap-1">
-              <span>Open Source Cloud</span>
-              <span className="text-[9px] px-1.5 py-0.2 rounded-md bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 font-extrabold uppercase">
-                Self-Hosted
-              </span>
-            </span>
+            <FolderSync className="w-4 h-4 text-indigo-500" />
+            <span>Multi-Drive Sync ({activeMirrorCount})</span>
           </button>
 
           <button
@@ -496,7 +517,31 @@ export const BackupModal: React.FC = () => {
             }`}
           >
             <HardDrive className="w-4 h-4" />
-            <span>Local Archive</span>
+            <span>Local Export / CSV</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('cloud')}
+            className={`pb-2.5 px-3 text-xs font-bold transition border-b-2 flex items-center gap-1.5 shrink-0 ${
+              activeTab === 'cloud'
+                ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
+                : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+            }`}
+          >
+            <Cloud className="w-4 h-4" />
+            <span>Snapshot Vault</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('opensource')}
+            className={`pb-2.5 px-3 text-xs font-bold transition border-b-2 flex items-center gap-1.5 shrink-0 ${
+              activeTab === 'opensource'
+                ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
+                : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+            }`}
+          >
+            <Server className="w-4 h-4 text-emerald-500" />
+            <span>Self-Hosted Test</span>
           </button>
 
           <button
@@ -523,18 +568,13 @@ export const BackupModal: React.FC = () => {
             }`}
           >
             <Smartphone className="w-4 h-4 text-emerald-500" />
-            <span className="flex items-center gap-1">
-              <span>Android APK Build</span>
-              <span className="text-[9px] px-1.5 py-0.2 rounded-md bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 font-extrabold uppercase">
-                Native App
-              </span>
-            </span>
+            <span>Android APK</span>
           </button>
         </div>
 
         {/* Alert Notifications */}
         {successMessage && (
-          <div className="mx-6 mt-4 p-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-xs font-medium text-emerald-800 dark:text-emerald-200 flex items-center justify-between gap-2">
+          <div className="mx-5 mt-3 p-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-xs font-medium text-emerald-800 dark:text-emerald-200 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Check className="w-4 h-4 text-emerald-600 shrink-0" />
               <span>{successMessage}</span>
@@ -546,7 +586,7 @@ export const BackupModal: React.FC = () => {
         )}
 
         {errorMessage && (
-          <div className="mx-6 mt-4 p-3 rounded-2xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-xs font-medium text-rose-800 dark:text-rose-200 flex items-center justify-between gap-2">
+          <div className="mx-5 mt-3 p-3 rounded-2xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-xs font-medium text-rose-800 dark:text-rose-200 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
               <span>{errorMessage}</span>
@@ -558,30 +598,600 @@ export const BackupModal: React.FC = () => {
         )}
 
         {/* Scrollable Tab Content */}
-        <div className="p-5 sm:p-6 overflow-y-auto flex-1 space-y-4">
+        <div className="p-4 sm:p-5 overflow-y-auto flex-1 space-y-4">
+          {/* TAB 0: JOPLIN-STYLE MULTI-DRIVE SYNC & AUTO-BACKUP */}
+          {activeTab === 'joplin_sync' && (
+            <div className="space-y-4">
+              {/* Top Control Bar: Interval, Sync on Change, Personal Profile Sync, Sync All Now */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-3">
+                  {/* Auto-Sync Interval */}
+                  <div className="flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-indigo-500" />
+                    <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                      Interval:
+                    </span>
+                    <select
+                      value={joplinSyncSettings.autoSyncIntervalMinutes}
+                      onChange={(e) =>
+                        updateJoplinSyncSettings({
+                          autoSyncIntervalMinutes: Number(e.target.value) as any,
+                        })
+                      }
+                      className="text-xs font-semibold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1 text-slate-800 dark:text-slate-200 cursor-pointer"
+                    >
+                      <option value={0}>Manual Only</option>
+                      <option value={5}>Every 5 mins</option>
+                      <option value={15}>Every 15 mins</option>
+                      <option value={30}>Every 30 mins</option>
+                      <option value={60}>Every 60 mins</option>
+                    </select>
+                  </div>
+
+                  {/* Sync on Change */}
+                  <label className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-700 dark:text-slate-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={joplinSyncSettings.syncOnChange}
+                      onChange={(e) =>
+                        updateJoplinSyncSettings({ syncOnChange: e.target.checked })
+                      }
+                      className="w-3.5 h-3.5 accent-indigo-600 rounded"
+                    />
+                    <span>Auto-Sync on Edit</span>
+                  </label>
+
+                  {/* Sync Personal Details (Photo, Name, DOB, Bio) */}
+                  <label className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-1 rounded-lg border border-emerald-200 dark:border-emerald-800 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={joplinSyncSettings.syncPersonalDetails}
+                      onChange={(e) =>
+                        updateJoplinSyncSettings({ syncPersonalDetails: e.target.checked })
+                      }
+                      className="w-3.5 h-3.5 accent-emerald-600 rounded"
+                    />
+                    <UserCheck className="w-3 h-3" />
+                    <span>Sync Personal Profile (Photo, DOB, Name)</span>
+                  </label>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={isSyncingDrive}
+                  onClick={() => handleSyncSelectedDrive()}
+                  className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-xs transition flex items-center gap-1.5 active:scale-95 disabled:opacity-50 cursor-pointer"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncingDrive ? 'animate-spin' : ''}`} />
+                  <span>{isSyncingDrive ? 'Syncing Drives...' : 'Sync All Active Drives'}</span>
+                </button>
+              </div>
+
+              {/* Minimal 8-Drive Selector Grid */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                    Select Drive to Configure (Click any drive &bull; Toggle multiple drives for Auto-Backup Mirroring)
+                  </span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Primary:{' '}
+                    <strong className="text-indigo-600 dark:text-indigo-400">
+                      {joplinSyncSettings.primaryTarget === 'none'
+                        ? 'Local-Only'
+                        : JOPLIN_DRIVE_META.find((d) => d.id === joplinSyncSettings.primaryTarget)?.name}
+                    </strong>
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {JOPLIN_DRIVE_META.map((drive) => {
+                    const cfg = joplinSyncSettings.drives[drive.id];
+                    const isPrimary = joplinSyncSettings.primaryTarget === drive.id;
+                    const isSelected = selectedDriveId === drive.id;
+                    const isMirror = cfg?.autoBackupEnabled;
+                    const isActive = isPrimary || cfg?.enabled || isMirror;
+
+                    return (
+                      <button
+                        key={drive.id}
+                        type="button"
+                        onClick={() => setSelectedDriveId(drive.id)}
+                        className={`p-2.5 rounded-2xl border text-left transition flex flex-col justify-between gap-1.5 cursor-pointer ${
+                          isSelected
+                            ? 'border-indigo-600 bg-indigo-50/70 dark:bg-indigo-950/40 ring-2 ring-indigo-500/20 shadow-xs'
+                            : isActive
+                            ? 'border-emerald-300 dark:border-emerald-800 bg-emerald-50/30 dark:bg-emerald-950/20'
+                            : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800/40 hover:bg-slate-50 dark:hover:bg-slate-800'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between w-full">
+                          <ProviderLogo provider={drive.id} className="w-4 h-4 shrink-0" />
+                          <div className="flex items-center gap-1">
+                            {isPrimary && (
+                              <span className="px-1.5 py-0.2 rounded text-[9px] font-extrabold bg-indigo-600 text-white">
+                                PRIMARY
+                              </span>
+                            )}
+                            {isMirror && !isPrimary && (
+                              <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300">
+                                MIRROR
+                              </span>
+                            )}
+                            {cfg?.lastStatus === 'synced' && (
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                            )}
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                            {drive.name}
+                          </div>
+                          <div className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                            {cfg?.lastSyncedAt
+                              ? `Synced ${new Date(cfg.lastSyncedAt).toLocaleTimeString([], {
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })}`
+                              : drive.subtitle}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Selected Drive Configuration Card */}
+              <div className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 space-y-3.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-slate-200/70 dark:border-slate-700/70">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center shadow-2xs">
+                      <ProviderLogo provider={selectedDriveId} className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">
+                          {selectedDriveMeta.name}
+                        </h4>
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-200/70 dark:bg-slate-700 text-slate-700 dark:text-slate-300">
+                          {selectedDriveMeta.protocol}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        {selectedDriveConfig?.lastSyncedAt
+                          ? `Last synced: ${new Date(selectedDriveConfig.lastSyncedAt).toLocaleString()}`
+                          : 'Not synced yet — configure below and click Sync This Drive'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Drive Role Switches */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nextPrimary =
+                          joplinSyncSettings.primaryTarget === selectedDriveId
+                            ? 'none'
+                            : selectedDriveId;
+                        updateJoplinSyncSettings({ primaryTarget: nextPrimary });
+                        if (nextPrimary !== 'none') {
+                          updateDriveConfig(selectedDriveId, { enabled: true });
+                        }
+                      }}
+                      className={`px-2.5 py-1 rounded-xl text-[11px] font-bold border transition cursor-pointer ${
+                        joplinSyncSettings.primaryTarget === selectedDriveId
+                          ? 'bg-indigo-600 text-white border-indigo-600'
+                          : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-indigo-400'
+                      }`}
+                    >
+                      {joplinSyncSettings.primaryTarget === selectedDriveId
+                        ? '✓ Primary Sync Target'
+                        : 'Set as Primary Target'}
+                    </button>
+
+                    <label className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[11px] font-bold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(selectedDriveConfig?.autoBackupEnabled)}
+                        onChange={(e) =>
+                          updateDriveConfig(selectedDriveId, {
+                            autoBackupEnabled: e.target.checked,
+                            enabled: e.target.checked || selectedDriveConfig?.enabled,
+                          })
+                        }
+                        className="w-3.5 h-3.5 accent-emerald-600 rounded"
+                      />
+                      <span>Auto-Backup Mirror</span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Drive-Specific Minimal Fields */}
+                {selectedDriveId === 'local_folder' && (
+                  <div className="space-y-2.5">
+                    <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                      <strong>Joplin File System Sync:</strong> Pick any folder on your device (such as a{' '}
+                      <strong>Syncthing</strong> shared folder, <strong>OneDrive</strong> folder,{' '}
+                      <strong>Google Drive</strong> desktop folder, or <strong>iCloud Drive</strong>). JivanOS reads and writes{' '}
+                      <code className="font-mono text-indigo-600 dark:text-indigo-400">jivanos-sync.json</code> directly inside it.
+                    </p>
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const ok = await pickLocalFolderForSync();
+                          if (ok) {
+                            setSuccessMessage('Local sync folder connected and persisted!');
+                          }
+                        }}
+                        className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <HardDrive className="w-3.5 h-3.5" />
+                        <span>
+                          {selectedDriveConfig?.folderName
+                            ? `Change Folder (${selectedDriveConfig.folderName})`
+                            : 'Choose Local Sync Folder'}
+                        </span>
+                      </button>
+                      {selectedDriveConfig?.folderName && (
+                        <span className="text-xs font-mono text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-2.5 py-1 rounded-lg border border-emerald-200 dark:border-emerald-800">
+                          Active Folder: {selectedDriveConfig.folderName}/jivanos-sync.json
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {(selectedDriveId === 'onedrive' ||
+                  selectedDriveId === 'gdrive' ||
+                  selectedDriveId === 'dropbox') && (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 block">
+                          OAuth App Client ID (for 1-Click Popup Connect)
+                        </label>
+                        <input
+                          type="text"
+                          value={selectedDriveConfig?.clientId || ''}
+                          onChange={(e) =>
+                            updateDriveConfig(selectedDriveId, { clientId: e.target.value })
+                          }
+                          placeholder={
+                            selectedDriveId === 'onedrive'
+                              ? 'Azure App (Client) ID'
+                              : selectedDriveId === 'gdrive'
+                              ? 'Google OAuth Client ID'
+                              : 'Dropbox App Key'
+                          }
+                          className="w-full text-xs px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-mono"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 block">
+                          Or Paste Direct Access Token
+                        </label>
+                        <input
+                          type="password"
+                          value={selectedDriveConfig?.accessToken || ''}
+                          onChange={(e) =>
+                            updateDriveConfig(selectedDriveId, {
+                              accessToken: e.target.value,
+                              enabled: Boolean(e.target.value.trim()),
+                            })
+                          }
+                          placeholder="Bearer token (auto-filled by OAuth popup)"
+                          className="w-full text-xs px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => connectDriveOAuth(selectedDriveId)}
+                          className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          <span>Connect {selectedDriveMeta.name} via OAuth Popup</span>
+                        </button>
+
+                        {selectedDriveConfig?.accessToken && (
+                          <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Token Connected</span>
+                          </span>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleCopyCallbackUrl}
+                        className="text-[11px] font-mono text-slate-500 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-400 flex items-center gap-1 cursor-pointer"
+                        title="Copy OAuth Redirect URI for your Azure/Google/Dropbox App"
+                      >
+                        {copiedCallback ? (
+                          <Check className="w-3 h-3 text-emerald-500" />
+                        ) : (
+                          <Copy className="w-3 h-3" />
+                        )}
+                        <span>
+                          {copiedCallback ? 'Copied Redirect URI!' : 'Copy OAuth Redirect URI'}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {(selectedDriveId === 'nextcloud' || selectedDriveId === 'webdav') && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="sm:col-span-2 space-y-1">
+                      <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 block">
+                        {selectedDriveId === 'nextcloud'
+                          ? 'Nextcloud WebDAV URL'
+                          : 'WebDAV Server Endpoint (Koofr, pCloud, Synology, OwnCloud)'}
+                      </label>
+                      <input
+                        type="url"
+                        value={selectedDriveConfig?.serverUrl || ''}
+                        onChange={(e) =>
+                          updateDriveConfig(selectedDriveId, { serverUrl: e.target.value })
+                        }
+                        placeholder={
+                          selectedDriveId === 'nextcloud'
+                            ? 'https://cloud.example.com/remote.php/dav/files/username/'
+                            : 'https://app.koofr.net/dav/Koofr/'
+                        }
+                        className="w-full text-xs px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-mono"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 block">
+                        Username
+                      </label>
+                      <input
+                        type="text"
+                        value={selectedDriveConfig?.username || ''}
+                        onChange={(e) =>
+                          updateDriveConfig(selectedDriveId, { username: e.target.value })
+                        }
+                        placeholder="username"
+                        className="w-full text-xs px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 block">
+                        App Password / Token
+                      </label>
+                      <input
+                        type="password"
+                        value={selectedDriveConfig?.password || ''}
+                        onChange={(e) =>
+                          updateDriveConfig(selectedDriveId, {
+                            password: e.target.value,
+                            enabled: Boolean(e.target.value),
+                          })
+                        }
+                        placeholder="••••••••••••"
+                        className="w-full text-xs px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-mono"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {selectedDriveId === 's3' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 block">
+                        S3 / R2 / MinIO Endpoint URL
+                      </label>
+                      <input
+                        type="url"
+                        value={selectedDriveConfig?.s3Endpoint || selectedDriveConfig?.serverUrl || ''}
+                        onChange={(e) =>
+                          updateDriveConfig('s3', {
+                            s3Endpoint: e.target.value,
+                            serverUrl: e.target.value,
+                          })
+                        }
+                        placeholder="https://s3.us-east-1.amazonaws.com"
+                        className="w-full text-xs px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-mono"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 block">
+                          Bucket Name
+                        </label>
+                        <input
+                          type="text"
+                          value={selectedDriveConfig?.s3Bucket || ''}
+                          onChange={(e) =>
+                            updateDriveConfig('s3', { s3Bucket: e.target.value })
+                          }
+                          placeholder="jivanos-sync"
+                          className="w-full text-xs px-2.5 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-mono"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 block">
+                          Region
+                        </label>
+                        <input
+                          type="text"
+                          value={selectedDriveConfig?.s3Region || 'us-east-1'}
+                          onChange={(e) =>
+                            updateDriveConfig('s3', { s3Region: e.target.value })
+                          }
+                          placeholder="us-east-1"
+                          className="w-full text-xs px-2.5 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 block">
+                        Access Key ID
+                      </label>
+                      <input
+                        type="text"
+                        value={selectedDriveConfig?.s3AccessKey || selectedDriveConfig?.username || ''}
+                        onChange={(e) =>
+                          updateDriveConfig('s3', {
+                            s3AccessKey: e.target.value,
+                            username: e.target.value,
+                          })
+                        }
+                        placeholder="AKIA..."
+                        className="w-full text-xs px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-mono"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 block">
+                        Secret Access Key
+                      </label>
+                      <input
+                        type="password"
+                        value={selectedDriveConfig?.s3SecretKey || selectedDriveConfig?.password || ''}
+                        onChange={(e) =>
+                          updateDriveConfig('s3', {
+                            s3SecretKey: e.target.value,
+                            password: e.target.value,
+                            enabled: Boolean(e.target.value),
+                          })
+                        }
+                        placeholder="••••••••••••••••"
+                        className="w-full text-xs px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-mono"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {selectedDriveId === 'firebase' && (
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <p className="text-xs text-slate-600 dark:text-slate-300">
+                      {firebaseUser
+                        ? `Connected to JivanOS Cloud as ${firebaseUser.email || firebaseUser.displayName}`
+                        : 'Optional: Sign in with Google to sync with JivanOS Cloud Firestore.'}
+                    </p>
+                    {!firebaseUser && (
+                      <button
+                        type="button"
+                        onClick={loginWithGoogle}
+                        className="px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold shadow-xs transition shrink-0 cursor-pointer"
+                      >
+                        Sign in with Google
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* Bottom Action Bar for Selected Drive + Optional E2EE */}
+                <div className="pt-2.5 border-t border-slate-200/70 dark:border-slate-700/70 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <label className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-700 dark:text-slate-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={joplinSyncSettings.e2eeEnabled}
+                        onChange={(e) =>
+                          updateJoplinSyncSettings({ e2eeEnabled: e.target.checked })
+                        }
+                        className="w-3.5 h-3.5 accent-indigo-600 rounded"
+                      />
+                      <Lock className="w-3 h-3 text-indigo-500" />
+                      <span>AES-256 E2EE Passphrase</span>
+                    </label>
+                    {joplinSyncSettings.e2eeEnabled && (
+                      <input
+                        type="password"
+                        value={joplinSyncSettings.e2eePassphrase || ''}
+                        onChange={(e) =>
+                          updateJoplinSyncSettings({ e2eePassphrase: e.target.value })
+                        }
+                        placeholder="Enter encryption password"
+                        className="text-xs px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 border border-indigo-300 dark:border-indigo-700 text-slate-800 dark:text-slate-200 font-mono w-44"
+                      />
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={isSyncingDrive}
+                    onClick={() => handleSyncSelectedDrive(selectedDriveId)}
+                    className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-xs transition flex items-center gap-1.5 active:scale-95 disabled:opacity-50 cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isSyncingDrive ? 'animate-spin' : ''}`} />
+                    <span>Sync {selectedDriveMeta.name} Now</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* TAB 1: COMMERCIAL CLOUD DRIVES */}
           {activeTab === 'cloud' && (
             <div className="space-y-4">
-              {/* Informative Google Drive & Account Banner */}
-              <div className="p-3.5 rounded-2xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/70 dark:border-amber-900/40 text-xs text-amber-900 dark:text-amber-200 space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 font-bold">
-                    <ProviderLogo provider="gdrive" className="w-4 h-4 shrink-0" />
-                    <span>Google Drive &amp; Cloud Sync Guide</span>
-                  </div>
-                  <a
-                    href="https://drive.google.com"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-800 dark:text-amber-300 hover:underline"
-                  >
-                    <span>drive.google.com</span>
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
+              {/* Vault Identifier Bar */}
+              <div className="p-3 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/40 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Mail className="w-4 h-4 text-indigo-600" />
+                  <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    Snapshot Vault Key:
+                  </span>
+                  <span className="text-xs font-bold font-mono text-indigo-700 dark:text-indigo-300 bg-white dark:bg-slate-900 px-2 py-0.5 rounded border border-indigo-200 dark:border-indigo-800">
+                    {activeAccountIdentifier}
+                  </span>
                 </div>
-                <p className="text-[11px] text-amber-800/90 dark:text-amber-300/90 leading-relaxed">
-                  Clicking <strong>Google Drive</strong> creates a complete, timestamped encrypted snapshot in your workspace cloud vault tied to <strong>{syncEmail}</strong>. To keep a direct file copy in your personal Google Drive folder, click <strong>Snapshot History</strong> below to inspect your data or download the JSON file anytime.
-                </p>
+
+                <div className="flex items-center gap-2">
+                  {savedSyncEmails.length > 0 && (
+                    <select
+                      value={syncEmail}
+                      onChange={(e) => setSyncEmail(e.target.value)}
+                      className="text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1"
+                    >
+                      {savedSyncEmails.map((em) => (
+                        <option key={em} value={em}>
+                          {em}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {!isAddingEmail ? (
+                    <button
+                      type="button"
+                      onClick={() => setIsAddingEmail(true)}
+                      className="px-2 py-1 rounded-lg text-xs font-semibold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-indigo-600 flex items-center gap-1"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>Set Vault Key</span>
+                    </button>
+                  ) : (
+                    <form onSubmit={handleAddEmail} className="flex items-center gap-1">
+                      <input
+                        type="text"
+                        placeholder="vault-name or email"
+                        value={newEmailInput}
+                        onChange={(e) => setNewEmailInput(e.target.value)}
+                        className="w-36 text-xs px-2 py-1 bg-white dark:bg-slate-900 border border-indigo-300 rounded-lg"
+                      />
+                      <button
+                        type="submit"
+                        className="px-2 py-1 bg-indigo-600 text-white text-xs font-semibold rounded-lg"
+                      >
+                        Save
+                      </button>
+                    </form>
+                  )}
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
@@ -612,7 +1222,7 @@ export const BackupModal: React.FC = () => {
 
                       <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
                         <span className="text-[10px] text-slate-400 font-mono">
-                          Target: {syncEmail.split('@')[0]}
+                          Vault: {activeAccountIdentifier.split('@')[0]}
                         </span>
                         <button
                           type="button"
@@ -643,37 +1253,32 @@ export const BackupModal: React.FC = () => {
           {/* TAB 2: OPEN SOURCE CLOUD BACKUP & SYNC */}
           {activeTab === 'opensource' && (
             <div className="space-y-4">
-              {/* Introduction Banner */}
               <div className="p-4 rounded-2xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-900 dark:text-emerald-200 space-y-1">
                 <div className="flex items-center gap-2 font-bold text-emerald-800 dark:text-emerald-300">
                   <Server className="w-4 h-4 text-emerald-600" />
-                  <span>Open Source Cloud & Self-Hosted Synchronization</span>
+                  <span>Open Source Cloud &amp; Self-Hosted Synchronization</span>
                 </div>
                 <p className="text-[11px] text-emerald-700 dark:text-emerald-400 leading-relaxed">
-                  Store and sync your Jivan snapshots directly to your own self-hosted infrastructure. Completely sovereign, non-proprietary, and zero-vendor-lockin.
+                  Store and sync your JivanOS snapshots directly to your own self-hosted infrastructure. Completely sovereign, non-proprietary, and zero-vendor-lockin.
                 </p>
               </div>
 
-              {/* Provider Selection Buttons */}
               <div className="grid grid-cols-3 gap-2.5">
                 {[
                   {
                     id: 'nextcloud' as const,
                     title: 'Nextcloud',
                     subtitle: 'WebDAV Protocol',
-                    desc: 'Official Nextcloud / ownCloud instance',
                   },
                   {
                     id: 'minio_s3' as const,
                     title: 'MinIO S3',
                     subtitle: 'Object Storage',
-                    desc: 'High-performance S3 compatible storage',
                   },
                   {
                     id: 'webdav' as const,
                     title: 'Generic WebDAV',
                     subtitle: 'NAS / Synology / Apache',
-                    desc: 'Standard WebDAV compliant drive',
                   },
                 ].map((item) => {
                   const isSelected = openSourceCloudConfig.provider === item.id;
@@ -690,7 +1295,9 @@ export const BackupModal: React.FC = () => {
                     >
                       <div className="flex items-center justify-between w-full">
                         <ProviderLogo provider={item.id} className="w-5 h-5 shrink-0" />
-                        {isSelected && <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />}
+                        {isSelected && (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                        )}
                       </div>
                       <div>
                         <h4 className="text-xs font-bold text-slate-900 dark:text-white">
@@ -705,158 +1312,84 @@ export const BackupModal: React.FC = () => {
                 })}
               </div>
 
-              {/* Provider Configuration Form */}
               <div className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/30 space-y-3.5">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                    <FolderSync className="w-4 h-4 text-indigo-500" />
-                    <span>
-                      Configure {openSourceCloudConfig.provider === 'nextcloud' ? 'Nextcloud' : openSourceCloudConfig.provider === 'minio_s3' ? 'MinIO S3' : 'WebDAV'} Server
-                    </span>
-                  </h4>
-                  <span className="text-[11px] font-mono text-slate-400">
-                    Account: {syncEmail}
-                  </span>
-                </div>
-
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {/* Server Endpoint URL */}
                   <div className="space-y-1 sm:col-span-2">
                     <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
-                      {openSourceCloudConfig.provider === 'minio_s3' ? 'S3 Endpoint URL / Host' : 'WebDAV Server URL / Endpoint'}
+                      {openSourceCloudConfig.provider === 'minio_s3'
+                        ? 'S3 Endpoint URL / Host'
+                        : 'WebDAV Server URL / Endpoint'}
                     </label>
                     <input
                       type="url"
                       value={openSourceCloudConfig.serverUrl}
                       onChange={(e) => updateOpenSourceCloudConfig({ serverUrl: e.target.value })}
-                      placeholder={
-                        openSourceCloudConfig.provider === 'nextcloud'
-                          ? 'https://your-nextcloud.domain.com/remote.php/dav/files/username/'
-                          : openSourceCloudConfig.provider === 'minio_s3'
-                          ? 'https://minio.your-domain.com:9000'
-                          : 'https://webdav.your-nas.local/remote.php/webdav/'
-                      }
-                      className="w-full text-xs px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-mono focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+                      placeholder="https://your-nextcloud.domain.com/remote.php/dav/files/username/"
+                      className="w-full text-xs px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-mono"
                     />
                   </div>
 
-                  {/* Username / Access Key */}
                   <div className="space-y-1">
                     <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
-                      {openSourceCloudConfig.provider === 'minio_s3' ? 'Access Key ID' : 'Username / Login Email'}
+                      {openSourceCloudConfig.provider === 'minio_s3'
+                        ? 'Access Key ID'
+                        : 'Username'}
                     </label>
                     <input
                       type="text"
                       value={openSourceCloudConfig.username}
                       onChange={(e) => updateOpenSourceCloudConfig({ username: e.target.value })}
-                      placeholder={syncEmail}
-                      className="w-full text-xs px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+                      placeholder="username"
+                      className="w-full text-xs px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200"
                     />
                   </div>
 
-                  {/* Auth Secret / App Password */}
                   <div className="space-y-1">
                     <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
-                      {openSourceCloudConfig.provider === 'minio_s3' ? 'Secret Access Key' : 'App Password / Auth Token'}
+                      {openSourceCloudConfig.provider === 'minio_s3'
+                        ? 'Secret Access Key'
+                        : 'App Password / Auth Token'}
                     </label>
                     <input
                       type="password"
                       value={openSourceCloudConfig.authSecret}
                       onChange={(e) => updateOpenSourceCloudConfig({ authSecret: e.target.value })}
                       placeholder="••••••••••••••••"
-                      className="w-full text-xs px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-emerald-500 font-mono"
+                      className="w-full text-xs px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-mono"
                     />
                   </div>
-
-                  {/* Target Folder or Bucket */}
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
-                      {openSourceCloudConfig.provider === 'minio_s3' ? 'S3 Bucket Name' : 'Remote Storage Directory'}
-                    </label>
-                    <input
-                      type="text"
-                      value={openSourceCloudConfig.provider === 'minio_s3' ? (openSourceCloudConfig.s3Bucket || 'jivanos-backups') : openSourceCloudConfig.remotePath}
-                      onChange={(e) => {
-                        if (openSourceCloudConfig.provider === 'minio_s3') {
-                          updateOpenSourceCloudConfig({ s3Bucket: e.target.value });
-                        } else {
-                          updateOpenSourceCloudConfig({ remotePath: e.target.value });
-                        }
-                      }}
-                      placeholder={openSourceCloudConfig.provider === 'minio_s3' ? 'jivanos-backups' : '/JivanOS_Backups'}
-                      className="w-full text-xs px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-emerald-500 font-mono"
-                    />
-                  </div>
-
-                  {/* S3 Region if applicable */}
-                  {openSourceCloudConfig.provider === 'minio_s3' && (
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
-                        Region (Optional)
-                      </label>
-                      <input
-                        type="text"
-                        value={openSourceCloudConfig.s3Region || 'us-east-1'}
-                        onChange={(e) => updateOpenSourceCloudConfig({ s3Region: e.target.value })}
-                        placeholder="us-east-1"
-                        className="w-full text-xs px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-emerald-500 font-mono"
-                      />
-                    </div>
-                  )}
                 </div>
 
-                {/* Connection Test & Action Buttons */}
                 <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-2.5">
                   <button
                     type="button"
                     disabled={isTestingOpenSource || !openSourceCloudConfig.serverUrl}
                     onClick={handleTestOpenSource}
-                    className="w-full sm:w-auto px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold shadow-xs transition flex items-center justify-center gap-1.5 disabled:opacity-50"
+                    className="w-full sm:w-auto px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold flex items-center justify-center gap-1.5 disabled:opacity-50"
                   >
-                    {isTestingOpenSource ? (
-                      <>
-                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                        <span>Testing Connection...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Cpu className="w-3.5 h-3.5 text-emerald-500" />
-                        <span>Test Server Ping</span>
-                      </>
-                    )}
+                    <Cpu className="w-3.5 h-3.5 text-emerald-500" />
+                    <span>{isTestingOpenSource ? 'Testing...' : 'Test Server Ping'}</span>
                   </button>
 
                   <button
                     type="button"
                     disabled={!!loadingProvider}
                     onClick={() => handleProviderBackup(openSourceCloudConfig.provider)}
-                    className="w-full sm:w-auto px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs shadow-xs transition flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50"
+                    className="w-full sm:w-auto px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs flex items-center justify-center gap-2"
                   >
-                    {loadingProvider === openSourceCloudConfig.provider ? (
-                      <>
-                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                        <span>Syncing to {openSourceCloudConfig.provider.toUpperCase()}...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Upload className="w-3.5 h-3.5" />
-                        <span>Backup to {openSourceCloudConfig.provider === 'nextcloud' ? 'Nextcloud' : openSourceCloudConfig.provider === 'minio_s3' ? 'MinIO' : 'WebDAV'} Now</span>
-                      </>
-                    )}
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Backup Now</span>
                   </button>
                 </div>
 
                 {testResult && (
-                  <div className={`p-2.5 rounded-xl text-[11px] font-medium flex items-center gap-2 ${
-                    testResult.success
-                      ? 'bg-emerald-100/70 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-800'
-                      : 'bg-rose-100/70 dark:bg-rose-950/60 text-rose-800 dark:text-rose-200 border border-rose-300 dark:border-rose-800'
-                  }`}>
-                    {testResult.success ? (
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                    ) : (
-                      <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-                    )}
+                  <div
+                    className={`p-2.5 rounded-xl text-[11px] font-medium flex items-center gap-2 ${
+                      testResult.success
+                        ? 'bg-emerald-100/70 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-200'
+                        : 'bg-rose-100/70 dark:bg-rose-950/60 text-rose-800 dark:text-rose-200'
+                    }`}
+                  >
                     <span>{testResult.message || testResult.error}</span>
                   </div>
                 )}
@@ -868,7 +1401,6 @@ export const BackupModal: React.FC = () => {
           {activeTab === 'local' && (
             <div className="space-y-5">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {/* Download Local Backup */}
                 <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 space-y-3 flex flex-col justify-between">
                   <div className="space-y-1.5">
                     <div className="w-9 h-9 rounded-xl bg-emerald-100 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
@@ -878,7 +1410,7 @@ export const BackupModal: React.FC = () => {
                       Export Local JSON File
                     </h4>
                     <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                      Download an offline copy of all your JivanOS data (tasks, habits, journal, health trackers, and configurations) directly to your computer or mobile device.
+                      Download an offline copy of all your JivanOS data (tasks, habits, medications, bills, and personal profile) directly to your device.
                     </p>
                   </div>
 
@@ -892,14 +1424,13 @@ export const BackupModal: React.FC = () => {
                   </button>
                 </div>
 
-                {/* Restore From File */}
                 <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 space-y-3 flex flex-col justify-between">
                   <div className="space-y-1.5">
                     <div className="w-9 h-9 rounded-xl bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
                       <Upload className="w-4 h-4" />
                     </div>
                     <h4 className="text-sm font-bold text-slate-900 dark:text-white">
-                      Import & Restore from File
+                      Import &amp; Restore from File
                     </h4>
                     <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
                       Select any previously exported JivanOS JSON backup file to instantly restore your data.
@@ -926,15 +1457,14 @@ export const BackupModal: React.FC = () => {
                 </div>
               </div>
 
-              {/* CSV & Separate/Combined Record Keeping Exports */}
               <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 space-y-4">
                 <div className="space-y-1">
                   <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
                     <FileText className="w-4 h-4 text-indigo-500" />
-                    <span>CSV & Separate/Combined Record Keeping Exports</span>
+                    <span>CSV &amp; Combined Archive Exports</span>
                   </h4>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Export your personal habit completion logs, tasks, and schedule items as separate CSV files or as a combined archive for long-term record keeping.
+                    Export your habit completion logs, tasks, and schedule items as separate CSV spreadsheets or a combined JSON bundle.
                   </p>
                 </div>
 
@@ -944,7 +1474,7 @@ export const BackupModal: React.FC = () => {
                     onClick={exportHabitsCSV}
                     className="py-2 px-3 rounded-xl bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 font-bold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer"
                   >
-                    <span>🎯 Habits CSV</span>
+                    <span>Habits CSV</span>
                   </button>
 
                   <button
@@ -952,7 +1482,7 @@ export const BackupModal: React.FC = () => {
                     onClick={exportTasksCSV}
                     className="py-2 px-3 rounded-xl bg-blue-600/10 hover:bg-blue-600/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 font-bold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer"
                   >
-                    <span>📋 Tasks CSV</span>
+                    <span>Tasks CSV</span>
                   </button>
 
                   <button
@@ -960,7 +1490,7 @@ export const BackupModal: React.FC = () => {
                     onClick={exportScheduleCSV}
                     className="py-2 px-3 rounded-xl bg-amber-600/10 hover:bg-amber-600/20 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 font-bold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer"
                   >
-                    <span>📅 Schedule CSV</span>
+                    <span>Schedule CSV</span>
                   </button>
                 </div>
 
@@ -985,7 +1515,7 @@ export const BackupModal: React.FC = () => {
                     Snapshots for:
                   </span>
                   <span className="text-xs font-mono font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 px-2 py-0.5 rounded-md">
-                    {syncEmail}
+                    {activeAccountIdentifier}
                   </span>
                 </div>
                 <button
@@ -999,53 +1529,24 @@ export const BackupModal: React.FC = () => {
                 </button>
               </div>
 
-              {/* Informational banner about data inspection and Google Drive */}
-              <div className="p-3 rounded-2xl bg-slate-100/80 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 text-[11px] text-slate-600 dark:text-slate-300 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <ProviderLogo provider="gdrive" className="w-4 h-4 shrink-0" />
-                  <span>
-                    Need to check your data or move it to your Google Drive? Click <strong>Inspect</strong> to view inside, or <strong>Download</strong> to save the JSON file directly.
-                  </span>
-                </div>
-                <a
-                  href="https://drive.google.com"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="shrink-0 font-semibold text-indigo-600 dark:text-indigo-400 hover:underline inline-flex items-center gap-1"
-                >
-                  <span>Open Drive</span>
-                  <ExternalLink className="w-3 h-3" />
-                </a>
-              </div>
-
               {snapshots.length === 0 ? (
                 <div className="p-8 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 text-center space-y-2">
                   <Database className="w-8 h-8 text-slate-400 mx-auto opacity-60" />
-                  <p className="text-xs text-slate-500 font-medium">No snapshots recorded yet for {syncEmail}.</p>
-                  <p className="text-[11px] text-slate-400">
-                    Trigger a backup using the Commercial Cloud or Open Source tabs to record your first snapshot!
+                  <p className="text-xs text-slate-500 font-medium">
+                    No snapshots recorded yet for {activeAccountIdentifier}.
                   </p>
                 </div>
               ) : (
                 <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
                   {snapshots.map((snap) => {
                     const isRestoring = restoringVersion === snap.version;
-                    const providerLabel =
-                      snap.provider === 'gdrive' ? 'Google Drive' :
-                      snap.provider === 'onedrive' ? 'OneDrive' :
-                      snap.provider === 'mega' ? 'MEGA' :
-                      snap.provider === 'proton' ? 'Proton Drive' :
-                      snap.provider === 'nextcloud' ? 'Nextcloud (WebDAV)' :
-                      snap.provider === 'minio_s3' ? 'MinIO S3' :
-                      snap.provider === 'webdav' ? 'WebDAV Storage' : 'Omni Cloud';
-
                     return (
                       <div
                         key={snap.version}
                         className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/70 dark:border-slate-800 flex items-center justify-between gap-3"
                       >
                         <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-8 h-8 rounded-xl bg-white dark:bg-slate-700/80 border border-slate-200 dark:border-slate-700 flex items-center justify-center shrink-0 shadow-2xs">
+                          <div className="w-8 h-8 rounded-xl bg-white dark:bg-slate-700/80 border border-slate-200 dark:border-slate-700 flex items-center justify-center shrink-0">
                             <ProviderLogo provider={snap.provider} className="w-4 h-4 shrink-0" />
                           </div>
                           <div className="min-w-0">
@@ -1054,69 +1555,35 @@ export const BackupModal: React.FC = () => {
                                 Snapshot #{snap.version}
                               </h5>
                               <span className="text-[10px] px-2 py-0.5 rounded-md font-semibold bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300 shrink-0">
-                                {providerLabel}
+                                {snap.provider}
                               </span>
                             </div>
                             <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5 flex-wrap">
                               <span>{new Date(snap.timestamp).toLocaleString()}</span>
                               <span>•</span>
                               <span>{(snap.sizeBytes / 1024).toFixed(1)} KB</span>
-                              <span>•</span>
-                              <span className="font-mono text-[10px] text-indigo-600 dark:text-indigo-400">
-                                {snap.accountEmail || syncEmail}
-                              </span>
                             </div>
                           </div>
                         </div>
 
                         <div className="flex items-center gap-1.5 shrink-0">
-                          {/* Inspect / View Data button */}
                           <button
                             type="button"
                             onClick={() => setInspectingVersion(snap.version)}
-                            title="Inspect snapshot payload"
-                            className="px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 text-xs font-semibold transition flex items-center gap-1 active:scale-95 cursor-pointer shadow-2xs"
+                            className="px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-semibold flex items-center gap-1"
                           >
                             <Eye className="w-3.5 h-3.5 text-indigo-500" />
                             <span className="hidden sm:inline">Inspect</span>
                           </button>
 
-                          {/* Download JSON button */}
                           <button
                             type="button"
-                            onClick={() =>
-                              window.open(
-                                `/api/backup/download/${encodeURIComponent(
-                                  snap.accountEmail || syncEmail
-                                )}/${snap.version}`,
-                                '_blank'
-                              )
-                            }
-                            title="Download JSON snapshot"
-                            className="px-2.5 py-1.5 rounded-xl border border-emerald-200 dark:border-emerald-800/80 bg-emerald-50/70 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 text-xs font-semibold transition flex items-center gap-1 active:scale-95 cursor-pointer shadow-2xs"
-                          >
-                            <Download className="w-3.5 h-3.5 text-emerald-600" />
-                            <span className="hidden sm:inline">Download</span>
-                          </button>
-
-                          {/* Restore button */}
-                          <button
-                            type="button"
-                            disabled={isRestoring || !!loadingProvider}
+                            disabled={isRestoring}
                             onClick={() => handleRestoreSnapshot(snap.version)}
-                            className="px-2.5 py-1.5 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 text-xs font-semibold transition flex items-center gap-1 active:scale-95 disabled:opacity-50 cursor-pointer shadow-2xs"
+                            className="px-2.5 py-1.5 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 text-xs font-semibold flex items-center gap-1"
                           >
-                            {isRestoring ? (
-                              <>
-                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                                <span className="hidden sm:inline">Restoring...</span>
-                              </>
-                            ) : (
-                              <>
-                                <RotateCcw className="w-3.5 h-3.5" />
-                                <span className="hidden sm:inline">Restore</span>
-                              </>
-                            )}
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline">Restore</span>
                           </button>
                         </div>
                       </div>
@@ -1126,9 +1593,10 @@ export const BackupModal: React.FC = () => {
               )}
             </div>
           )}
-          {/* Mobile APK Build & Sync Tab */}
+
+          {/* TAB 5: MOBILE APK BUILD */}
           {activeTab === 'mobile_apk' && (
-            <div className="space-y-6">
+            <div className="space-y-4">
               <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/40 dark:to-teal-950/40 border border-emerald-200 dark:border-emerald-800">
                 <div className="flex items-start gap-3">
                   <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-md">
@@ -1136,119 +1604,49 @@ export const BackupModal: React.FC = () => {
                   </div>
                   <div>
                     <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                      <span>Real Native Android App (.APK)</span>
+                      <span>Universal Local-First Android APK &amp; Multi-OS App</span>
                       <span className="px-2 py-0.5 text-[10px] font-extrabold uppercase bg-emerald-200 dark:bg-emerald-900 text-emerald-800 dark:text-emerald-200 rounded-md">
-                        Offline-First + Cloud Sync
+                        Zero Personal Data Baked In
                       </span>
                     </h4>
                     <p className="text-xs text-slate-600 dark:text-slate-300 mt-1">
-                      Compile this exact application into an installable Android APK package using Capacitor. The mobile app stores all data locally in high-speed device storage (SQLite/LocalStorage) and automatically synchronizes with the web application via Google Firebase Firestore.
+                      Anyone can install the APK or PWA on Android (including GrapheneOS), iOS, Windows, macOS, or Linux. It starts as a clean Local-First vault and lets each user connect their own OneDrive, Google Drive, Dropbox, Nextcloud, WebDAV, S3, or Syncthing folder.
                     </p>
                   </div>
                 </div>
               </div>
 
-              {/* Real-Time Sync Architecture Clarification */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                <div className="p-4 rounded-2xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 space-y-2">
-                  <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400 font-bold text-xs">
-                    <Database className="w-4 h-4" />
-                    <span>How Local &amp; Web Data Syncs</span>
-                  </div>
-                  <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-                    When you run the app on Android, any offline actions (completing tasks, logging medicine doses, drinking water, journaling) are saved instantly on device. Once connected to WiFi or mobile data, changes automatically upload to your Firebase Firestore document:
-                  </p>
-                  <code className="block p-2 rounded-lg bg-slate-100 dark:bg-slate-900 text-[11px] font-mono text-indigo-600 dark:text-indigo-300">
-                    users/{syncEmail || 'your_account'}/payload
-                  </code>
+              <div className="p-4 rounded-2xl bg-slate-900 text-slate-100 space-y-3 border border-slate-800 font-mono text-xs">
+                <div className="flex items-center gap-2 text-emerald-400 font-sans font-bold">
+                  <Sparkles className="w-4 h-4" />
+                  <span>Build Clean Multi-User Android APK with Capacitor:</span>
                 </div>
-
-                <div className="p-4 rounded-2xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 space-y-2">
-                  <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 font-bold text-xs">
-                    <Cloud className="w-4 h-4" />
-                    <span>Where Google Drive Saves</span>
-                  </div>
-                  <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-                    When you click "Google Drive Backup", your encrypted JSON snapshot is stored directly in your root Google Drive under an application data directory:
-                  </p>
-                  <code className="block p-2 rounded-lg bg-slate-100 dark:bg-slate-900 text-[11px] font-mono text-emerald-600 dark:text-emerald-300">
-                    Google Drive &gt; JivanOS_Backups &gt; snapshot.json
-                  </code>
-                </div>
-              </div>
-
-              {/* Step-by-Step Compilation Commands */}
-              <div className="p-5 rounded-2xl bg-slate-900 text-slate-100 space-y-4 border border-slate-800">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Cpu className="w-4 h-4 text-emerald-400" />
-                    <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
-                      Step-by-Step: Generate .APK File
-                    </span>
-                  </div>
-                  <span className="text-[11px] text-slate-400">Run on your computer with Node.js &amp; Android Studio</span>
-                </div>
-
-                <div className="space-y-3 font-mono text-xs">
-                  <div>
-                    <span className="text-slate-400 font-sans block text-[11px] mb-1">
-                      1. Export the project (Settings &rarr; Export ZIP) and install Capacitor:
-                    </span>
-                    <pre className="p-2.5 rounded-xl bg-black/60 border border-slate-800 text-emerald-300 select-all overflow-x-auto">
-npm install @capacitor/core @capacitor/cli @capacitor/android
-                    </pre>
-                  </div>
-
-                  <div>
-                    <span className="text-slate-400 font-sans block text-[11px] mb-1">
-                      2. Initialize Capacitor configuration:
-                    </span>
-                    <pre className="p-2.5 rounded-xl bg-black/60 border border-slate-800 text-emerald-300 select-all overflow-x-auto">
+                <pre className="p-2.5 rounded-xl bg-black/60 border border-slate-800 text-emerald-300 select-all overflow-x-auto">
+{`npm install @capacitor/core @capacitor/cli @capacitor/android
 npx cap init "JivanOS" "com.jivanos.app" --web-dir "dist"
-                    </pre>
-                  </div>
-
-                  <div>
-                    <span className="text-slate-400 font-sans block text-[11px] mb-1">
-                      3. Build production web assets and attach Android project:
-                    </span>
-                    <pre className="p-2.5 rounded-xl bg-black/60 border border-slate-800 text-emerald-300 select-all overflow-x-auto">
 npm run build && npx cap add android && npx cap sync
-                    </pre>
-                  </div>
-
-                  <div>
-                    <span className="text-slate-400 font-sans block text-[11px] mb-1">
-                      4. Open in Android Studio or compile debug APK directly:
-                    </span>
-                    <pre className="p-2.5 rounded-xl bg-black/60 border border-slate-800 text-emerald-300 select-all overflow-x-auto">
-# Option A: Open Android Studio to build &amp; sign APK
-npx cap open android
-
-# Option B: Direct CLI build (if Android SDK is installed)
-cd android && ./gradlew assembleDebug
-# Generated APK: android/app/build/outputs/apk/debug/app-debug.apk
-                    </pre>
-                  </div>
-                </div>
+cd android && ./gradlew assembleDebug`}
+                </pre>
               </div>
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="p-4 sm:p-5 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 flex items-center justify-between shrink-0 text-xs">
+        <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 flex items-center justify-between shrink-0 text-xs">
           <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-[11px]">
             <span className="w-2 h-2 rounded-full bg-emerald-500" />
-            <span>Target Account:</span>
-            <strong className="font-mono text-slate-800 dark:text-slate-200">{syncEmail}</strong>
+            <span>Mode:</span>
+            <strong className="text-slate-800 dark:text-slate-200">
+              Local-First + {activeMirrorCount} Connected Drive{activeMirrorCount === 1 ? '' : 's'}
+            </strong>
           </div>
           <button
             type="button"
             onClick={() => setIsBackupModalOpen(false)}
-            className="px-4 py-2 rounded-xl bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold hover:bg-slate-300 dark:hover:bg-slate-700 transition"
+            className="px-4 py-1.5 rounded-xl bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold hover:bg-slate-300 dark:hover:bg-slate-700 transition"
           >
-            Close
+            Done
           </button>
         </div>
       </div>
@@ -1258,7 +1656,7 @@ cd android && ./gradlew assembleDebug
         isOpen={inspectingVersion !== null}
         onClose={() => setInspectingVersion(null)}
         version={inspectingVersion}
-        accountEmail={syncEmail}
+        accountEmail={activeAccountIdentifier}
         onRestore={handleRestoreSnapshot}
       />
     </div>

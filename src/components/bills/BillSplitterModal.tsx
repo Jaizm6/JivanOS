@@ -53,7 +53,7 @@ export const BillSplitterModal: React.FC<BillSplitterModalProps> = ({
   const [peopleCount, setPeopleCount] = useState<number>(4);
 
   const [participants, setParticipants] = useState<Participant[]>([
-    { id: '1', name: 'You (Jaiz)' },
+    { id: '1', name: 'You' },
     { id: '2', name: 'Friend 1' },
     { id: '3', name: 'Friend 2' },
     { id: '4', name: 'Friend 3' },

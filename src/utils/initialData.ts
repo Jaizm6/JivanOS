@@ -22,16 +22,18 @@ export const initialProfile: UserProfile = {
   identifier: '',
   name: 'Guest',
   nickname: '',
-  dateOfBirth: '1998-05-15',
-  heightCm: 175,
-  weightKg: 68,
-  gender: 'male',
+  dateOfBirth: '',
+  heightCm: undefined,
+  weightKg: undefined,
+  gender: 'unspecified',
   preferredCurrency: 'INR',
   avatarPhoto: '',
+  bio: '',
   type: 'email',
   twoFactorEnabled: false,
   isPasscodeProtected: false,
   lastSyncedAt: new Date().toISOString(),
+  updatedAt: '',
 };
 
 export const initialAppLock: AppLockConfig = {

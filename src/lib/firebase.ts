@@ -3,6 +3,8 @@ import {
   getAuth,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   signOut as firebaseSignOut,
   onAuthStateChanged,
   User as FirebaseUser,
@@ -17,6 +19,7 @@ import {
   doc,
   setDoc,
   getDoc,
+  getDocFromServer,
   onSnapshot,
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
@@ -58,18 +61,64 @@ function createResilientFirestore(): Firestore {
 
 export const db = createResilientFirestore();
 
+// Validate connection to Firestore on startup
+async function testConnection() {
+  try {
+    await getDocFromServer(doc(db, 'test', 'connection'));
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('the client is offline')) {
+      console.error('Please check your Firebase configuration.');
+    }
+  }
+}
+testConnection();
+
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
+export function isRunningInIframe(): boolean {
+  try {
+    return typeof window !== 'undefined' && window.self !== window.top;
+  } catch {
+    return true;
+  }
+}
+
 /**
- * Sign in with Google using popup
+ * Sign in with Google using popup first, falling back to redirect on standalone mobile/PWA when popups are blocked.
  */
 export async function signInWithGoogle(): Promise<FirebaseUser | null> {
   try {
     const result = await signInWithPopup(auth, googleProvider);
     return result.user;
   } catch (error: any) {
-    console.error('Firebase Google Sign-in error:', error);
+    const code = String(error?.code || '');
+    console.error('Firebase Google Sign-in error:', code, error);
+
+    // If running outside an iframe (e.g., standalone mobile browser / installed PWA) and popup was blocked
+    if (
+      !isRunningInIframe() &&
+      (code === 'auth/popup-blocked' ||
+        code === 'auth/operation-not-supported-in-this-environment' ||
+        code === 'auth/cancelled-popup-request')
+    ) {
+      await signInWithRedirect(auth, googleProvider);
+      return null;
+    }
+
+    if (code === 'auth/unauthorized-domain') {
+      throw new Error(
+        `Domain "${window.location.hostname}" is not authorized in Firebase Auth, or you are in a local WebView. Use Local Folder, OneDrive, Google Drive, Dropbox, WebDAV, or S3 sync in the Sync Hub — no login required.`
+      );
+    }
+    if (code === 'auth/popup-blocked') {
+      throw new Error(
+        'Sign-in popup was blocked by your browser. Please allow popups for this site or use any drive in the Sync & Backup Vault.'
+      );
+    }
+    if (code === 'auth/popup-closed-by-user') {
+      throw new Error('Google sign-in window was closed before completing.');
+    }
     throw error;
   }
 }
@@ -109,13 +158,14 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
       emailVerified: auth.currentUser?.emailVerified,
       isAnonymous: auth.currentUser?.isAnonymous,
       tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData?.map(provider => ({
-        providerId: provider.providerId,
-        email: provider.email,
-      })) || []
+      providerInfo:
+        auth.currentUser?.providerData?.map(provider => ({
+          providerId: provider.providerId,
+          email: provider.email,
+        })) || [],
     },
     operationType,
-    path
+    path,
   };
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
@@ -166,26 +216,46 @@ async function withExponentialBackoff<T>(
 }
 
 /**
- * Persist app payload snapshot directly to Firestore
+ * Persist app payload snapshot directly to Firestore under authenticated user's UID
  */
 export async function saveUserDataToFirestore(userId: string, data: any): Promise<boolean> {
-  const path = `users/${userId}`;
+  const activeUid = auth.currentUser?.uid;
+  if (!userId || !activeUid || userId !== activeUid) {
+    return false;
+  }
+  const path = `users/${activeUid}`;
   try {
-    if (!userId) return false;
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       return false;
     }
-    const docRef = doc(db, 'users', userId);
-    await withExponentialBackoff(() =>
-      setDoc(
-        docRef,
-        {
-          ...data,
-          updatedAt: new Date().toISOString(),
-        },
-        { merge: true }
-      )
-    );
+    const rawPayload = typeof data.payload === 'string' ? data.payload : JSON.stringify(data.payload || {});
+    if (rawPayload.length > 940000) {
+      console.warn('Firestore payload approaches 1MB limit; skipping Firestore write (use Drive/WebDAV/S3/Local Folder).');
+      return false;
+    }
+    const nowIso = new Date().toISOString();
+    const sanitizedDoc: Record<string, any> = {
+      payload: rawPayload,
+      updatedAt: nowIso,
+    };
+    if (typeof data.email === 'string' && data.email.length <= 320) {
+      sanitizedDoc.email = data.email;
+    }
+    if (typeof data.clientVersion === 'number') {
+      sanitizedDoc.clientVersion = Math.min(1000, Math.max(0, data.clientVersion));
+    }
+    if (typeof data.provider === 'string' && data.provider.length <= 64) {
+      sanitizedDoc.provider = data.provider;
+    }
+    if (typeof data.source === 'string' && data.source.length <= 32) {
+      sanitizedDoc.source = data.source;
+    }
+    if (typeof data.timestamp === 'string' && data.timestamp.length <= 64) {
+      sanitizedDoc.timestamp = data.timestamp;
+    }
+
+    const docRef = doc(db, 'users', activeUid);
+    await withExponentialBackoff(() => setDoc(docRef, sanitizedDoc, { merge: true }));
     return true;
   } catch (error: any) {
     if (error?.code === 'permission-denied' || error?.message?.includes('permission')) {
@@ -201,16 +271,19 @@ export async function saveUserDataToFirestore(userId: string, data: any): Promis
 }
 
 /**
- * Fetch app payload snapshot from Firestore
+ * Fetch app payload snapshot from Firestore under authenticated user's UID
  */
 export async function getUserDataFromFirestore(userId: string): Promise<any | null> {
-  const path = `users/${userId}`;
+  const activeUid = auth.currentUser?.uid;
+  if (!userId || !activeUid || userId !== activeUid) {
+    return null;
+  }
+  const path = `users/${activeUid}`;
   try {
-    if (!userId) return null;
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       return null;
     }
-    const docRef = doc(db, 'users', userId);
+    const docRef = doc(db, 'users', activeUid);
     const snap = await withExponentialBackoff(() => getDoc(docRef));
     if (snap.exists()) {
       return snap.data();
@@ -232,12 +305,15 @@ export async function getUserDataFromFirestore(userId: string): Promise<any | nu
 export {
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   firebaseSignOut,
   onAuthStateChanged,
   doc,
   setDoc,
   getDoc,
   onSnapshot,
+  firebaseConfig,
 };
 
 export type { FirebaseUser };

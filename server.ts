@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import type { GoogleGenAI } from '@google/genai';
 
 // Safe directory resolution across tsx (ESM) and bundled CommonJS
@@ -347,6 +348,183 @@ async function startServer() {
       return res.json({ success: true, message: 'Configuration verified.' });
     } catch (e: any) {
       return res.status(500).json({ success: false, error: e?.message || 'Connection test failed.' });
+    }
+  });
+
+  // OAuth 2.0 Popup Callback Handler for Google Drive, Microsoft OneDrive, and Dropbox
+  const oauthCallbackHandler = (_req: express.Request, res: express.Response) => {
+    res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>JivanOS Drive Connected</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+    .card { background: #1e293b; border: 1px solid #334155; border-radius: 16px; padding: 24px 28px; text-align: center; max-width: 360px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h3 style="margin: 0 0 8px; font-size: 16px;">Drive Authorization Complete</h3>
+    <p id="status" style="margin: 0; font-size: 13px; color: #94a3b8;">Completing secure connection...</p>
+  </div>
+  <script>
+    (function() {
+      try {
+        var rawHash = window.location.hash ? window.location.hash.substring(1) : '';
+        var rawSearch = window.location.search ? window.location.search.substring(1) : '';
+        var params = new URLSearchParams(rawHash || rawSearch);
+        var token = params.get('access_token');
+        var error = params.get('error_description') || params.get('error');
+        if (window.opener) {
+          if (token) {
+            window.opener.postMessage({ type: 'JIVANOS_DRIVE_OAUTH_TOKEN', accessToken: token }, '*');
+            document.getElementById('status').textContent = 'Connected! Closing window...';
+          } else {
+            window.opener.postMessage({ type: 'JIVANOS_DRIVE_OAUTH_ERROR', error: error || 'No access token returned.' }, '*');
+            document.getElementById('status').textContent = error || 'Authorization cancelled.';
+          }
+          setTimeout(function() { window.close(); }, 400);
+        } else {
+          window.location.href = '/';
+        }
+      } catch (e) {
+        if (window.opener) {
+          window.opener.postMessage({ type: 'JIVANOS_DRIVE_OAUTH_ERROR', error: e.message }, '*');
+        }
+      }
+    })();
+  </script>
+</body>
+</html>`);
+  };
+  app.get(['/auth/oauth-callback', '/auth/oauth-callback/', '/auth/callback', '/auth/callback/'], oauthCallbackHandler);
+
+  // WebDAV / Nextcloud Server Proxy (Prevents CORS blocks on self-hosted Nextcloud/ownCloud/Koofr/pCloud/NAS)
+  app.post('/api/backup/webdav-proxy', async (req, res) => {
+    const { targetUrl, method = 'GET', username = '', password = '', content } = req.body || {};
+    if (!targetUrl || typeof targetUrl !== 'string') {
+      return res.status(400).json({ success: false, error: 'Target WebDAV URL is required.' });
+    }
+    try {
+      const authHeader = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');
+      const headers: Record<string, string> = {
+        Authorization: authHeader,
+      };
+      if (method === 'PROPFIND') headers['Depth'] = '0';
+      if (method === 'PUT') headers['Content-Type'] = 'application/json; charset=utf-8';
+
+      const upstream = await fetch(targetUrl, {
+        method,
+        headers,
+        body: method === 'PUT' ? content : undefined,
+      });
+      const bodyText = method === 'GET' ? await upstream.text() : '';
+      return res.json({
+        success: upstream.status >= 200 && upstream.status < 300,
+        status: upstream.status,
+        body: bodyText,
+      });
+    } catch (e: any) {
+      return res.status(500).json({ success: false, error: e?.message || 'WebDAV proxy request failed.' });
+    }
+  });
+
+  // S3-Compatible Object Storage Proxy (AWS SigV4 for AWS S3, Cloudflare R2, MinIO, Backblaze B2, DigitalOcean Spaces)
+  app.post('/api/backup/s3-proxy', async (req, res) => {
+    const {
+      endpoint = '',
+      bucket = '',
+      region = 'us-east-1',
+      accessKey = '',
+      secretKey = '',
+      objectKey = 'jivanos-sync.json',
+      method = 'GET',
+      content = '',
+    } = req.body || {};
+
+    if (!endpoint || !bucket || !accessKey || !secretKey) {
+      return res.status(400).json({ success: false, error: 'S3 endpoint, bucket, accessKey, and secretKey are required.' });
+    }
+
+    try {
+      const cleanEndpoint = String(endpoint).trim().replace(/\/+$/, '');
+      const cleanBucket = String(bucket).trim().replace(/^\/+|\/+$/g, '');
+      const cleanKey = String(objectKey).trim().replace(/^\/+/, '');
+      const cleanRegion = String(region || 'us-east-1').trim() || 'us-east-1';
+
+      const targetUrl = `${cleanEndpoint}/${cleanBucket}/${cleanKey}`;
+      const parsedUrl = new URL(targetUrl);
+
+      const now = new Date();
+      const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
+      const dateStamp = amzDate.slice(0, 8);
+
+      const payloadStr = method === 'PUT' ? String(content || '') : '';
+      const payloadHash = crypto.createHash('sha256').update(payloadStr, 'utf8').digest('hex');
+
+      const canonicalUri = parsedUrl.pathname;
+      const canonicalQueryString = '';
+      const hostHeader = parsedUrl.host;
+      const canonicalHeaders =
+        `host:${hostHeader}\n` +
+        `x-amz-content-sha256:${payloadHash}\n` +
+        `x-amz-date:${amzDate}\n`;
+      const signedHeaders = 'host;x-amz-content-sha256;x-amz-date';
+
+      const canonicalRequest = [
+        method,
+        canonicalUri,
+        canonicalQueryString,
+        canonicalHeaders,
+        signedHeaders,
+        payloadHash,
+      ].join('\n');
+
+      const algorithm = 'AWS4-HMAC-SHA256';
+      const credentialScope = `${dateStamp}/${cleanRegion}/s3/aws4_request`;
+      const stringToSign = [
+        algorithm,
+        amzDate,
+        credentialScope,
+        crypto.createHash('sha256').update(canonicalRequest, 'utf8').digest('hex'),
+      ].join('\n');
+
+      const hmac = (key: Buffer | string, data: string) =>
+        crypto.createHmac('sha256', key).update(data, 'utf8').digest();
+
+      const kDate = hmac(`AWS4${secretKey}`, dateStamp);
+      const kRegion = hmac(kDate, cleanRegion);
+      const kService = hmac(kRegion, 's3');
+      const kSigning = hmac(kService, 'aws4_request');
+      const signature = crypto.createHmac('sha256', kSigning).update(stringToSign, 'utf8').digest('hex');
+
+      const authorizationHeader =
+        `${algorithm} Credential=${accessKey}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+
+      const headers: Record<string, string> = {
+        Authorization: authorizationHeader,
+        'x-amz-date': amzDate,
+        'x-amz-content-sha256': payloadHash,
+      };
+      if (method === 'PUT') {
+        headers['Content-Type'] = 'application/json; charset=utf-8';
+      }
+
+      const upstream = await fetch(targetUrl, {
+        method,
+        headers,
+        body: method === 'PUT' ? payloadStr : undefined,
+      });
+
+      const bodyText = method === 'GET' && upstream.status === 200 ? await upstream.text() : '';
+      return res.json({
+        success: upstream.status >= 200 && upstream.status < 300,
+        status: upstream.status,
+        body: bodyText,
+      });
+    } catch (e: any) {
+      return res.status(500).json({ success: false, error: e?.message || 'S3 request failed.' });
     }
   });
 

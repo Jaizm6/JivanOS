@@ -1,0 +1,116 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net: Default deny for all unmatched paths
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Phase 3: Hardened Global Helpers
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Validation Blueprint 1: UserSyncDoc (/users/{userId})
+    function isValidUserSyncDoc(data) {
+      return data.keys().hasAll(['payload', 'updatedAt'])
+        && data.keys().hasOnly(['email', 'payload', 'clientVersion', 'provider', 'source', 'timestamp', 'updatedAt'])
+        && data.payload is string && data.payload.size() >= 2 && data.payload.size() <= 950000
+        && data.updatedAt is string && data.updatedAt.size() >= 10 && data.updatedAt.size() <= 64
+        && (!('email' in data) || (data.email is string && data.email.size() <= 320))
+        && (!('clientVersion' in data) || (data.clientVersion is number && data.clientVersion >= 0 && data.clientVersion <= 1000))
+        && (!('provider' in data) || (data.provider is string && data.provider.size() <= 64))
+        && (!('source' in data) || (data.source is string && data.source.size() <= 32))
+        && (!('timestamp' in data) || (data.timestamp is string && data.timestamp.size() <= 64));
+    }
+
+    // Validation Blueprint 2: UserData (/users/{userId}/data/state)
+    function isValidUserData(data, userId) {
+      return data.keys().hasAll(['userId', 'payload', 'updatedAt'])
+        && data.keys().hasOnly(['userId', 'email', 'payload', 'version', 'updatedAt'])
+        && data.userId is string && data.userId == userId && data.userId == request.auth.uid
+        && data.payload is string && data.payload.size() >= 2 && data.payload.size() <= 950000
+        && data.updatedAt is string && data.updatedAt.size() >= 10 && data.updatedAt.size() <= 64
+        && (!('email' in data) || (data.email is string && data.email.size() <= 320))
+        && (!('version' in data) || (data.version is number && data.version >= 0));
+    }
+
+    // Validation Blueprint 3: QuoteReminder (/users/{userId}/reminders/{reminderId})
+    function isValidQuoteReminder(data, userId) {
+      return data.keys().hasAll(['userId', 'quoteId', 'reminderTime', 'enabled'])
+        && data.keys().hasOnly(['userId', 'quoteId', 'reminderTime', 'enabled', 'updatedAt'])
+        && data.userId is string && data.userId == userId && data.userId == request.auth.uid
+        && data.quoteId is string && data.quoteId.size() >= 1 && data.quoteId.size() <= 128
+        && data.reminderTime is string && data.reminderTime.size() >= 1 && data.reminderTime.size() <= 32
+        && data.enabled is bool
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
+    }
+
+    // Startup connectivity check path (read-only)
+    match /test/connection {
+      allow get: if true;
+      allow list, create, update, delete: if false;
+    }
+
+    // Primary User Sync & Backup Document
+    match /users/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId);
+      allow list: if false;
+      allow create: if isOwner(userId) && isValidId(userId) && isValidUserSyncDoc(incoming());
+      allow update: if isOwner(userId) && isValidId(userId) && isValidUserSyncDoc(incoming()) && (
+        incoming().diff(existing()).affectedKeys().hasOnly(['email', 'payload', 'clientVersion', 'provider', 'source', 'timestamp', 'updatedAt'])
+      );
+      allow delete: if isOwner(userId) && isValidId(userId);
+
+      // Subcollection: /users/{userId}/data/state
+      match /data/state {
+        allow get: if isOwner(userId) && isValidId(userId)
+          && exists(/databases/$(database)/documents/users/$(userId));
+        allow list: if false;
+        allow create: if isOwner(userId) && isValidId(userId)
+          && isValidUserData(incoming(), userId)
+          && exists(/databases/$(database)/documents/users/$(userId));
+        allow update: if isOwner(userId) && isValidId(userId)
+          && isValidUserData(incoming(), userId)
+          && incoming().userId == existing().userId
+          && incoming().diff(existing()).affectedKeys().hasOnly(['email', 'payload', 'version', 'updatedAt'])
+          && exists(/databases/$(database)/documents/users/$(userId));
+        allow delete: if isOwner(userId) && isValidId(userId)
+          && exists(/databases/$(database)/documents/users/$(userId));
+      }
+
+      // Subcollection: /users/{userId}/reminders/{reminderId}
+      match /reminders/{reminderId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(reminderId)
+          && exists(/databases/$(database)/documents/users/$(userId));
+        allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow create: if isOwner(userId) && isValidId(userId) && isValidId(reminderId)
+          && isValidQuoteReminder(incoming(), userId)
+          && exists(/databases/$(database)/documents/users/$(userId));
+        allow update: if isOwner(userId) && isValidId(userId) && isValidId(reminderId)
+          && isValidQuoteReminder(incoming(), userId)
+          && incoming().userId == existing().userId
+          && incoming().diff(existing()).affectedKeys().hasOnly(['quoteId', 'reminderTime', 'enabled', 'updatedAt'])
+          && exists(/databases/$(database)/documents/users/$(userId));
+        allow delete: if isOwner(userId) && isValidId(userId) && isValidId(reminderId)
+          && exists(/databases/$(database)/documents/users/$(userId));
+      }
+    }
+  }
+}

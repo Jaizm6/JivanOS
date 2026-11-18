@@ -3,11 +3,14 @@ import React from 'react';
 export type ProviderId =
   | 'gdrive'
   | 'onedrive'
+  | 'dropbox'
   | 'nextcloud'
   | 'minio_s3'
+  | 's3'
   | 'mega'
   | 'proton'
   | 'local'
+  | 'local_folder'
   | 'webdav'
   | 'omni_cloud'
   | 'firebase';
@@ -102,8 +105,26 @@ export const ProviderLogo: React.FC<ProviderLogoProps> = ({
         </svg>
       );
 
+    case 'dropbox':
+      return (
+        <svg
+          viewBox="0 0 24 24"
+          className={className}
+          style={sizeStyle}
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path d="M6 2L0 6l6 4 6-4-6-4z" fill="#0061FF" />
+          <path d="M18 2l-6 4 6 4 6-4-6-4z" fill="#0061FF" />
+          <path d="M0 14l6 4 6-4-6-4-6 4z" fill="#0061FF" />
+          <path d="M18 10l-6 4 6 4 6-4-6-4z" fill="#0061FF" />
+          <path d="M6 19.3l6 3.7 6-3.7L12 15.5l-6 3.8z" fill="#0061FF" />
+        </svg>
+      );
+
+    case 's3':
     case 'minio_s3':
-      // Official MinIO crimson geometric winged logo
+      // Official S3 / MinIO geometric storage logo
       return (
         <svg
           viewBox="0 0 24 24"
@@ -128,6 +149,34 @@ export const ProviderLogo: React.FC<ProviderLogoProps> = ({
             d="M5 16.2L12 20.2L19 16.2"
             stroke="#C72C48"
             strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      );
+
+    case 'local_folder':
+      return (
+        <svg
+          viewBox="0 0 24 24"
+          className={className}
+          style={sizeStyle}
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <rect width="24" height="24" rx="5" fill="#059669" fillOpacity="0.12" />
+          <path
+            d="M3 7C3 5.9 3.9 5 5 5H9.5L11.5 7H19C20.1 7 21 7.9 21 9V17C21 18.1 20.1 19 19 19H5C3.9 19 3 18.1 3 17V7Z"
+            fill="#10B981"
+            fillOpacity="0.2"
+            stroke="#059669"
+            strokeWidth="1.8"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M9.5 13L12 10.5L14.5 13M12 10.5V16"
+            stroke="#059669"
+            strokeWidth="1.9"
             strokeLinecap="round"
             strokeLinejoin="round"
           />

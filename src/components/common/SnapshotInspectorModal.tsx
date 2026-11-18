@@ -244,9 +244,9 @@ export const SnapshotInspectorModal: React.FC<SnapshotInspectorModalProps> = ({
                     <span>Profile Info in Snapshot</span>
                   </h4>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] text-slate-600 dark:text-slate-300">
-                    <div>Name: <strong className="text-slate-900 dark:text-white">{data.profile.name || 'Jaiprakash'}</strong></div>
-                    <div>Nickname: <strong className="text-slate-900 dark:text-white">{data.profile.nickname || 'Jaiz'}</strong></div>
-                    <div>Email: <strong className="text-slate-900 dark:text-white">{data.profile.identifier || accountEmail}</strong></div>
+                    <div>Name: <strong className="text-slate-900 dark:text-white">{data.profile.name || 'Guest'}</strong></div>
+                    <div>Nickname: <strong className="text-slate-900 dark:text-white">{data.profile.nickname || '—'}</strong></div>
+                    <div>Email: <strong className="text-slate-900 dark:text-white">{data.profile.identifier || accountEmail || 'Local'}</strong></div>
                     <div>Currency: <strong className="text-slate-900 dark:text-white">{data.profile.preferredCurrency || 'INR'}</strong></div>
                   </div>
                 </div>

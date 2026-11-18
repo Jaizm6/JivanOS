@@ -323,10 +323,17 @@ export const SyncStatusWidget: React.FC = () => {
               )}
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-bold text-slate-900 dark:text-white truncate">
-                  {userProfile?.name || 'JivanOS User'}
+                  {userProfile?.nickname && userProfile.nickname !== 'User'
+                    ? userProfile.nickname
+                    : userProfile?.name && userProfile.name !== 'Guest'
+                    ? userProfile.name
+                    : 'Local Vault User'}
                 </p>
                 <p className="text-[10.5px] text-slate-500 dark:text-slate-400 truncate font-mono">
-                  {firebaseUser?.email || userProfile?.email || userProfile?.identifier || 'jaiprakashog@gmail.com'}
+                  {firebaseUser?.email ||
+                    userProfile?.email ||
+                    userProfile?.identifier ||
+                    'Local-First • Multi-Drive Ready'}
                 </p>
               </div>
             </div>
@@ -339,9 +346,9 @@ export const SyncStatusWidget: React.FC = () => {
                 </span>
               </div>
               <div className="flex items-center justify-between text-[11px]">
-                <span className="text-slate-500 dark:text-slate-400">Avatar State:</span>
+                <span className="text-slate-500 dark:text-slate-400">Personal Details:</span>
                 <span className="font-semibold text-emerald-600 dark:text-emerald-400">
-                  {userProfile?.avatarPhoto ? 'Photo Synced' : 'Default Avatar'}
+                  {userProfile?.avatarPhoto ? 'Photo + DOB Synced' : 'Auto-Sync Enabled'}
                 </span>
               </div>
             </div>
@@ -355,7 +362,7 @@ export const SyncStatusWidget: React.FC = () => {
                 className="text-[10.5px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
               >
                 <ShieldCheck className="w-3 h-3" />
-                <span>Sign in with Google</span>
+                <span>Optional Cloud Sign-In</span>
               </button>
             ) : (
               <span className="text-[10.5px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
@@ -368,7 +375,7 @@ export const SyncStatusWidget: React.FC = () => {
               onClick={() => setIsAuthModalOpen(true)}
               className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 cursor-pointer"
             >
-              Account Settings
+              Edit Profile
             </button>
           </div>
         </div>
@@ -392,7 +399,7 @@ export const SyncStatusWidget: React.FC = () => {
             </div>
 
             <p className="text-[10.5px] text-slate-500 dark:text-slate-400 pb-1.5">
-              These items are saved together so PC and Mobile show identical data:
+              These items + your personal profile sync together across PC &amp; Mobile:
             </p>
 
             <div className="grid grid-cols-2 gap-1.5 text-[11px]">
@@ -424,7 +431,7 @@ export const SyncStatusWidget: React.FC = () => {
               {isCopied ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
               <span>{isCopied ? 'Link Copied!' : 'Copy Mobile Link'}</span>
             </button>
-            <span className="text-[10px] text-slate-400">PWA Ready</span>
+            <span className="text-[10px] text-slate-400">Local-First PWA</span>
           </div>
         </div>
       </div>
@@ -436,7 +443,7 @@ export const SyncStatusWidget: React.FC = () => {
             <div className="flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
               <h4 className="text-xs sm:text-sm font-bold text-indigo-950 dark:text-indigo-200">
-                Android Installation & Cross-Platform Alignment Guide
+                Android, iOS, Windows, macOS &amp; Linux Multi-Drive Sync Guide
               </h4>
             </div>
             <button
@@ -449,36 +456,25 @@ export const SyncStatusWidget: React.FC = () => {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-slate-700 dark:text-slate-300">
-            {/* Question 1: Do I have to make another APK again? */}
             <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-indigo-100 dark:border-indigo-900/60 space-y-1.5 shadow-2xs">
               <div className="flex items-center gap-1.5 font-bold text-slate-900 dark:text-white text-[12px]">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                <span>Do I need to make another APK whenever changes happen?</span>
+                <span>Local-First on Any OS (No Login Required)</span>
               </div>
               <p className="text-[11.5px] leading-relaxed text-slate-600 dark:text-slate-300">
-                <strong className="text-indigo-600 dark:text-indigo-400">NO, never!</strong> This application is built as a cloud-synchronized Progressive Web App (PWA). Every time code updates or features change, your mobile app automatically receives the latest version live from the web server upon opening or refreshing. You do not need to rebuild or install a new APK.
+                JivanOS works 100% locally out of the box on Android (including GrapheneOS), iPhone, Windows, macOS, and Linux. Zero personal developer data is bundled in the app.
               </p>
             </div>
 
-            {/* Question 2: Why weren't tasks/meds/journal visible on mobile? */}
             <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-indigo-100 dark:border-indigo-900/60 space-y-1.5 shadow-2xs">
               <div className="flex items-center gap-1.5 font-bold text-slate-900 dark:text-white text-[12px]">
                 <AlertCircle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
-                <span>How to see your PC tasks, meds & profile picture on mobile:</span>
+                <span>How to sync tasks, meds &amp; profile across PC and phone:</span>
               </div>
               <ol className="text-[11.5px] list-decimal list-inside space-y-1 text-slate-600 dark:text-slate-300 leading-relaxed">
-                <li>
-                  Open Chrome on your phone with the app URL:{' '}
-                  <button
-                    onClick={handleCopyAppUrl}
-                    className="font-mono text-indigo-600 dark:text-indigo-400 underline font-semibold cursor-pointer"
-                  >
-                    {isCopied ? 'Copied!' : 'Copy Link'}
-                  </button>
-                </li>
-                <li>Tap <strong>Sign in with Google</strong> (or use the same email <code>jaiprakashog@gmail.com</code>).</li>
-                <li>Tap <strong>Pull Latest from Cloud</strong> in this widget to immediately mirror all PC changes.</li>
-                <li>Tap Chrome Menu (⋮) &gt; <strong>"Install app"</strong> or <strong>"Add to Home Screen"</strong> for full-screen native mobile experience!</li>
+                <li>Open <strong>Backup &amp; Multi-Drive Sync</strong> from the sidebar.</li>
+                <li>Connect the same <strong>OneDrive, Google Drive, Dropbox, Nextcloud, WebDAV, S3, or Syncthing folder</strong> on both devices.</li>
+                <li>Your tasks, habits, meds, bills, and personal details (photo, DOB, name) merge automatically on interval and on edit!</li>
               </ol>
             </div>
           </div>

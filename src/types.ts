@@ -711,6 +711,7 @@ export interface UserProfile {
   isPasscodeProtected: boolean;
   passcodeHash?: string;
   lastSyncedAt?: string;
+  updatedAt?: string;
 }
 
 export interface AppNotification {
@@ -741,15 +742,68 @@ export type CloudBackupProvider =
   | 'firebase'
   | 'gdrive'
   | 'onedrive'
+  | 'dropbox'
   | 'mega'
   | 'proton'
   | 'nextcloud'
   | 'webdav'
   | 'minio_s3'
+  | 's3'
   | 'omni_cloud'
   | 'local'
-  | 'icloud'
-  | 'dropbox';
+  | 'local_folder'
+  | 'icloud';
+
+export type SyncDriveId =
+  | 'local_folder'
+  | 'onedrive'
+  | 'gdrive'
+  | 'dropbox'
+  | 'webdav'
+  | 'nextcloud'
+  | 's3'
+  | 'firebase';
+
+export interface SyncDriveConfig {
+  id: SyncDriveId;
+  enabled: boolean;
+  autoBackupEnabled?: boolean;
+  label?: string;
+  // WebDAV / Nextcloud
+  serverUrl?: string;
+  username?: string;
+  password?: string;
+  remotePath?: string;
+  // S3 / R2 / MinIO / B2
+  s3Endpoint?: string;
+  s3Bucket?: string;
+  s3Region?: string;
+  s3AccessKey?: string;
+  s3SecretKey?: string;
+  // OAuth / Token drives (OneDrive, Google Drive, Dropbox)
+  clientId?: string;
+  accessToken?: string;
+  refreshToken?: string;
+  tokenExpiresAt?: number;
+  accountEmail?: string;
+  folderName?: string;
+  //Status metadata
+  lastSyncedAt?: string;
+  lastBackupAt?: string;
+  lastStatus?: 'idle' | 'syncing' | 'synced' | 'error';
+  lastError?: string;
+}
+
+export interface JoplinSyncSettings {
+  primaryTarget: SyncDriveId | 'none';
+  autoSyncIntervalMinutes: 0 | 5 | 15 | 30 | 60;
+  syncOnChange: boolean;
+  syncOnStartup: boolean;
+  syncPersonalDetails: boolean;
+  e2eeEnabled: boolean;
+  e2eePassphrase?: string;
+  drives: Record<SyncDriveId, SyncDriveConfig>;
+}
 
 export interface OpenSourceCloudConfig {
   provider: 'nextcloud' | 'webdav' | 'minio_s3';

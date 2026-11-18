@@ -2315,7 +2315,7 @@ export const SettingsManager: React.FC = () => {
                 type="text"
                 value={nameInput}
                 onChange={e => setNameInput(e.target.value)}
-                placeholder="Jaiprakash"
+                placeholder="Your full name"
                 className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
               />
             </div>
@@ -2327,7 +2327,7 @@ export const SettingsManager: React.FC = () => {
                 type="text"
                 value={nicknameInput}
                 onChange={e => setNicknameInput(e.target.value)}
-                placeholder="Jaiz (example)"
+                placeholder="Display name"
                 className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
               />
             </div>
@@ -2339,6 +2339,7 @@ export const SettingsManager: React.FC = () => {
                 type="email"
                 value={emailInput}
                 onChange={e => setEmailInput(e.target.value)}
+                placeholder="you@example.com"
                 className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
               />
             </div>

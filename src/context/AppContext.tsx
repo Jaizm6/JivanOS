@@ -19,6 +19,7 @@ import {
   HabitStep,
   HydrationState,
   InboxItem,
+  JoplinSyncSettings,
   ListGroup,
   Medication,
   OpenSourceCloudConfig,
@@ -27,6 +28,8 @@ import {
   Routine,
   RoutineItem,
   ScheduleItem,
+  SyncDriveConfig,
+  SyncDriveId,
   TaskItem,
   TaskStatus,
   ThemeStyle,
@@ -62,12 +65,23 @@ import {
   doc,
   onSnapshot,
   signInWithGoogle,
+  getRedirectResult,
   firebaseSignOut,
   onAuthStateChanged,
   saveUserDataToFirestore,
   getUserDataFromFirestore,
   FirebaseUser,
 } from '../lib/firebase';
+import {
+  DEFAULT_JOPLIN_SYNC_SETTINGS,
+  mergeSyncPayloads,
+  encodeSyncEnvelope,
+  decodeSyncEnvelope,
+  pullFromDrive,
+  pushToDrive,
+  pickLocalSyncDirectory,
+  launchDriveOAuthPopup,
+} from '../utils/joplinSyncEngine';
 
 export interface GlobalTimerState {
   activeId: string | null;
@@ -337,6 +351,12 @@ interface AppContextType {
   openSourceCloudConfig: OpenSourceCloudConfig;
   updateOpenSourceCloudConfig: (cfg: Partial<OpenSourceCloudConfig>) => void;
   testOpenSourceCloudConnection: () => Promise<{ success: boolean; message?: string; error?: string }>;
+  joplinSyncSettings: JoplinSyncSettings;
+  updateJoplinSyncSettings: (cfg: Partial<JoplinSyncSettings>) => void;
+  updateDriveConfig: (driveId: SyncDriveId, cfg: Partial<SyncDriveConfig>) => void;
+  syncDriveNow: (driveId?: SyncDriveId, options?: { isBackupSnapshot?: boolean }) => Promise<{ success: boolean; message: string }>;
+  pickLocalFolderForSync: () => Promise<{ success: boolean; folderName?: string; error?: string }>;
+  connectDriveOAuth: (driveId: 'onedrive' | 'gdrive' | 'dropbox', clientId?: string) => Promise<{ success: boolean; error?: string }>;
   isOnline: boolean;
   offlinePendingQueue: any[];
   retryOfflineQueue: () => Promise<void>;
@@ -587,26 +607,28 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
   }, []);
 
-  // Core Data States with LocalStorage Persistence
+  // Core Data States with LocalStorage Persistence (Local-First by Default, Zero Shipped Personal Data)
   const [profile, setProfile] = useState<UserProfile>(() => {
     try {
-      const hasExplicitAuth = localStorage.getItem('omniplan_user_explicit_login') === 'true';
       const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_profile`);
-      if (saved && hasExplicitAuth) {
+      if (saved) {
         const parsed = JSON.parse(saved);
+        if (!parsed.updatedAt) {
+          return initialProfile;
+        }
         return {
           ...initialProfile,
           ...parsed,
           name: parsed.name || 'Guest',
           nickname: parsed.nickname || '',
           identifier: parsed.identifier || '',
-          dateOfBirth: parsed.dateOfBirth || '1998-05-15',
-          heightCm: parsed.heightCm || 175,
-          weightKg: parsed.weightKg || 68,
-          gender: parsed.gender || 'male',
+          email: parsed.email || parsed.identifier || '',
+          dateOfBirth: parsed.dateOfBirth || '',
+          gender: parsed.gender || 'unspecified',
           preferredCurrency: parsed.preferredCurrency || 'INR',
           avatarPhoto: parsed.avatarPhoto || '',
           bio: parsed.bio || '',
+          updatedAt: parsed.updatedAt,
         };
       }
       return initialProfile;
@@ -1137,6 +1159,83 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return [];
   });
 
+  // Deleted item tombstones for conflict-free Joplin sync merges
+  const [deletedIds, setDeletedIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_deleted_ids`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed.slice(-500);
+      }
+    } catch {}
+    return [];
+  });
+
+  const recordDeletedId = useCallback((id: string) => {
+    if (!id) return;
+    setDeletedIds(prev => {
+      if (prev.includes(id)) return prev;
+      const next = [...prev, id].slice(-500);
+      try {
+        localStorage.setItem(`${LOCAL_STORAGE_KEY}_deleted_ids`, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  }, []);
+
+  // Joplin-Style Multi-Drive Sync & Auto-Backup Configuration
+  const [joplinSyncSettings, setJoplinSyncSettings] = useState<JoplinSyncSettings>(() => {
+    try {
+      const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_joplin_sync_settings`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return {
+          ...DEFAULT_JOPLIN_SYNC_SETTINGS,
+          ...parsed,
+          drives: {
+            ...DEFAULT_JOPLIN_SYNC_SETTINGS.drives,
+            ...(parsed.drives || {}),
+          },
+        };
+      }
+    } catch {}
+    return DEFAULT_JOPLIN_SYNC_SETTINGS;
+  });
+
+  const updateJoplinSyncSettings = useCallback((cfg: Partial<JoplinSyncSettings>) => {
+    setJoplinSyncSettings(prev => {
+      const next: JoplinSyncSettings = {
+        ...prev,
+        ...cfg,
+        drives: cfg.drives ? { ...prev.drives, ...cfg.drives } : prev.drives,
+      };
+      try {
+        localStorage.setItem(`${LOCAL_STORAGE_KEY}_joplin_sync_settings`, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  }, []);
+
+  const updateDriveConfig = useCallback((driveId: SyncDriveId, cfg: Partial<SyncDriveConfig>) => {
+    setJoplinSyncSettings(prev => {
+      const currentDrive = prev.drives[driveId] || DEFAULT_JOPLIN_SYNC_SETTINGS.drives[driveId];
+      const next: JoplinSyncSettings = {
+        ...prev,
+        drives: {
+          ...prev.drives,
+          [driveId]: {
+            ...currentDrive,
+            ...cfg,
+          },
+        },
+      };
+      try {
+        localStorage.setItem(`${LOCAL_STORAGE_KEY}_joplin_sync_settings`, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  }, []);
+
   // Open Source Cloud Configuration (Nextcloud / WebDAV / MinIO S3)
   const [openSourceCloudConfig, setOpenSourceCloudConfig] = useState<OpenSourceCloudConfig>(() => {
     try {
@@ -1148,11 +1247,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return {
       provider: 'nextcloud',
       enabled: false,
-      serverUrl: 'https://cloud.nextcloud.example/remote.php/dav/files/user/',
+      serverUrl: '',
       username: '',
       authSecret: '',
-      remotePath: '/JivanOS_Backups',
-      s3Bucket: 'jivanos-backups',
+      remotePath: '/JivanOS',
+      s3Bucket: 'jivanos-sync',
       s3Region: 'us-east-1',
     };
   });
@@ -1162,15 +1261,25 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   );
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(new Date().toISOString());
 
-  // Firebase Auth State & Real-time Cloud Sync
+  // Firebase Auth State & Real-time Cloud Sync (Strictly Authenticated UID)
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const importBackupJSONRef = useRef<(jsonStr: string) => boolean>(() => false);
+  const compilePayloadRef = useRef<() => string>(() => '{}');
   const isApplyingRemoteSyncRef = useRef(false);
   const isInitialMountRef = useRef(true);
   const lastSyncedPayloadHashRef = useRef<string>('');
 
   useEffect(() => {
     let firestoreUnsub: (() => void) | null = null;
+
+    // Handle redirect sign-in result if returning from mobile redirect flow
+    getRedirectResult(auth)
+      .then((res) => {
+        if (res?.user) {
+          localStorage.setItem('omniplan_user_explicit_login', 'true');
+        }
+      })
+      .catch(() => {});
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setFirebaseUser(user);
@@ -1179,31 +1288,53 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         firestoreUnsub = null;
       }
 
-      if (user && user.email) {
-        const emailLower = user.email.toLowerCase();
+      if (user && user.uid) {
+        const emailLower = (user.email || '').toLowerCase();
         localStorage.setItem('omniplan_user_explicit_login', 'true');
-        setSyncEmailState(emailLower);
-        setSavedSyncEmails(prev => (prev.includes(emailLower) ? prev : [...prev, emailLower]));
-        localStorage.setItem(`${LOCAL_STORAGE_KEY}_sync_email`, emailLower);
+        if (emailLower) {
+          setSyncEmailState(emailLower);
+          setSavedSyncEmails(prev => (prev.includes(emailLower) ? prev : [...prev, emailLower]));
+          localStorage.setItem(`${LOCAL_STORAGE_KEY}_sync_email`, emailLower);
+        }
 
-        // Update profile
+        // Preserve any local personal customizations (avatarPhoto, nickname, DOB, height/weight) when signing in
         setProfile(prev => ({
           ...prev,
           id: user.uid,
-          identifier: emailLower,
-          name: user.displayName || (prev.name && prev.name !== 'Guest' ? prev.name : emailLower.split('@')[0]),
-          avatarPhoto: user.photoURL || prev.avatarPhoto,
+          identifier: emailLower || prev.identifier,
+          email: emailLower || prev.email,
+          name:
+            prev.name && prev.name !== 'Guest'
+              ? prev.name
+              : user.displayName || (emailLower ? emailLower.split('@')[0] : 'User'),
+          avatarPhoto: prev.avatarPhoto || user.photoURL || '',
           type: 'email',
+          updatedAt: prev.updatedAt || new Date().toISOString(),
         }));
 
-        // Try initial pull from Firestore
+        updateDriveConfig('firebase', {
+          enabled: true,
+          accountEmail: emailLower,
+          lastStatus: 'synced',
+        });
+
+        // Initial conflict-free merge pull from authenticated user's Firestore doc (users/{uid})
         try {
           const remoteData = await getUserDataFromFirestore(user.uid);
           if (remoteData && remoteData.payload) {
+            const plainRemote = await decodeSyncEnvelope(
+              typeof remoteData.payload === 'string' ? remoteData.payload : JSON.stringify(remoteData.payload),
+              joplinSyncSettings.e2eePassphrase
+            );
+            const merged = mergeSyncPayloads(
+              compilePayloadRef.current(),
+              plainRemote,
+              joplinSyncSettings.syncPersonalDetails
+            );
             isApplyingRemoteSyncRef.current = true;
-            importBackupJSONRef.current(remoteData.payload);
+            importBackupJSONRef.current(JSON.stringify(merged));
             setLastSyncTime(remoteData.updatedAt || new Date().toISOString());
-            lastSyncedPayloadHashRef.current = typeof remoteData.payload === 'string' ? remoteData.payload : JSON.stringify(remoteData.payload);
+            setSyncStatus('synced');
             setTimeout(() => {
               isApplyingRemoteSyncRef.current = false;
             }, 1500);
@@ -1212,25 +1343,40 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           console.warn('Initial Firestore pull info:', e);
         }
 
-        // Attach Real-time listener on user's Firestore document
+        // Attach Real-time listener on authenticated user's Firestore document
         try {
-          firestoreUnsub = onSnapshot(doc(db, 'users', user.uid), (docSnap) => {
-            if (docSnap.exists()) {
-              const remoteData = docSnap.data();
-              if (remoteData && remoteData.payload) {
-                isApplyingRemoteSyncRef.current = true;
-                importBackupJSONRef.current(remoteData.payload);
-                setLastSyncTime(remoteData.updatedAt || new Date().toISOString());
-                setSyncStatus('synced');
-                lastSyncedPayloadHashRef.current = typeof remoteData.payload === 'string' ? remoteData.payload : JSON.stringify(remoteData.payload);
-                setTimeout(() => {
-                  isApplyingRemoteSyncRef.current = false;
-                }, 1500);
+          firestoreUnsub = onSnapshot(
+            doc(db, 'users', user.uid),
+            async (docSnap) => {
+              if (docSnap.exists()) {
+                const remoteData = docSnap.data();
+                if (remoteData && remoteData.payload) {
+                  try {
+                    const plainRemote = await decodeSyncEnvelope(
+                      typeof remoteData.payload === 'string' ? remoteData.payload : JSON.stringify(remoteData.payload),
+                      joplinSyncSettings.e2eePassphrase
+                    );
+                    const merged = mergeSyncPayloads(
+                      compilePayloadRef.current(),
+                      plainRemote,
+                      joplinSyncSettings.syncPersonalDetails
+                    );
+                    isApplyingRemoteSyncRef.current = true;
+                    importBackupJSONRef.current(JSON.stringify(merged));
+                    setLastSyncTime(remoteData.updatedAt || new Date().toISOString());
+                    setSyncStatus('synced');
+                  } catch {} finally {
+                    setTimeout(() => {
+                      isApplyingRemoteSyncRef.current = false;
+                    }, 1500);
+                  }
+                }
               }
+            },
+            (err) => {
+              console.warn('Firestore realtime snapshot listener info:', err);
             }
-          }, (err) => {
-            console.warn('Firestore realtime snapshot listener info:', err);
-          });
+          );
         } catch (e) {
           console.warn('Error attaching Firestore realtime listener:', e);
         }
@@ -1242,109 +1388,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (firestoreUnsub) firestoreUnsub();
     };
   }, []);
-
-  // Initial pull & real-time listener from Firestore + backend /api/sync ONLY when user is signed in
-  useEffect(() => {
-    const targetEmail = (syncEmail || firebaseUser?.email || profile?.identifier || '').trim().toLowerCase();
-    if (!targetEmail) {
-      return;
-    }
-    const emailDocId = targetEmail.replace(/[^a-zA-Z0-9_-]/g, '_');
-    let emailFirestoreUnsub: (() => void) | null = null;
-
-    const applyRemotePayloadIfNewer = (rawPayload: any, remoteUpdatedAt?: string | null) => {
-      if (!rawPayload) return;
-      const localLastSync = localStorage.getItem(`${LOCAL_STORAGE_KEY}_last_sync_time`);
-      const serverTime = remoteUpdatedAt ? new Date(remoteUpdatedAt).getTime() : 0;
-      const localTime = localLastSync ? new Date(localLastSync).getTime() : 0;
-
-      const localTasksRaw = localStorage.getItem(`${LOCAL_STORAGE_KEY}_tasks`);
-      const isDefaultTasks = !localTasksRaw || (localTasksRaw.includes('task_1') && !localTasksRaw.includes('task_179'));
-
-      if (serverTime > localTime || !localLastSync || isDefaultTasks) {
-        isApplyingRemoteSyncRef.current = true;
-        importBackupJSONRef.current(rawPayload);
-        const ts = remoteUpdatedAt || new Date().toISOString();
-        setLastSyncTime(ts);
-        try {
-          localStorage.setItem(`${LOCAL_STORAGE_KEY}_last_sync_time`, ts);
-        } catch {}
-        setSyncStatus('synced');
-        lastSyncedPayloadHashRef.current = typeof rawPayload === 'string' ? rawPayload : JSON.stringify(rawPayload);
-        setTimeout(() => {
-          isApplyingRemoteSyncRef.current = false;
-        }, 1200);
-      } else {
-        setSyncStatus('synced');
-      }
-    };
-
-    const pullLatestState = async () => {
-      // 1. Pull from Firebase Firestore by target email key (works on Web & standalone Android APK)
-      try {
-        const firestoreData = await getUserDataFromFirestore(emailDocId);
-        if (firestoreData && firestoreData.payload) {
-          applyRemotePayloadIfNewer(firestoreData.payload, firestoreData.updatedAt);
-        }
-      } catch (err) {
-        console.warn('Firestore email sync pull info:', err);
-      }
-
-      // 2. Also pull from backend /api/sync when running in web environment
-      try {
-        const res = await fetch(`/api/sync?email=${encodeURIComponent(targetEmail)}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.success && data.hasUpdate && data.latestData) {
-            applyRemotePayloadIfNewer(data.latestData, data.updatedAt);
-          }
-        }
-      } catch {
-        // Standalone APK or offline from local Express server; Firestore handles cloud sync
-      }
-    };
-
-    // Attach real-time Firestore listener on the email account document
-    try {
-      emailFirestoreUnsub = onSnapshot(
-        doc(db, 'users', emailDocId),
-        (docSnap) => {
-          if (docSnap.exists()) {
-            const remoteData = docSnap.data();
-            if (remoteData && remoteData.payload) {
-              const incomingStr = typeof remoteData.payload === 'string' ? remoteData.payload : JSON.stringify(remoteData.payload);
-              if (incomingStr !== lastSyncedPayloadHashRef.current) {
-                applyRemotePayloadIfNewer(remoteData.payload, remoteData.updatedAt);
-              } else {
-                setSyncStatus('synced');
-              }
-            }
-          }
-        },
-        () => {
-          // Ignore snapshot listener permission/offline warnings gracefully
-        }
-      );
-    } catch {}
-
-    // Defer initial background sync pull slightly so first paint and UI hydration are never blocked
-    const initialSyncTimer = setTimeout(pullLatestState, 1000);
-
-    // Pull when switching back to tab (e.g. mobile browser focus)
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        pullLatestState();
-      }
-    };
-    window.addEventListener('focus', handleVisibility);
-    document.addEventListener('visibilitychange', handleVisibility);
-    return () => {
-      clearTimeout(initialSyncTimer);
-      if (emailFirestoreUnsub) emailFirestoreUnsub();
-      window.removeEventListener('focus', handleVisibility);
-      document.removeEventListener('visibilitychange', handleVisibility);
-    };
-  }, [syncEmail]);
 
   // Modals state
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
@@ -2512,6 +2555,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const deleteMedication = (id: string) => {
+    recordDeletedId(id);
     setMedications(prev => prev.filter(m => m.id !== id));
   };
 
@@ -3066,6 +3110,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const deleteTask = (id: string) => {
+    recordDeletedId(id);
     setTasks(prev => prev.filter(t => t.id !== id));
   };
 
@@ -5187,15 +5232,23 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setAlarmHistory([]);
   };
 
-  // Deterministic data hash to detect actual user changes (excluding transient timestamps)
+  // Deterministic data hash to detect actual user changes (including all personal profile fields)
   const getDataHash = () => {
     try {
       return JSON.stringify({
         profile: {
           name: profile.name,
+          nickname: profile.nickname,
           avatarPhoto: profile.avatarPhoto,
           email: profile.email,
           identifier: profile.identifier,
+          bio: profile.bio,
+          dateOfBirth: profile.dateOfBirth,
+          heightCm: profile.heightCm,
+          weightKg: profile.weightKg,
+          gender: profile.gender,
+          preferredCurrency: profile.preferredCurrency,
+          updatedAt: profile.updatedAt,
         },
         medications,
         doseLogs,
@@ -5219,6 +5272,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           goalId: t.goalId,
           project: t.project,
           isStarred: t.isStarred,
+          updatedAt: t.updatedAt,
         })),
         goals,
         bills,
@@ -5236,17 +5290,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         themeStyle,
         accentTone,
         favoriteQuoteIds,
+        deletedIds,
       });
     } catch {
       return '';
     }
   };
 
-  // Cloud Sync & Backups
+  // Cloud Sync & Backups (Includes Personal Profile Details +Tombstones)
   const compilePayload = () => {
     return JSON.stringify({
       version: 2,
-      profile,
+      profile: joplinSyncSettings.syncPersonalDetails
+        ? profile
+        : { ...initialProfile, preferredCurrency: profile.preferredCurrency || (currency as any) },
       medications,
       doseLogs,
       hydration,
@@ -5271,9 +5328,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       themeStyle,
       accentTone,
       favoriteQuoteIds,
+      deletedIds,
       exportedAt: new Date().toISOString(),
     });
   };
+
+  useEffect(() => {
+    compilePayloadRef.current = compilePayload;
+  });
 
   const setSyncEmail = (email: string) => {
     const clean = email.trim().toLowerCase();
@@ -5286,6 +5348,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       identifier: prev.identifier || clean,
       email: prev.email || clean,
       name: !prev.name || prev.name === 'Guest' ? clean.split('@')[0] : prev.name,
+      updatedAt: new Date().toISOString(),
     }));
     if (!savedSyncEmails.includes(clean)) {
       const updated = [...savedSyncEmails, clean];
@@ -5321,6 +5384,23 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setOpenSourceCloudConfig(prev => {
       const next = { ...prev, ...cfg };
       localStorage.setItem(`${LOCAL_STORAGE_KEY}_opensource_cloud`, JSON.stringify(next));
+      // Keep Joplin WebDAV / Nextcloud / S3 drive config in sync
+      if (next.provider === 'nextcloud' || next.provider === 'webdav') {
+        updateDriveConfig(next.provider, {
+          serverUrl: next.serverUrl,
+          username: next.username,
+          password: next.authSecret,
+          remotePath: next.remotePath || '/JivanOS',
+        });
+      } else if (next.provider === 'minio_s3') {
+        updateDriveConfig('s3', {
+          s3Endpoint: next.serverUrl,
+          s3AccessKey: next.username,
+          s3SecretKey: next.authSecret,
+          s3Bucket: next.s3Bucket || 'jivanos-sync',
+          s3Region: next.s3Region || 'us-east-1',
+        });
+      }
       return next;
     });
   };
@@ -5345,77 +5425,209 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
-  const syncWithCloud = async () => {
-    if (!isOnline) {
-      setSyncStatus('offline');
-      return;
-    }
-    const targetEmail = (syncEmail || firebaseUser?.email || profile?.identifier || '').trim().toLowerCase();
-    if (!targetEmail) {
-      // Do not push to a shared or personal email when the user has not signed in
-      setSyncStatus('idle');
-      return;
-    }
-    setSyncStatus('syncing');
-    const payload = compilePayload();
-    const emailDocId = targetEmail.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const nowIso = new Date().toISOString();
-
-    // Always persist latest snapshot locally first
-    try {
-      localStorage.setItem(`${LOCAL_STORAGE_KEY}_cloud_snapshot_${emailDocId}`, payload);
-      localStorage.setItem(`${LOCAL_STORAGE_KEY}_last_sync_time`, nowIso);
-    } catch {}
-
-    let firestoreSynced = false;
-    let apiSynced = false;
-
-    // 1. Primary Cloud Sync: Firebase Firestore (works on both Web & standalone Android APK)
-    try {
-      firestoreSynced = await saveUserDataToFirestore(emailDocId, {
-        email: targetEmail,
-        payload,
-        clientVersion: 1,
+  const pickLocalFolderForSync = async (): Promise<{ success: boolean; folderName?: string; error?: string }> => {
+    const res = await pickLocalSyncDirectory();
+    if (res.success && res.folderName) {
+      updateDriveConfig('local_folder', {
+        enabled: true,
+        folderName: res.folderName,
+        lastStatus: 'idle',
+        lastError: undefined,
       });
-      if (firebaseUser?.uid && firebaseUser.uid !== emailDocId) {
-        await saveUserDataToFirestore(firebaseUser.uid, {
-          email: targetEmail,
-          payload,
-          clientVersion: 1,
+      if (joplinSyncSettings.primaryTarget === 'none') {
+        updateJoplinSyncSettings({ primaryTarget: 'local_folder' });
+      }
+    }
+    return res;
+  };
+
+  const connectDriveOAuth = async (
+    driveId: 'onedrive' | 'gdrive' | 'dropbox',
+    customClientId?: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const effectiveClientId = customClientId || joplinSyncSettings.drives[driveId]?.clientId || '';
+      const { accessToken } = await launchDriveOAuthPopup(driveId, effectiveClientId);
+      updateDriveConfig(driveId, {
+        enabled: true,
+        clientId: effectiveClientId,
+        accessToken,
+        lastStatus: 'synced',
+        lastError: undefined,
+      });
+      if (joplinSyncSettings.primaryTarget === 'none') {
+        updateJoplinSyncSettings({ primaryTarget: driveId });
+      }
+      return { success: true };
+    } catch (err: any) {
+      updateDriveConfig(driveId, {
+        lastStatus: 'error',
+        lastError: err?.message || 'OAuth failed',
+      });
+      return { success: false, error: err?.message || 'OAuth failed' };
+    }
+  };
+
+  /**
+   * Joplin-Style Bi-Directional Sync & Multi-Drive Auto-Backup
+   * 1. Pulls remote state from the target drive (if present)
+   * 2. Merges entities + personal profile details conflict-free
+   * 3. Pushes merged state back to target drive + mirrors snapshots to all enabled Auto-Backup drives
+   */
+  const syncDriveNow = async (
+    specificDriveId?: SyncDriveId,
+    options?: { isBackupSnapshot?: boolean }
+  ): Promise<{ success: boolean; message: string }> => {
+    const targetDriveId: SyncDriveId | 'none' =
+      specificDriveId ||
+      (joplinSyncSettings.primaryTarget !== 'none'
+        ? joplinSyncSettings.primaryTarget
+        : firebaseUser?.uid
+        ? 'firebase'
+        : 'none');
+
+    const nowIso = new Date().toISOString();
+    setSyncStatus('syncing');
+
+    try {
+      let currentPlainJson = compilePayload();
+
+      // Step 1: If we have a primary or specified drive, pull & merge first (unless purely creating a backup snapshot)
+      if (targetDriveId !== 'none') {
+        const driveCfg = joplinSyncSettings.drives[targetDriveId];
+        updateDriveConfig(targetDriveId, { lastStatus: 'syncing', lastError: undefined });
+
+        try {
+          const rawRemote = await pullFromDrive(targetDriveId, driveCfg, firebaseUser?.uid);
+          if (rawRemote && rawRemote.trim().length > 2) {
+            const decodedRemote = await decodeSyncEnvelope(rawRemote, joplinSyncSettings.e2eePassphrase);
+            const mergedObj = mergeSyncPayloads(
+              currentPlainJson,
+              decodedRemote,
+              joplinSyncSettings.syncPersonalDetails
+            );
+            currentPlainJson = JSON.stringify(mergedObj);
+            isApplyingRemoteSyncRef.current = true;
+            importBackupJSON(currentPlainJson);
+            setTimeout(() => {
+              isApplyingRemoteSyncRef.current = false;
+            }, 1200);
+          }
+        } catch (pullErr: any) {
+          // If first-time push or 404, continue to push
+          if (pullErr?.message?.includes('E2EE') || pullErr?.message?.includes('Decryption')) {
+            throw pullErr;
+          }
+        }
+
+        // Step 2: Encode (optional E2EE) and push merged state to target drive
+        const encodedPayload = await encodeSyncEnvelope(
+          currentPlainJson,
+          joplinSyncSettings.e2eeEnabled,
+          joplinSyncSettings.e2eePassphrase
+        );
+
+        await pushToDrive(targetDriveId, driveCfg, encodedPayload, {
+          isBackupSnapshot: options?.isBackupSnapshot,
+          firebaseUid: firebaseUser?.uid,
+          email: firebaseUser?.email || syncEmail || profile.identifier,
+        });
+
+        updateDriveConfig(targetDriveId, {
+          enabled: true,
+          lastStatus: 'synced',
+          lastSyncedAt: nowIso,
+          lastBackupAt: options?.isBackupSnapshot ? nowIso : driveCfg.lastBackupAt,
+          lastError: undefined,
         });
       }
-    } catch (e) {
-      console.warn('Firestore cloud sync warning:', e);
-    }
 
-    // 2. Secondary REST Sync: Backend /api/sync (when running in Web preview/server mode)
-    try {
-      const res = await fetch('/api/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: targetEmail,
-          email: targetEmail,
-          payload,
-          clientVersion: 1,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success) {
-          apiSynced = true;
+      // Step 3: Mirror to all other drives marked with `autoBackupEnabled: true`
+      const encodedForBackups = await encodeSyncEnvelope(
+        currentPlainJson,
+        joplinSyncSettings.e2eeEnabled,
+        joplinSyncSettings.e2eePassphrase
+      );
+
+      const allDriveIds = Object.keys(joplinSyncSettings.drives) as SyncDriveId[];
+      const mirroredDrives: string[] = [];
+
+      for (const dId of allDriveIds) {
+        if (dId === targetDriveId) continue;
+        const dCfg = joplinSyncSettings.drives[dId];
+        if (!dCfg?.autoBackupEnabled) continue;
+        try {
+          await pushToDrive(dId, dCfg, encodedForBackups, {
+            isBackupSnapshot: true,
+            firebaseUid: firebaseUser?.uid,
+            email: firebaseUser?.email || syncEmail || profile.identifier,
+          });
+          updateDriveConfig(dId, {
+            lastBackupAt: nowIso,
+            lastStatus: 'synced',
+            lastError: undefined,
+          });
+          mirroredDrives.push(dCfg.label || dId);
+        } catch (mirrorErr: any) {
+          updateDriveConfig(dId, {
+            lastStatus: 'error',
+            lastError: mirrorErr?.message || 'Auto-backup failed',
+          });
         }
       }
-    } catch {
-      // Standalone Android APK does not run a local Express server; Firestore + local snapshot handle sync
-    }
 
-    setLastSyncTime(nowIso);
-    if (firestoreSynced || apiSynced || isOnline) {
+      // Also save local snapshot in localStorage & server history when online
+      try {
+        localStorage.setItem(`${LOCAL_STORAGE_KEY}_last_sync_time`, nowIso);
+      } catch {}
+
+      const activeAccount = (firebaseUser?.email || syncEmail || profile.identifier || 'local_vault').trim().toLowerCase();
+      try {
+        await fetch('/api/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: activeAccount,
+            email: activeAccount,
+            payload: currentPlainJson,
+            clientVersion: 2,
+          }),
+        });
+      } catch {}
+
+      setLastSyncTime(nowIso);
       setSyncStatus('synced');
-    } else {
-      setSyncStatus('offline');
+
+      const primaryLabel =
+        targetDriveId !== 'none'
+          ? joplinSyncSettings.drives[targetDriveId]?.label || targetDriveId
+          : 'Local Device Vault';
+      const mirrorSuffix = mirroredDrives.length > 0 ? ` + mirrored to ${mirroredDrives.join(', ')}` : '';
+      return {
+        success: true,
+        message: `Synced with ${primaryLabel}${mirrorSuffix}. Personal profile & modules up to date.`,
+      };
+    } catch (err: any) {
+      if (targetDriveId !== 'none') {
+        updateDriveConfig(targetDriveId, {
+          lastStatus: 'error',
+          lastError: err?.message || 'Sync failed',
+        });
+      }
+      setSyncStatus('error');
+      return {
+        success: false,
+        message: err?.message || 'Sync encountered an error.',
+      };
     }
+  };
+
+  const syncWithCloud = async () => {
+    if (!isOnline && joplinSyncSettings.primaryTarget !== 'local_folder') {
+      setSyncStatus('offline');
+      return;
+    }
+    await syncDriveNow();
   };
 
   const createCloudBackup = async (
@@ -5424,48 +5636,50 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   ) => {
     try {
       const payload = compilePayload();
-      const targetEmail = (syncEmail || firebaseUser?.email || profile?.identifier || '').trim().toLowerCase();
+      const targetEmail = (syncEmail || firebaseUser?.email || profile?.identifier || 'local_vault').trim().toLowerCase();
 
-      if (provider === 'local' || !targetEmail) {
+      if (provider === 'local') {
         downloadLocalBackupFile();
         return true;
       }
-      const emailDocId = targetEmail.replace(/[^a-zA-Z0-9_-]/g, '_');
 
-      const providerName =
-        provider === 'firebase' ? 'Firebase Cloud' :
-        provider === 'gdrive' ? 'Google Drive' :
-        provider === 'onedrive' ? 'Microsoft OneDrive' :
-        provider === 'mega' ? 'MEGA Cloud' :
-        provider === 'proton' ? 'Proton Drive' :
-        provider === 'nextcloud' ? 'Nextcloud (WebDAV)' :
-        provider === 'webdav' ? 'WebDAV Storage' :
-        provider === 'minio_s3' ? 'MinIO S3 Storage' :
-        provider === 'omni_cloud' ? 'JivanOS Cloud Vault' : provider.toUpperCase();
+      // Map CloudBackupProvider to Joplin SyncDriveId if applicable
+      const driveMap: Partial<Record<CloudBackupProvider, SyncDriveId>> = {
+        local_folder: 'local_folder',
+        onedrive: 'onedrive',
+        gdrive: 'gdrive',
+        dropbox: 'dropbox',
+        nextcloud: 'nextcloud',
+        webdav: 'webdav',
+        minio_s3: 's3',
+        s3: 's3',
+        firebase: 'firebase',
+      };
 
-      // Always persist backup snapshot to Firebase Firestore so standalone Android APK works without Express backend
-      let firestoreOk = false;
-      try {
-        firestoreOk = await saveUserDataToFirestore(emailDocId, {
-          email: targetEmail,
-          payload,
-          provider,
-          source,
-          timestamp: new Date().toISOString(),
-        });
-      } catch {}
+      const mappedDrive = driveMap[provider];
+      if (mappedDrive) {
+        const dCfg = joplinSyncSettings.drives[mappedDrive];
+        const isConfigured =
+          mappedDrive === 'local_folder'
+            ? Boolean(dCfg?.folderName)
+            : mappedDrive === 'firebase'
+            ? Boolean(firebaseUser?.uid)
+            : mappedDrive === 'nextcloud' || mappedDrive === 'webdav'
+            ? Boolean(dCfg?.serverUrl)
+            : mappedDrive === 's3'
+            ? Boolean(dCfg?.s3Endpoint && dCfg?.s3Bucket)
+            : Boolean(dCfg?.accessToken);
 
-      if (provider === 'firebase' && firestoreOk) {
-        pushNotification(
-          'Firebase Cloud Sync',
-          `Snapshot synchronized to Firebase Firestore database for ${targetEmail}`,
-          'system'
-        );
-        setLastSyncTime(new Date().toISOString());
-        setSyncStatus('synced');
-        return true;
+        if (isConfigured) {
+          const res = await syncDriveNow(mappedDrive, { isBackupSnapshot: true });
+          if (res.success) {
+            pushNotification('Drive Sync & Backup', res.message, 'system');
+            return true;
+          }
+        }
       }
 
+      // Also store snapshot in server snapshot history for Snapshot Inspector
       try {
         const res = await fetch('/api/backup/create', {
           method: 'POST',
@@ -5485,27 +5699,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             setLastSyncTime(new Date().toISOString());
             setSyncStatus('synced');
             pushNotification(
-              'Backup Created',
-              `Saved encrypted snapshot to ${providerName} for ${targetEmail}`,
+              'Backup Snapshot Saved',
+              `Created snapshot on ${provider.toUpperCase()} (including personal details & tasks).`,
               'system'
             );
             return true;
           }
         }
-      } catch {
-        // Standalone APK fallback
-      }
+      } catch {}
 
-      if (firestoreOk) {
-        setLastSyncTime(new Date().toISOString());
-        setSyncStatus('synced');
-        pushNotification(
-          'Backup Created',
-          `Saved encrypted snapshot to ${providerName} for ${targetEmail}`,
-          'system'
-        );
-        return true;
-      }
       return false;
     } catch {
       return false;
@@ -5533,24 +5735,37 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const restoreCloudBackup = async (version?: number) => {
     try {
-      // Check Firebase Firestore first if authenticated
-      if (firebaseUser?.uid) {
+      // If a Joplin primary drive is active and no historical version is specified, pull & merge from primary drive
+      if (!version && joplinSyncSettings.primaryTarget !== 'none') {
+        const res = await syncDriveNow(joplinSyncSettings.primaryTarget);
+        if (res.success) return true;
+      }
+
+      // Check Firebase Firestore if authenticated
+      if (!version && firebaseUser?.uid) {
         const remoteData = await getUserDataFromFirestore(firebaseUser.uid);
         if (remoteData && remoteData.payload) {
-          const success = importBackupJSON(remoteData.payload);
+          const decoded = await decodeSyncEnvelope(remoteData.payload, joplinSyncSettings.e2eePassphrase);
+          const merged = mergeSyncPayloads(
+            compilePayload(),
+            decoded,
+            joplinSyncSettings.syncPersonalDetails
+          );
+          const success = importBackupJSON(JSON.stringify(merged));
           if (success) {
-            pushNotification('Firebase Restore', 'Restored latest state from Firebase Firestore.', 'system');
+            pushNotification('Cloud Restore', 'Merged latest state & personal profile from Firebase Cloud.', 'system');
             return true;
           }
         }
       }
 
+      const activeAccount = (syncEmail || firebaseUser?.email || profile?.identifier || 'local_vault').trim().toLowerCase();
       const res = await fetch('/api/backup/restore', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          userId: syncEmail,
-          email: syncEmail,
+          userId: activeAccount,
+          email: activeAccount,
           version,
         }),
       });
@@ -5575,12 +5790,22 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       if (data.profile) {
         setProfile(prev => {
-          const merged = { ...prev, ...data.profile };
+          const merged = mergeSyncPayloads(
+            { profile: prev },
+            { profile: data.profile },
+            joplinSyncSettings.syncPersonalDetails
+          ).profile || { ...prev, ...data.profile };
           try {
             localStorage.setItem(`${LOCAL_STORAGE_KEY}_profile`, JSON.stringify(merged));
           } catch {}
           return merged;
         });
+      }
+      if (Array.isArray(data.deletedIds)) {
+        setDeletedIds(data.deletedIds);
+        try {
+          localStorage.setItem(`${LOCAL_STORAGE_KEY}_deleted_ids`, JSON.stringify(data.deletedIds));
+        } catch {}
       }
       if (data.medications) {
         setMedications(data.medications);
@@ -5682,7 +5907,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_favorite_quotes`, JSON.stringify(data.favoriteQuoteIds)); } catch {}
       }
 
-      // Update current hash reference so imported snapshot doesn't immediately bounce back
       setTimeout(() => {
         lastSyncedPayloadHashRef.current = getDataHash();
       }, 100);
@@ -5699,7 +5923,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     importBackupJSONRef.current = importBackupJSON;
   });
 
-  // Auto-sync: triggers on every change made by user (debounced by 1.5s after user edits)
+  // Joplin-style Auto-Sync on any local change (tasks, habits, meds, or personal profile details)
   useEffect(() => {
     if (isInitialMountRef.current) {
       isInitialMountRef.current = false;
@@ -5709,18 +5933,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (isApplyingRemoteSyncRef.current) {
       return;
     }
+    if (!joplinSyncSettings.syncOnChange) {
+      return;
+    }
 
     const timer = setTimeout(() => {
       try {
         const currentDataHash = getDataHash();
-        // If data hasn't changed since last sync, skip unnecessary network call
         if (!currentDataHash || currentDataHash === lastSyncedPayloadHashRef.current) {
           return;
         }
         lastSyncedPayloadHashRef.current = currentDataHash;
         syncWithCloud().catch(() => {});
       } catch {}
-    }, 1500);
+    }, 2500);
 
     return () => clearTimeout(timer);
   }, [
@@ -5733,9 +5959,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     bills,
     hydration,
     profile.name,
+    profile.nickname,
     profile.avatarPhoto,
     profile.email,
     profile.identifier,
+    profile.bio,
+    profile.dateOfBirth,
+    profile.heightCm,
+    profile.weightKg,
+    profile.gender,
+    profile.preferredCurrency,
+    profile.updatedAt,
     todoLists,
     listGroups,
     tags,
@@ -5743,16 +5977,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     inboxItems,
     workflowStages,
     currency,
+    deletedIds,
+    joplinSyncSettings.syncOnChange,
   ]);
 
-  // Periodic auto-backup / auto-sync interval: syncs every 1 hour (60 minutes) when idle & online
+  // Joplin-style Configurable Interval Auto-Sync & Focus Sync
   useEffect(() => {
-    if (!isOnline) return;
+    const mins = joplinSyncSettings.autoSyncIntervalMinutes;
+    if (!mins || mins <= 0) return;
     const interval = setInterval(() => {
-      syncWithCloud().catch(() => {});
-    }, 60 * 60 * 1000); // Exactly 1 hour
+      if (isOnline || joplinSyncSettings.primaryTarget === 'local_folder') {
+        syncWithCloud().catch(() => {});
+      }
+    }, mins * 60 * 1000);
     return () => clearInterval(interval);
-  }, [isOnline]);
+  }, [isOnline, joplinSyncSettings.autoSyncIntervalMinutes, joplinSyncSettings.primaryTarget]);
 
   const unreadNotificationsCount = useMemo(
     () => notifications.filter(n => !n.read).length,
@@ -5769,7 +6008,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   );
 
   const updateUserProfile = useCallback(
-    (p: Partial<UserProfile>) => setProfile(prev => ({ ...prev, ...p })),
+    (p: Partial<UserProfile>) =>
+      setProfile(prev => {
+        const next: UserProfile = {
+          ...prev,
+          ...p,
+          updatedAt: new Date().toISOString(),
+          lastSyncedAt: new Date().toISOString(),
+        };
+        try {
+          localStorage.setItem(`${LOCAL_STORAGE_KEY}_profile`, JSON.stringify(next));
+        } catch {}
+        return next;
+      }),
     []
   );
 
@@ -5792,7 +6043,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         convertInboxItemToTask,
         profile,
         setProfile,
-        isLoggedIn: profile.identifier !== '',
+        isLoggedIn: Boolean(firebaseUser || profile.identifier || joplinSyncSettings.primaryTarget !== 'none'),
         firebaseUser,
         login,
         loginWithGoogle,
@@ -5962,6 +6213,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         openSourceCloudConfig,
         updateOpenSourceCloudConfig,
         testOpenSourceCloudConnection,
+        joplinSyncSettings,
+        updateJoplinSyncSettings,
+        updateDriveConfig,
+        syncDriveNow,
+        pickLocalFolderForSync,
+        connectDriveOAuth,
         syncWithCloud,
         createCloudBackup,
         restoreCloudBackup,

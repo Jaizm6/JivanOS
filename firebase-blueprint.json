@@ -1,55 +1,108 @@
 {
   "entities": {
-    "UserProfile": {
-      "title": "UserProfile",
-      "description": "User profile information",
+    "UserSyncDoc": {
+      "title": "UserSyncDoc",
+      "description": "Authenticated user's synchronized JivanOS state and profile snapshot",
       "type": "object",
       "properties": {
-        "userId": { "type": "string" },
-        "name": { "type": "string" },
-        "email": { "type": "string" },
-        "nickname": { "type": "string" },
-        "avatarPhoto": { "type": "string" },
-        "bio": { "type": "string" },
-        "gender": { "type": "string" },
-        "dateOfBirth": { "type": "string" },
-        "heightCm": { "type": "number" },
-        "weightKg": { "type": "number" },
-        "preferredCurrency": { "type": "string" },
-        "updatedAt": { "type": "string" }
+        "email": {
+          "type": "string",
+          "maxLength": 320,
+          "description": "Owner account email address"
+        },
+        "payload": {
+          "type": "string",
+          "maxLength": 950000,
+          "description": "Serialized or AES-256-GCM encrypted JivanOS snapshot JSON"
+        },
+        "clientVersion": {
+          "type": "number",
+          "description": "Schema version of client sync engine"
+        },
+        "provider": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Active sync target provider identifier"
+        },
+        "source": {
+          "type": "string",
+          "maxLength": 32,
+          "description": "Sync trigger source (manual or auto)"
+        },
+        "timestamp": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "ISO timestamp of snapshot creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "ISO timestamp of last write"
+        }
       },
-      "required": ["userId", "email"]
+      "required": ["payload", "updatedAt"]
     },
     "UserData": {
       "title": "UserData",
-      "description": "User state data payload for backup and synchronization",
+      "description": "User state data payload for backup subcollection",
       "type": "object",
       "properties": {
-        "userId": { "type": "string" },
-        "email": { "type": "string" },
-        "payload": { "type": "string" },
-        "version": { "type": "number" },
-        "updatedAt": { "type": "string" }
+        "userId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 320
+        },
+        "payload": {
+          "type": "string",
+          "maxLength": 950000
+        },
+        "version": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "string",
+          "maxLength": 64
+        }
       },
-      "required": ["userId", "payload"]
+      "required": ["userId", "payload", "updatedAt"]
     },
     "QuoteReminder": {
       "title": "QuoteReminder",
       "description": "User scheduled quote reminders",
       "type": "object",
       "properties": {
-        "userId": { "type": "string" },
-        "quoteId": { "type": "string" },
-        "reminderTime": { "type": "string" },
-        "enabled": { "type": "boolean" }
+        "userId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "quoteId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "reminderTime": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "updatedAt": {
+          "type": "string",
+          "maxLength": 64
+        }
       },
       "required": ["userId", "quoteId", "reminderTime", "enabled"]
     }
   },
   "firestore": {
     "/users/{userId}": {
-      "schema": "UserProfile",
-      "description": "User profile and configuration document"
+      "schema": "UserSyncDoc",
+      "description": "Authenticated user's primary sync & backup state document"
     },
     "/users/{userId}/data/state": {
       "schema": "UserData",

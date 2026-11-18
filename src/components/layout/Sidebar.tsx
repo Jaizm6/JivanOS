@@ -354,11 +354,14 @@ export const Sidebar: React.FC = () => {
 
   const isOpen = !isSidebarCollapsed;
   const isAuthenticated = Boolean(firebaseUser || profile.identifier || syncEmail);
-  const displayName = firebaseUser?.displayName
-    ? firebaseUser.displayName.split(' ')[0]
-    : isAuthenticated && profile.name && profile.name !== 'Guest'
-    ? profile.nickname || profile.name
-    : 'Sign In to Sync';
+  const displayName =
+    profile.nickname && profile.nickname.trim()
+      ? profile.nickname.trim()
+      : profile.name && profile.name !== 'Guest'
+      ? profile.name
+      : firebaseUser?.displayName
+      ? firebaseUser.displayName.split(' ')[0]
+      : 'Local Vault';
 
   const quickPresets = pomodoro.mode === 'break' ? [5, 10, 15, 20] : [15, 25, 45, 60];
   const currentSetMinutes = Math.max(1, Math.round((pomodoro.timeRemaining || 1500) / 60));
@@ -470,56 +473,61 @@ export const Sidebar: React.FC = () => {
           {/* 2. SCROLLABLE MATERIAL 3 EXPRESSIVE BODY (overscroll-contain locks scroll inside drawer) */}
           <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain no-scrollbar space-y-2 pr-0.5">
             {/* ONEPLUS-STYLE DIGITAL CLOCK + DATE (LEFT ~3/4) & FULL-HEIGHT LIVE ANALOG CLOCK (RIGHT ~1/4) */}
-            <div className="px-3 py-2.5 rounded-[22px] bg-white dark:bg-zinc-900/95 border border-slate-200/80 dark:border-zinc-800/80 shadow-2xs flex items-center justify-between gap-2">
-              {/* Left ~3/4 Section: Enlarged Digital Clock on Top + Full Date Strip Below */}
-              <div className="min-w-0 flex-1 flex flex-col justify-between gap-1.5 pr-1">
+            <div className="p-2 sm:p-2.5 rounded-[20px] bg-white dark:bg-zinc-900/95 border border-slate-200/80 dark:border-zinc-800/80 shadow-2xs flex items-center justify-between gap-2">
+              {/* Left Section: Enlarged Digital Clock on Top + Full Date Strip Below */}
+              <div className="min-w-0 flex-1 h-[74px] sm:h-[78px] flex flex-col justify-between pr-2.5 border-r border-slate-200/70 dark:border-zinc-800">
                 {/* Digital Clock Row */}
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <div className="text-[42px] sm:text-[45px] font-black tracking-tighter tabular-nums leading-[0.9] flex items-baseline">
+                <div className="flex items-center justify-between gap-1.5 min-w-0 flex-1">
+                  <div className="text-[42px] sm:text-[45px] font-black tracking-[-0.045em] tabular-nums leading-[0.82] flex items-baseline shrink-0 select-none">
                     <span className="text-rose-600 dark:text-rose-500">{clockParts.hours}</span>
                     <span className="text-slate-900 dark:text-white">:{clockParts.minutes}</span>
                   </div>
 
-                  {/* Stacked :SS and AM/PM badge scaled to match larger clock */}
-                  <div className="flex flex-col justify-between h-[36px] sm:h-[38px] py-0.5 leading-none shrink-0">
-                    <span className="text-[12.5px] sm:text-[13px] font-mono font-extrabold text-indigo-600 dark:text-indigo-400 tabular-nums">
+                  {/* Stacked :SS and AM/PM badge with guaranteed right clearance from divider */}
+                  <div className="flex flex-col items-end justify-between h-[40px] sm:h-[42px] py-0.5 mr-0.5 leading-none shrink-0">
+                    <span className="text-[12.5px] sm:text-[13.5px] font-mono font-extrabold text-emerald-600 dark:text-emerald-400 tabular-nums leading-none">
                       :{clockParts.seconds}
                     </span>
-                    <span className="px-1.5 py-[2px] rounded-md bg-slate-100 dark:bg-zinc-800 text-[9.5px] font-black tracking-wider text-slate-600 dark:text-zinc-300 uppercase leading-none">
+                    <span className="px-1.5 py-[3px] rounded-md bg-slate-100 dark:bg-zinc-800 text-[9.5px] sm:text-[10px] font-black tracking-wider text-slate-700 dark:text-zinc-200 uppercase leading-none">
                       {clockParts.period}
                     </span>
                   </div>
                 </div>
 
-                {/* Date Row Directly Below Digital Clock inside Left 3/4 Section */}
-                <div className="flex items-center gap-1 pt-1.5 border-t border-slate-100 dark:border-zinc-800/80 text-[11px] sm:text-[11.5px] font-extrabold tracking-tight whitespace-nowrap min-w-0">
-                  <span className="text-rose-600 dark:text-rose-400 uppercase tracking-wider shrink-0">
-                    {clockParts.weekday}
-                  </span>
-                  <span className="text-slate-300 dark:text-zinc-700 shrink-0">•</span>
-                  <span className="text-slate-700 dark:text-zinc-200 truncate">
-                    {clockParts.dayNum} {clockParts.monthLong}
-                  </span>
-                  <span className="text-indigo-600 dark:text-indigo-400 font-black tabular-nums shrink-0">
+                {/* Crisp Horizontal Divider */}
+                <div className="h-px w-full bg-slate-100 dark:bg-zinc-800/90 my-1 shrink-0" />
+
+                {/* Date Row Directly Below Digital Clock — spans full left column width with zero truncation */}
+                <div className="flex items-center justify-between gap-1 pr-0.5 text-[11px] sm:text-[11.5px] font-extrabold tracking-[-0.02em] leading-none whitespace-nowrap min-w-0">
+                  <div className="flex items-center gap-1 min-w-0">
+                    <span className="text-rose-600 dark:text-rose-400 uppercase tracking-wider shrink-0">
+                      {clockParts.weekday}
+                    </span>
+                    <span className="text-slate-300 dark:text-zinc-700 shrink-0">•</span>
+                    <span className="text-slate-800 dark:text-zinc-100">
+                      {clockParts.dayNum} {clockParts.monthLong}
+                    </span>
+                  </div>
+                  <span className="text-emerald-600 dark:text-emerald-400 font-black tabular-nums shrink-0">
                     {clockParts.yearNum}
                   </span>
                 </div>
               </div>
 
-              {/* Right Section: Larger Full-Height Live Analog Clock Face with Numbers 1-12 */}
-              <div className="shrink-0 flex items-center justify-center pl-2 border-l border-slate-100 dark:border-zinc-800/80 self-stretch">
+              {/* Right Section: Full-Height Live Analog Clock Face with Numbers 1-12 */}
+              <div className="shrink-0 flex items-center justify-center">
                 <svg
-                  width="86"
-                  height="86"
+                  width="76"
+                  height="76"
                   viewBox="0 0 86 86"
-                  className="w-[82px] h-[82px] sm:w-[86px] sm:h-[86px] overflow-visible select-none"
+                  className="w-[74px] h-[74px] sm:w-[78px] sm:h-[78px] overflow-visible select-none block"
                   aria-label="Live analog clock"
                 >
                   {/* Outer Bezel */}
                   <circle
                     cx="43"
                     cy="43"
-                    r="41"
+                    r="41.5"
                     className="fill-[#f4f7fc] dark:fill-zinc-950 stroke-slate-200/95 dark:stroke-zinc-800"
                     strokeWidth="2"
                   />
@@ -529,8 +537,8 @@ export const Sidebar: React.FC = () => {
                     const angleRad = ((idx * 30 - 90) * Math.PI) / 180;
                     const x1 = 43 + 37.5 * Math.cos(angleRad);
                     const y1 = 43 + 37.5 * Math.sin(angleRad);
-                    const x2 = 43 + 39.5 * Math.cos(angleRad);
-                    const y2 = 43 + 39.5 * Math.sin(angleRad);
+                    const x2 = 43 + 39.8 * Math.cos(angleRad);
+                    const y2 = 43 + 39.8 * Math.sin(angleRad);
                     return (
                       <line
                         key={`tick_${idx}`}
@@ -549,7 +557,7 @@ export const Sidebar: React.FC = () => {
                   {Array.from({ length: 12 }).map((_, idx) => {
                     const num = idx === 0 ? 12 : idx;
                     const angleRad = ((idx * 30 - 90) * Math.PI) / 180;
-                    const rNum = 31.2;
+                    const rNum = 31.5;
                     const x = 43 + rNum * Math.cos(angleRad);
                     const y = 43 + rNum * Math.sin(angleRad);
                     return (
@@ -559,7 +567,7 @@ export const Sidebar: React.FC = () => {
                         y={y}
                         textAnchor="middle"
                         dominantBaseline="central"
-                        fontSize="7.8"
+                        fontSize="8"
                         fontWeight="800"
                         className={
                           num === 12
