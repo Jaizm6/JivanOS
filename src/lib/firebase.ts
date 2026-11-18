@@ -84,10 +84,27 @@ export function isRunningInIframe(): boolean {
   }
 }
 
+export function isCapacitorNative(): boolean {
+  try {
+    if (typeof window === 'undefined') return false;
+    const cap = (window as any).Capacitor;
+    if (cap?.isNativePlatform?.()) return true;
+    return window.location.protocol === 'capacitor:' || (window.location.hostname === 'localhost' && !window.location.port);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Sign in with Google using popup first, falling back to redirect on standalone mobile/PWA when popups are blocked.
  */
 export async function signInWithGoogle(): Promise<FirebaseUser | null> {
+  if (isCapacitorNative()) {
+    throw new Error(
+      'Google Sign-In popup is restricted inside the Android APK WebView (https://localhost). Connect JivanOS Private Vault, OneDrive, Google Drive, Dropbox, Nextcloud, WebDAV, or Syncthing Folder in Multi-Drive Sync — works identically across Android, PC & iOS with zero Google login required.'
+    );
+  }
+
   try {
     const result = await signInWithPopup(auth, googleProvider);
     return result.user;
@@ -108,12 +125,12 @@ export async function signInWithGoogle(): Promise<FirebaseUser | null> {
 
     if (code === 'auth/unauthorized-domain') {
       throw new Error(
-        `Domain "${window.location.hostname}" is not authorized in Firebase Auth, or you are in a local WebView. Use Local Folder, OneDrive, Google Drive, Dropbox, WebDAV, or S3 sync in the Sync Hub — no login required.`
+        `Domain "${window.location.hostname}" is not authorized in Firebase Auth. Use JivanOS Private Vault, Local Folder, OneDrive, Google Drive, Dropbox, WebDAV, or S3 sync in Multi-Drive Sync — no Google login required.`
       );
     }
     if (code === 'auth/popup-blocked') {
       throw new Error(
-        'Sign-in popup was blocked by your browser. Please allow popups for this site or use any drive in the Sync & Backup Vault.'
+        'Sign-in popup was blocked by your browser. Please allow popups for this site or use JivanOS Private Vault / any drive in Multi-Drive Sync.'
       );
     }
     if (code === 'auth/popup-closed-by-user') {

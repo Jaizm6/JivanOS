@@ -32,6 +32,8 @@ export const ProfileModal: React.FC = () => {
     currency,
     setCurrency,
     firebaseUser,
+    authError,
+    clearAuthError,
     loginWithGoogle,
     logout,
     joplinSyncSettings,
@@ -134,13 +136,14 @@ export const ProfileModal: React.FC = () => {
 
   const handleGoogleSignIn = async () => {
     setErrorMsg('');
+    clearAuthError();
     setIsLoggingIn(true);
     try {
       await loginWithGoogle();
     } catch (err: any) {
       setErrorMsg(
         err?.message ||
-          'Google sign-in could not complete in this browser context. You can continue using Local-First mode or connect OneDrive, Google Drive, Dropbox, WebDAV, S3, or a Local Folder in Multi-Drive Sync.'
+          'Google sign-in could not complete in this browser context. You can continue using Local-First mode or connect JivanOS Private Vault, OneDrive, Google Drive, Dropbox, WebDAV, S3, or a Local Folder in Multi-Drive Sync.'
       );
     } finally {
       setIsLoggingIn(false);
@@ -363,10 +366,10 @@ export const ProfileModal: React.FC = () => {
             </div>
           </div>
 
-          {errorMsg && (
+          {(errorMsg || authError) && (
             <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 text-xs border border-rose-200 dark:border-rose-800 flex items-start gap-2">
               <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-              <span>{errorMsg}</span>
+              <span>{errorMsg || authError}</span>
             </div>
           )}
 

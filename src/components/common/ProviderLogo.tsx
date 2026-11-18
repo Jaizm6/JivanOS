@@ -1,6 +1,7 @@
 import React from 'react';
 
 export type ProviderId =
+  | 'jivanos_vault'
   | 'gdrive'
   | 'onedrive'
   | 'dropbox'
@@ -29,6 +30,26 @@ export const ProviderLogo: React.FC<ProviderLogoProps> = ({
   const sizeStyle = size ? { width: `${size}px`, height: `${size}px` } : undefined;
 
   switch (provider) {
+    case 'jivanos_vault':
+      return (
+        <svg
+          viewBox="0 0 24 24"
+          className={className}
+          style={sizeStyle}
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <rect width="24" height="24" rx="6" fill="#0F172A" />
+          <path
+            d="M14.5 6.5V14.2C14.5 16.4 12.9 18 10.7 18C9 18 7.8 17.1 7.3 15.8"
+            stroke="#6366F1"
+            strokeWidth="2.3"
+            strokeLinecap="round"
+          />
+          <circle cx="15.5" cy="7" r="2" fill="#10B981" />
+        </svg>
+      );
+
     case 'gdrive':
       // Official Google Drive triangular geometry
       return (

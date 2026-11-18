@@ -1,56 +1,63 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
   <defs>
-    <linearGradient id="gBg" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#090D16" />
-      <stop offset="55%" stop-color="#111827" />
-      <stop offset="100%" stop-color="#0F172A" />
+    <linearGradient id="jBg" x1="24" y1="16" x2="488" y2="496" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0B1020" />
+      <stop offset="55%" stop-color="#131A35" />
+      <stop offset="100%" stop-color="#1E1B4B" />
     </linearGradient>
-    <linearGradient id="gStroke" x1="96" y1="72" x2="416" y2="440" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#F8FAFC" />
-      <stop offset="55%" stop-color="#CBD5E1" />
-      <stop offset="100%" stop-color="#6366F1" />
+    <linearGradient id="jRing" x1="88" y1="88" x2="424" y2="424" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#6366F1" stop-opacity="0.7" />
+      <stop offset="50%" stop-color="#38BDF8" stop-opacity="0.45" />
+      <stop offset="100%" stop-color="#10B981" stop-opacity="0.7" />
     </linearGradient>
-    <linearGradient id="gCore" x1="176" y1="152" x2="336" y2="360" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#818CF8" />
-      <stop offset="100%" stop-color="#4F46E5" />
+    <linearGradient id="jMark" x1="176" y1="112" x2="340" y2="396" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="52%" stop-color="#E0E7FF" />
+      <stop offset="100%" stop-color="#818CF8" />
+    </linearGradient>
+    <linearGradient id="jPulse" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#34D399" />
+      <stop offset="100%" stop-color="#06B6D4" />
     </linearGradient>
   </defs>
 
-  <!-- Minimal GrapheneOS-Inspired Squircle Carbon Shield -->
-  <rect width="512" height="512" rx="118" fill="url(#gBg)" />
-  <rect x="18" y="18" width="476" height="476" rx="102" stroke="#ffffff" stroke-opacity="0.08" stroke-width="4" />
+  <!-- Crisp Squircle Canvas -->
+  <rect width="512" height="512" rx="116" fill="url(#jBg)" />
+  <rect x="20" y="20" width="472" height="472" rx="100" stroke="#FFFFFF" stroke-opacity="0.1" stroke-width="4" />
 
-  <!-- Outer Hexagonal Graphene Lattice Ring -->
-  <polygon
-    points="256,84 405,170 405,342 256,428 107,342 107,170"
-    stroke="url(#gStroke)"
-    stroke-width="22"
+  <!-- Subtle Orbital Continuity Arc -->
+  <circle
+    cx="256"
+    cy="256"
+    r="168"
+    stroke="url(#jRing)"
+    stroke-width="14"
+    stroke-dasharray="760 295"
+    stroke-dashoffset="65"
     stroke-linecap="round"
-    stroke-linejoin="round"
-    fill="none"
   />
 
-  <!-- Inner Graphene Bond Spokes (Y-Lattice) -->
-  <line x1="256" y1="84" x2="256" y2="178" stroke="#94A3B8" stroke-opacity="0.55" stroke-width="14" stroke-linecap="round" />
-  <line x1="405" y1="342" x2="324" y2="295" stroke="#94A3B8" stroke-opacity="0.55" stroke-width="14" stroke-linecap="round" />
-  <line x1="107" y1="342" x2="188" y2="295" stroke="#94A3B8" stroke-opacity="0.55" stroke-width="14" stroke-linecap="round" />
-
-  <!-- Inner Core Hexagon ("G / J" Open Graphene Ring) -->
+  <!-- Stylized Geometric "J" Stem & Hook -->
   <path
-    d="M324 217 L256 178 L188 217 L188 295 L256 334 L324 295 L324 256 L268 256"
-    stroke="url(#gCore)"
-    stroke-width="24"
+    d="M294 128 V288 C294 342 252 380 198 380 C166 380 140 364 126 340"
+    stroke="url(#jMark)"
+    stroke-width="44"
     stroke-linecap="round"
     stroke-linejoin="round"
-    fill="none"
   />
 
-  <!-- 6 Atomic Carbon Vertex Nodes + Center Nucleus -->
-  <circle cx="256" cy="84" r="16" fill="#F8FAFC" />
-  <circle cx="405" cy="170" r="16" fill="#F8FAFC" />
-  <circle cx="405" cy="342" r="16" fill="#CBD5E1" />
-  <circle cx="256" cy="428" r="16" fill="#818CF8" />
-  <circle cx="107" cy="342" r="16" fill="#CBD5E1" />
-  <circle cx="107" cy="170" r="16" fill="#F8FAFC" />
-  <circle cx="256" cy="256" r="15" fill="#F43F5E" />
+  <!-- Top Horizon Bar on "J" -->
+  <line
+    x1="218"
+    y1="128"
+    x2="338"
+    y2="128"
+    stroke="#F8FAFC"
+    stroke-width="34"
+    stroke-linecap="round"
+  />
+
+  <!-- Vitality Beacon Dot -->
+  <circle cx="372" cy="186" r="24" fill="url(#jPulse)" />
+  <circle cx="372" cy="186" r="9" fill="#ECFDF5" />
 </svg>

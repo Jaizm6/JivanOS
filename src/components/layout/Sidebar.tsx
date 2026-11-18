@@ -30,34 +30,38 @@ import { soundEngine } from '../../utils/audio';
 import { showAndroidToast } from '../common/AndroidToast';
 
 /**
- * Minimal GrapheneOS-inspired geometric hexagonal lattice emblem
+ * Minimal JivanOS geometric emblem
  */
-export const GrapheneLogoMark: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) => (
+export const JivanLogoMark: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) => (
   <svg viewBox="0 0 64 64" fill="none" className={className} aria-hidden="true">
-    <polygon
-      points="32,8 52,19.5 52,44.5 32,56 12,44.5 12,19.5"
+    <circle
+      cx="32"
+      cy="32"
+      r="22"
       stroke="currentColor"
-      strokeWidth="4.2"
+      strokeOpacity="0.28"
+      strokeWidth="3.2"
+      strokeDasharray="96 42"
+      strokeDashoffset="10"
+      strokeLinecap="round"
+    />
+    <path
+      d="M36.5 16 V36.5 C36.5 43.2 31.4 48 24.8 48 C20.8 48 17.5 46 15.8 43"
+      stroke="currentColor"
+      strokeWidth="5.4"
       strokeLinecap="round"
       strokeLinejoin="round"
     />
-    <line x1="32" y1="8" x2="32" y2="21" stroke="currentColor" strokeOpacity="0.55" strokeWidth="3" strokeLinecap="round" />
-    <line x1="52" y1="44.5" x2="41" y2="38" stroke="currentColor" strokeOpacity="0.55" strokeWidth="3" strokeLinecap="round" />
-    <line x1="12" y1="44.5" x2="23" y2="38" stroke="currentColor" strokeOpacity="0.55" strokeWidth="3" strokeLinecap="round" />
-    <path
-      d="M41 26 L32 21 L23 26 L23 38 L32 43 L41 38 L41 32 L34 32"
+    <line
+      x1="27"
+      y1="16"
+      x2="42"
+      y2="16"
       stroke="#818cf8"
       strokeWidth="4.4"
       strokeLinecap="round"
-      strokeLinejoin="round"
     />
-    <circle cx="32" cy="8" r="2.8" fill="currentColor" />
-    <circle cx="52" cy="19.5" r="2.8" fill="currentColor" />
-    <circle cx="52" cy="44.5" r="2.8" fill="currentColor" />
-    <circle cx="32" cy="56" r="2.8" fill="#818cf8" />
-    <circle cx="12" cy="44.5" r="2.8" fill="currentColor" />
-    <circle cx="12" cy="19.5" r="2.8" fill="currentColor" />
-    <circle cx="32" cy="32" r="2.8" fill="#f43f5e" />
+    <circle cx="46.5" cy="23.5" r="3.4" fill="#34d399" />
   </svg>
 );
 
@@ -386,7 +390,7 @@ export const Sidebar: React.FC = () => {
         className="fixed inset-y-0 left-0 z-[80] w-[288px] sm:w-[308px] bg-[#edf2fa] dark:bg-[#090b10] border-r border-slate-200/90 dark:border-zinc-800/90 flex flex-col select-none touch-pan-y overscroll-contain"
       >
         <div className="flex flex-col h-full min-h-0 p-2.5 sm:p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] gap-2 overflow-hidden">
-          {/* 1. CLEAN TOP HEADER CARD WITH MINIMAL GRAPHENEOS EMBLEM & ANIMATED BELL */}
+          {/* 1. CLEAN TOP HEADER CARD WITH JIVANOS EMBLEM & ANIMATED BELL */}
           <div className="flex items-center justify-between gap-2 px-2.5 py-2 rounded-[22px] bg-white dark:bg-zinc-900/95 border border-slate-200/80 dark:border-zinc-800/80 shadow-2xs shrink-0">
             <button
               type="button"
@@ -407,8 +411,8 @@ export const Sidebar: React.FC = () => {
                     className="w-9 h-9 rounded-full object-cover ring-2 ring-indigo-500/35 dark:ring-indigo-400/35"
                   />
                 ) : (
-                  <div className="w-9 h-9 rounded-2xl bg-[#090D16] dark:bg-zinc-950 text-slate-100 ring-1 ring-slate-200/80 dark:ring-zinc-700/80 flex items-center justify-center shadow-xs">
-                    <GrapheneLogoMark className="w-6 h-6" />
+                  <div className="w-9 h-9 rounded-2xl bg-[#0B1020] dark:bg-zinc-950 text-slate-100 ring-1 ring-slate-200/80 dark:ring-zinc-700/80 flex items-center justify-center shadow-xs">
+                    <JivanLogoMark className="w-6 h-6" />
                   </div>
                 )}
                 <span

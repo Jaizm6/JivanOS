@@ -81,6 +81,8 @@ import {
   pushToDrive,
   pickLocalSyncDirectory,
   launchDriveOAuthPopup,
+  testDriveConnection,
+  fetchServerOAuthDefaults,
 } from '../utils/joplinSyncEngine';
 
 export interface GlobalTimerState {
@@ -126,6 +128,8 @@ interface AppContextType {
   setProfile: (p: UserProfile) => void;
   isLoggedIn: boolean;
   firebaseUser: FirebaseUser | null;
+  authError: string | null;
+  clearAuthError: () => void;
   login: (identifier: string, isPhone: boolean, require2FA?: boolean) => Promise<{ need2FA: boolean; devCode?: string }>;
   loginWithGoogle: () => Promise<boolean>;
   verify2FA: (code: string) => Promise<boolean>;
@@ -355,6 +359,7 @@ interface AppContextType {
   updateJoplinSyncSettings: (cfg: Partial<JoplinSyncSettings>) => void;
   updateDriveConfig: (driveId: SyncDriveId, cfg: Partial<SyncDriveConfig>) => void;
   syncDriveNow: (driveId?: SyncDriveId, options?: { isBackupSnapshot?: boolean }) => Promise<{ success: boolean; message: string }>;
+  checkDriveConfiguration: (driveId: SyncDriveId) => Promise<{ success: boolean; message: string }>;
   pickLocalFolderForSync: () => Promise<{ success: boolean; folderName?: string; error?: string }>;
   connectDriveOAuth: (driveId: 'onedrive' | 'gdrive' | 'dropbox', clientId?: string) => Promise<{ success: boolean; error?: string }>;
   isOnline: boolean;
@@ -1263,6 +1268,36 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Firebase Auth State & Real-time Cloud Sync (Strictly Authenticated UID)
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const clearAuthError = useCallback(() => setAuthError(null), []);
+  const joplinSyncSettingsRef = useRef<JoplinSyncSettings>(joplinSyncSettings);
+  useEffect(() => {
+    joplinSyncSettingsRef.current = joplinSyncSettings;
+  }, [joplinSyncSettings]);
+
+  // Hydrate default OAuth Client IDs from server configuration if not overridden locally
+  useEffect(() => {
+    fetchServerOAuthDefaults().then((defaults) => {
+      setJoplinSyncSettings(prev => {
+        let changed = false;
+        const nextDrives = { ...prev.drives };
+        if (defaults.gdriveClientId && !nextDrives.gdrive?.clientId) {
+          nextDrives.gdrive = { ...nextDrives.gdrive, clientId: defaults.gdriveClientId };
+          changed = true;
+        }
+        if (defaults.onedriveClientId && !nextDrives.onedrive?.clientId) {
+          nextDrives.onedrive = { ...nextDrives.onedrive, clientId: defaults.onedriveClientId };
+          changed = true;
+        }
+        if (defaults.dropboxClientId && !nextDrives.dropbox?.clientId) {
+          nextDrives.dropbox = { ...nextDrives.dropbox, clientId: defaults.dropboxClientId };
+          changed = true;
+        }
+        return changed ? { ...prev, drives: nextDrives } : prev;
+      });
+    }).catch(() => {});
+  }, []);
+
   const importBackupJSONRef = useRef<(jsonStr: string) => boolean>(() => false);
   const compilePayloadRef = useRef<() => string>(() => '{}');
   const isApplyingRemoteSyncRef = useRef(false);
@@ -1322,14 +1357,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         try {
           const remoteData = await getUserDataFromFirestore(user.uid);
           if (remoteData && remoteData.payload) {
+            const latestSyncCfg = joplinSyncSettingsRef.current;
             const plainRemote = await decodeSyncEnvelope(
               typeof remoteData.payload === 'string' ? remoteData.payload : JSON.stringify(remoteData.payload),
-              joplinSyncSettings.e2eePassphrase
+              latestSyncCfg.e2eePassphrase
             );
             const merged = mergeSyncPayloads(
               compilePayloadRef.current(),
               plainRemote,
-              joplinSyncSettings.syncPersonalDetails
+              latestSyncCfg.syncPersonalDetails
             );
             isApplyingRemoteSyncRef.current = true;
             importBackupJSONRef.current(JSON.stringify(merged));
@@ -1352,14 +1388,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 const remoteData = docSnap.data();
                 if (remoteData && remoteData.payload) {
                   try {
+                    const latestSyncCfg = joplinSyncSettingsRef.current;
                     const plainRemote = await decodeSyncEnvelope(
                       typeof remoteData.payload === 'string' ? remoteData.payload : JSON.stringify(remoteData.payload),
-                      joplinSyncSettings.e2eePassphrase
+                      latestSyncCfg.e2eePassphrase
                     );
                     const merged = mergeSyncPayloads(
                       compilePayloadRef.current(),
                       plainRemote,
-                      joplinSyncSettings.syncPersonalDetails
+                      latestSyncCfg.syncPersonalDetails
                     );
                     isApplyingRemoteSyncRef.current = true;
                     importBackupJSONRef.current(JSON.stringify(merged));
@@ -2507,6 +2544,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const loginWithGoogle = async (): Promise<boolean> => {
+    setAuthError(null);
     try {
       const user = await signInWithGoogle();
       if (user) {
@@ -2521,8 +2559,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       }
       return false;
     } catch (e: any) {
+      const msg = e?.message || 'Google sign-in could not be completed.';
       console.error('Google login error:', e);
-      pushNotification('Sign-In Notice', e?.message || 'Google sign-in could not be completed.', 'system');
+      setAuthError(msg);
+      pushNotification('Sign-In Notice', msg, 'system');
       return false;
     }
   };
@@ -5441,6 +5481,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return res;
   };
 
+  const checkDriveConfiguration = async (
+    driveId: SyncDriveId
+  ): Promise<{ success: boolean; message: string }> => {
+    const driveCfg = joplinSyncSettings.drives[driveId];
+    const res = await testDriveConnection(driveId, driveCfg, firebaseUser?.uid);
+    updateDriveConfig(driveId, {
+      lastStatus: res.success ? 'synced' : 'error',
+      lastError: res.success ? undefined : res.message,
+    });
+    return res;
+  };
+
   const connectDriveOAuth = async (
     driveId: 'onedrive' | 'gdrive' | 'dropbox',
     customClientId?: string
@@ -6045,6 +6097,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setProfile,
         isLoggedIn: Boolean(firebaseUser || profile.identifier || joplinSyncSettings.primaryTarget !== 'none'),
         firebaseUser,
+        authError,
+        clearAuthError,
         login,
         loginWithGoogle,
         verify2FA,
@@ -6217,6 +6271,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         updateJoplinSyncSettings,
         updateDriveConfig,
         syncDriveNow,
+        checkDriveConfiguration,
         pickLocalFolderForSync,
         connectDriveOAuth,
         syncWithCloud,

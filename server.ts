@@ -70,6 +70,7 @@ function resolveAccountKey(email?: string, userId?: string): string {
 
 const cloudBackups: Record<string, CloudUserBackup[]> = {};
 const userLatestState: Record<string, { payload: string; updatedAt: string; version: number }> = {};
+const privateVaults: Record<string, { payload: string; updatedAt: string; version: number; pinHash?: string }> = {};
 
 const SYNC_DATA_FILE = path.join(appDir, 'data', 'sync_state.json');
 
@@ -80,7 +81,8 @@ function loadPersistedSyncState() {
       const parsed = JSON.parse(content);
       if (parsed.userLatestState) Object.assign(userLatestState, parsed.userLatestState);
       if (parsed.cloudBackups) Object.assign(cloudBackups, parsed.cloudBackups);
-      console.log(`[Sync] Loaded persistent sync state for ${Object.keys(userLatestState).length} accounts.`);
+      if (parsed.privateVaults) Object.assign(privateVaults, parsed.privateVaults);
+      console.log(`[Sync] Loaded persistent sync state for ${Object.keys(userLatestState).length} accounts and ${Object.keys(privateVaults).length} private vaults.`);
     }
   } catch (e) {
     console.warn('[Sync] Could not load sync state from disk:', e);
@@ -93,10 +95,35 @@ function savePersistedSyncState() {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-    fs.writeFileSync(SYNC_DATA_FILE, JSON.stringify({ userLatestState, cloudBackups }, null, 2), 'utf-8');
+    fs.writeFileSync(SYNC_DATA_FILE, JSON.stringify({ userLatestState, cloudBackups, privateVaults }, null, 2), 'utf-8');
   } catch (e) {
     console.warn('[Sync] Could not save sync state to disk:', e);
   }
+}
+
+function getFirebaseOAuthClientId(): string {
+  try {
+    const cfgPath = path.join(appDir, 'firebase-applet-config.json');
+    if (fs.existsSync(cfgPath)) {
+      const parsed = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+      if (typeof parsed.oAuthClientId === 'string') return parsed.oAuthClientId.trim();
+    }
+  } catch {}
+  return '';
+}
+
+function normalizeVaultId(raw: string): string {
+  return String(raw || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '')
+    .slice(0, 64);
+}
+
+function hashPin(pin?: string): string | undefined {
+  const clean = String(pin || '').trim();
+  if (!clean) return undefined;
+  return crypto.createHash('sha256').update(`jivanos_vault_pin:${clean}`).digest('hex');
 }
 
 // Load state immediately
@@ -115,9 +142,75 @@ async function startServer() {
   app.get('/api/health', (_req, res) => {
     res.json({
       status: 'ok',
-      service: 'OmniPlan_LifeOS API',
+      service: 'JivanOS API',
       timestamp: new Date().toISOString(),
       encryption: 'AES-256-GCM End-to-End Supported',
+    });
+  });
+
+  // Expose public OAuth Client IDs configured on server/project (never secrets)
+  app.get('/api/sync/oauth-config', (_req, res) => {
+    res.json({
+      gdriveClientId: process.env.GOOGLE_DRIVE_CLIENT_ID || getFirebaseOAuthClientId() || '',
+      onedriveClientId: process.env.ONEDRIVE_CLIENT_ID || '',
+      dropboxClientId: process.env.DROPBOX_CLIENT_ID || '',
+    });
+  });
+
+  // Joplin-Server-style Zero-OAuth Private Sync Vault (works across Android APK, iOS, Desktop & Web)
+  app.get('/api/sync/vault/:vaultId', (req, res) => {
+    const vaultId = normalizeVaultId(req.params.vaultId);
+    if (!vaultId || vaultId.length < 4) {
+      return res.status(400).json({ success: false, error: 'Vault Key must be at least 4 alphanumeric characters.' });
+    }
+    const existing = privateVaults[vaultId];
+    if (!existing) {
+      return res.json({ success: true, exists: false, vaultId, payload: null, version: 0, updatedAt: null });
+    }
+    const reqPin = req.header('x-vault-pin') || (req.query.pin as string) || '';
+    const reqPinHash = hashPin(reqPin);
+    if (existing.pinHash && existing.pinHash !== reqPinHash) {
+      return res.status(403).json({ success: false, error: 'Invalid Vault Access PIN for this Vault Key.' });
+    }
+    const pingOnly = req.query.ping === '1';
+    return res.json({
+      success: true,
+      exists: true,
+      vaultId,
+      payload: pingOnly ? null : existing.payload,
+      version: existing.version,
+      updatedAt: existing.updatedAt,
+    });
+  });
+
+  app.post('/api/sync/vault/:vaultId', (req, res) => {
+    const vaultId = normalizeVaultId(req.params.vaultId);
+    if (!vaultId || vaultId.length < 4) {
+      return res.status(400).json({ success: false, error: 'Vault Key must be at least 4 alphanumeric characters.' });
+    }
+    const { payload, pin } = req.body || {};
+    if (typeof payload !== 'string' || payload.length < 2) {
+      return res.status(400).json({ success: false, error: 'Sync payload string is required.' });
+    }
+    const existing = privateVaults[vaultId];
+    const reqPinHash = hashPin(pin || req.header('x-vault-pin'));
+    if (existing?.pinHash && existing.pinHash !== reqPinHash) {
+      return res.status(403).json({ success: false, error: 'Invalid Vault Access PIN for this Vault Key.' });
+    }
+    const nowIso = new Date().toISOString();
+    const nextVersion = existing ? existing.version + 1 : 1;
+    privateVaults[vaultId] = {
+      payload,
+      updatedAt: nowIso,
+      version: nextVersion,
+      pinHash: reqPinHash || existing?.pinHash,
+    };
+    savePersistedSyncState();
+    return res.json({
+      success: true,
+      vaultId,
+      version: nextVersion,
+      updatedAt: nowIso,
     });
   });
 
@@ -585,7 +678,7 @@ async function startServer() {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="omnilifeos-snapshot-v${target.version}-${target.provider}.json"`
+      `attachment; filename="jivanos-snapshot-v${target.version}-${target.provider}.json"`
     );
     return res.send(target.payload);
   });
@@ -697,7 +790,7 @@ async function startServer() {
       const isTomorrow = lower.includes('tomorrow');
       const dueDate = isTomorrow ? tomorrow : nextWeek;
 
-      return `I've prepared a reminder for your **${title}** for **$${amount.toFixed(2)}** due on **${dueDate}**.\n\n<omni_action>{"type":"bill","title":"${title}","category":"${category}","amount":${amount},"currency":"$","dueDate":"${dueDate}","recurring":"monthly","autoPay":false,"notes":"Generated via OmniPlan Assistant"}</omni_action>\n\nClick the card below to add it directly to your Bills tracker!`;
+      return `I've prepared a reminder for your **${title}** for **$${amount.toFixed(2)}** due on **${dueDate}**.\n\n<omni_action>{"type":"bill","title":"${title}","category":"${category}","amount":${amount},"currency":"$","dueDate":"${dueDate}","recurring":"monthly","autoPay":false,"notes":"Generated via JivanOS Assistant"}</omni_action>\n\nClick the card below to add it directly to your Bills tracker!`;
     }
 
     // 2. HABITS
@@ -774,7 +867,7 @@ async function startServer() {
       const durationMatch = message.match(/(\d+)\s*(min|m|minute)/i);
       const timerMinutes = durationMatch ? parseInt(durationMatch[1], 10) : 20;
 
-      return `Excellent choice for consistency! I've configured your new habit in the **${cat.toUpperCase()}** section: **${cleanName}**.\n\n<omni_action>{"type":"habit","name":"${cleanName}","category":"${cat}","frequency":"daily","targetDaysPerWeek":7,"timerMinutes":${timerMinutes},"color":"${color}","notes":"Built with OmniPlan Assistant"}</omni_action>\n\nTap the action card below to save it to your Habits Tracker!`;
+      return `Excellent choice for consistency! I've configured your new habit in the **${cat.toUpperCase()}** section: **${cleanName}**.\n\n<omni_action>{"type":"habit","name":"${cleanName}","category":"${cat}","frequency":"daily","targetDaysPerWeek":7,"timerMinutes":${timerMinutes},"color":"${color}","notes":"Built with JivanOS Assistant"}</omni_action>\n\nTap the action card below to save it to your Habits Tracker!`;
     }
 
     // 3. GOALS
@@ -1395,7 +1488,7 @@ Your Objective:
                 model,
                 contents: prompt,
                 config: {
-                  systemInstruction: "You are the OmniPlan AI Productivity Intelligence Engine. Analyze tasks, goals, and projects to output optimal actionable subtasks and deadline adjustments in strict JSON.",
+                  systemInstruction: "You are the JivanOS Productivity Intelligence Engine. Analyze tasks, goals, and projects to output optimal actionable subtasks and deadline adjustments in strict JSON.",
                   temperature: 0.3,
                   responseMimeType: "application/json",
                   responseSchema: {

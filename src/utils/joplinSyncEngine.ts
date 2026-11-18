@@ -26,6 +26,15 @@ export const DEFAULT_JOPLIN_SYNC_SETTINGS: JoplinSyncSettings = {
   e2eeEnabled: false,
   e2eePassphrase: '',
   drives: {
+    jivanos_vault: {
+      id: 'jivanos_vault',
+      enabled: false,
+      autoBackupEnabled: false,
+      label: 'JivanOS Private Vault',
+      vaultId: '',
+      vaultPin: '',
+      lastStatus: 'idle',
+    },
     local_folder: {
       id: 'local_folder',
       enabled: false,
@@ -713,12 +722,73 @@ async function dropboxPush(cfg: SyncDriveConfig, content: string, fileName = 'ji
 // 5. Unified Pull / Push / Sync Execution Across Any Drive
 // ============================================================================
 
+async function jivanosVaultPull(cfg: SyncDriveConfig): Promise<string | null> {
+  const vaultId = (cfg.vaultId || '').trim();
+  if (!vaultId || vaultId.length < 4) {
+    throw new Error('Enter a Private Vault Key (at least 4 characters) to sync.');
+  }
+  const headers: Record<string, string> = {};
+  if (cfg.vaultPin?.trim()) headers['x-vault-pin'] = cfg.vaultPin.trim();
+
+  const res = await fetch(`/api/sync/vault/${encodeURIComponent(vaultId)}`, { headers });
+  const data = await res.json();
+  if (!res.ok || !data.success) {
+    throw new Error(data.error || `Private Vault HTTP ${res.status}`);
+  }
+  return data.payload || null;
+}
+
+async function jivanosVaultPush(cfg: SyncDriveConfig, content: string): Promise<boolean> {
+  const vaultId = (cfg.vaultId || '').trim();
+  if (!vaultId || vaultId.length < 4) {
+    throw new Error('Enter a Private Vault Key (at least 4 characters) to sync.');
+  }
+  const res = await fetch(`/api/sync/vault/${encodeURIComponent(vaultId)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      payload: content,
+      pin: cfg.vaultPin?.trim() || undefined,
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) {
+    throw new Error(data.error || `Private Vault upload failed (HTTP ${res.status})`);
+  }
+  return true;
+}
+
+export async function fetchServerOAuthDefaults(): Promise<{
+  gdriveClientId: string;
+  onedriveClientId: string;
+  dropboxClientId: string;
+}> {
+  try {
+    const res = await fetch('/api/sync/oauth-config');
+    if (res.ok) {
+      const data = await res.json();
+      return {
+        gdriveClientId: data.gdriveClientId || (firebaseConfig as any)?.oAuthClientId || '',
+        onedriveClientId: data.onedriveClientId || '',
+        dropboxClientId: data.dropboxClientId || '',
+      };
+    }
+  } catch {}
+  return {
+    gdriveClientId: (firebaseConfig as any)?.oAuthClientId || '',
+    onedriveClientId: '',
+    dropboxClientId: '',
+  };
+}
+
 export async function pullFromDrive(
   driveId: SyncDriveId,
   cfg: SyncDriveConfig,
   firebaseUid?: string | null
 ): Promise<string | null> {
   switch (driveId) {
+    case 'jivanos_vault':
+      return await jivanosVaultPull(cfg);
     case 'local_folder':
       return await readLocalFolderSyncFile();
     case 'nextcloud':
@@ -762,6 +832,8 @@ export async function pushToDrive(
   const snapshotName = options?.isBackupSnapshot ? `jivanos-backup-${stamp}.json` : 'jivanos-sync.json';
 
   switch (driveId) {
+    case 'jivanos_vault':
+      return await jivanosVaultPush(cfg, encodedContent);
     case 'local_folder':
       return await writeLocalFolderSyncFile(encodedContent, options?.isBackupSnapshot);
     case 'nextcloud':
@@ -903,4 +975,144 @@ export function launchDriveOAuthPopup(
 
     window.addEventListener('message', handleMsg);
   });
+}
+
+/**
+ * Joplin-style "Check Synchronisation Configuration" diagnostic tester.
+ * Verifies connectivity, credentials, and permissions cleanly before running sync.
+ */
+export async function testDriveConnection(
+  driveId: SyncDriveId,
+  cfg: SyncDriveConfig,
+  firebaseUid?: string | null
+): Promise<{ success: boolean; message: string }> {
+  try {
+    switch (driveId) {
+      case 'jivanos_vault': {
+        const vaultId = (cfg.vaultId || '').trim();
+        if (!vaultId || vaultId.length < 4) {
+          return { success: false, message: 'Enter a Vault Pairing Key (minimum 4 characters).' };
+        }
+        const headers: Record<string, string> = {};
+        if (cfg.vaultPin?.trim()) headers['x-vault-pin'] = cfg.vaultPin.trim();
+        const res = await fetch(`/api/sync/vault/${encodeURIComponent(vaultId)}?ping=1`, { headers });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          return { success: false, message: data.error || `Vault check failed (HTTP ${res.status}).` };
+        }
+        return {
+          success: true,
+          message: data.exists
+            ? `Success! Vault "${data.vaultId}" reachable (revision #${data.version}, last updated ${new Date(data.updatedAt).toLocaleString()}).`
+            : `Success! Vault Key "${data.vaultId}" is ready for your first sync push.`,
+        };
+      }
+      case 'local_folder': {
+        const handle = await getSavedDirectoryHandle();
+        if (!handle) {
+          return { success: false, message: 'No local sync folder selected yet. Click "Choose Local Sync Folder".' };
+        }
+        const granted = await verifyDirPermission(handle, true);
+        if (!granted) {
+          return { success: false, message: 'Read/Write permission to the selected folder was denied.' };
+        }
+        return {
+          success: true,
+          message: `Success! Folder "${handle.name || cfg.folderName || 'Sync Folder'}" has read & write access.`,
+        };
+      }
+      case 'onedrive': {
+        if (!cfg.accessToken?.trim()) {
+          return { success: false, message: 'OneDrive is not connected yet. Connect via OAuth Popup or paste an Access Token.' };
+        }
+        const res = await fetch('https://graph.microsoft.com/v1.0/me/drive', {
+          headers: { Authorization: `Bearer ${cfg.accessToken.trim()}` },
+        });
+        if (!res.ok) {
+          return { success: false, message: `OneDrive rejected token (HTTP ${res.status}). Reconnect OAuth or paste a fresh token.` };
+        }
+        const data = await res.json();
+        return {
+          success: true,
+          message: `Success! Connected to OneDrive (${data.owner?.user?.displayName || data.driveType || 'AppRoot'}).`,
+        };
+      }
+      case 'gdrive': {
+        if (!cfg.accessToken?.trim()) {
+          return { success: false, message: 'Google Drive is not connected yet. Connect via OAuth Popup or paste an Access Token.' };
+        }
+        const res = await fetch('https://www.googleapis.com/drive/v3/about?fields=user', {
+          headers: { Authorization: `Bearer ${cfg.accessToken.trim()}` },
+        });
+        if (!res.ok) {
+          return { success: false, message: `Google Drive rejected token (HTTP ${res.status}). Reconnect OAuth or paste a fresh token.` };
+        }
+        const data = await res.json();
+        return {
+          success: true,
+          message: `Success! Google Drive reachable (${data.user?.emailAddress || data.user?.displayName || 'Authorized'}).`,
+        };
+      }
+      case 'dropbox': {
+        if (!cfg.accessToken?.trim()) {
+          return { success: false, message: 'Dropbox is not connected yet. Connect via OAuth Popup or paste an Access Token.' };
+        }
+        const res = await fetch('https://api.dropboxapi.com/2/users/get_current_account', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${cfg.accessToken.trim()}` },
+        });
+        if (!res.ok) {
+          return { success: false, message: `Dropbox rejected token (HTTP ${res.status}). Reconnect OAuth or paste a fresh token.` };
+        }
+        const data = await res.json();
+        return {
+          success: true,
+          message: `Success! Dropbox connected (${data.email || data.name?.display_name || 'App Folder'}).`,
+        };
+      }
+      case 'nextcloud':
+      case 'webdav': {
+        if (!cfg.serverUrl?.trim()) {
+          return { success: false, message: 'Enter your WebDAV / Nextcloud server URL.' };
+        }
+        const res = await webdavRequest(cfg, 'PROPFIND', '');
+        if (res.status === 401 || res.status === 403) {
+          return { success: false, message: `Authentication failed (HTTP ${res.status}). Verify username & app password.` };
+        }
+        if (res.status >= 200 && res.status < 400) {
+          return { success: true, message: `Success! WebDAV endpoint responded cleanly (HTTP ${res.status}).` };
+        }
+        return { success: true, message: `Endpoint reachable (HTTP ${res.status}). Will auto-create folder on first sync.` };
+      }
+      case 's3': {
+        if (!cfg.s3Endpoint?.trim() || !cfg.s3Bucket?.trim() || !cfg.s3AccessKey?.trim() || !cfg.s3SecretKey?.trim()) {
+          return { success: false, message: 'S3 Endpoint, Bucket, Access Key ID, and Secret Access Key are required.' };
+        }
+        const res = await s3Request(cfg, 'GET', 'jivanos-sync.json');
+        if (res.status === 403) {
+          return { success: false, message: 'S3 rejected credentials (HTTP 403 Signature/Access Denied).' };
+        }
+        return {
+          success: true,
+          message:
+            res.status === 200
+              ? `Success! Connected to bucket "${cfg.s3Bucket}" and found existing sync file.`
+              : `Success! Bucket "${cfg.s3Bucket}" reachable (HTTP ${res.status}). Ready to sync.`,
+        };
+      }
+      case 'firebase': {
+        if (!firebaseUid) {
+          return { success: false, message: 'Sign in with Google on a web browser to activate JivanOS Cloud (Firestore).' };
+        }
+        return { success: true, message: 'Success! Authenticated with JivanOS Cloud (Firestore).' };
+      }
+      default:
+        return { success: false, message: 'Unsupported sync target.' };
+    }
+  } catch (err: any) {
+    return {
+      success: false,
+      message: err?.message || 'Configuration check failed.',
+    };
+  }
 }

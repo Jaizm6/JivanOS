@@ -462,7 +462,7 @@ export const SyncStatusWidget: React.FC = () => {
                 <span>Local-First on Any OS (No Login Required)</span>
               </div>
               <p className="text-[11.5px] leading-relaxed text-slate-600 dark:text-slate-300">
-                JivanOS works 100% locally out of the box on Android (including GrapheneOS), iPhone, Windows, macOS, and Linux. Zero personal developer data is bundled in the app.
+                JivanOS works 100% locally out of the box on Android, iPhone, Windows, macOS, and Linux. Zero personal developer data is bundled in the app.
               </p>
             </div>
 

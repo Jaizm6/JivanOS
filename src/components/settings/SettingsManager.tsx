@@ -39,8 +39,15 @@ import {
   X,
   Sun,
   Moon,
+  FolderSync,
+  LogOut,
+  AlertCircle,
+  Activity,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { SupportedCurrency, SyncDriveId } from '../../types';
+import { JivanLogoMark } from '../layout/Sidebar';
+import { APP_VERSION, APP_GITHUB_REPO, APP_GITHUB_RELEASES_URL } from '../../utils/appVersion';
 import { showAndroidToast } from '../common/AndroidToast';
 import {
   soundEngine,
@@ -128,6 +135,17 @@ export const SettingsManager: React.FC = () => {
     scheduleStartHour,
     scheduleEndHour,
     setScheduleTimingPreset,
+    joplinSyncSettings,
+    updateJoplinSyncSettings,
+    syncDriveNow,
+    checkDriveConfiguration,
+    firebaseUser,
+    loginWithGoogle,
+    logout,
+    authError,
+    clearAuthError,
+    lastSyncTime,
+    syncStatus,
   } = useApp();
 
   const isDark = theme === 'dark' || (typeof document !== 'undefined' && document.documentElement.classList.contains('dark'));
@@ -166,17 +184,32 @@ export const SettingsManager: React.FC = () => {
     try { soundEngine.playClick?.(); } catch {}
   };
 
-  const [emailInput, setEmailInput] = useState(userProfile.email);
+  const [emailInput, setEmailInput] = useState(userProfile.email || userProfile.identifier || '');
   const [nameInput, setNameInput] = useState(userProfile.name);
   const [nicknameInput, setNicknameInput] = useState(userProfile.nickname || '');
   const [avatarPhoto, setAvatarPhoto] = useState(userProfile.avatarPhoto || '');
   const [bioInput, setBioInput] = useState(userProfile.bio || '');
+  const [dobInput, setDobInput] = useState(userProfile.dateOfBirth || '');
+  const [genderInput, setGenderInput] = useState<'male' | 'female' | 'other' | 'unspecified'>(
+    userProfile.gender || 'unspecified'
+  );
+  const [heightInput, setHeightInput] = useState(userProfile.heightCm ? String(userProfile.heightCm) : '');
+  const [weightInput, setWeightInput] = useState(userProfile.weightKg ? String(userProfile.weightKg) : '');
+  const [currencyInput, setCurrencyInput] = useState<SupportedCurrency>(
+    (userProfile.preferredCurrency || currency || 'INR') as SupportedCurrency
+  );
+  const [profileSavedMsg, setProfileSavedMsg] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [profileAuthError, setProfileAuthError] = useState('');
   const [isCompressingPhoto, setIsCompressingPhoto] = useState(false);
   const [photoError, setPhotoError] = useState('');
   const [twoFactorActive, setTwoFactorActive] = useState(userProfile.twoFactorEnabled);
   const [newPassphrase, setNewPassphrase] = useState('');
   const [showPassModal, setShowPassModal] = useState(false);
   const [backupStatusMsg, setBackupStatusMsg] = useState('');
+  const [syncDiagResult, setSyncDiagResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [isCheckingDrive, setIsCheckingDrive] = useState(false);
+  const [isSyncingNow, setIsSyncingNow] = useState(false);
 
   // App Lock State in Settings
   const [appLockEnabled, setAppLockEnabled] = useState(appLock.isEnabled);
@@ -365,8 +398,13 @@ export const SettingsManager: React.FC = () => {
     setEmailInput(userProfile.email || userProfile.identifier || '');
     setAvatarPhoto(userProfile.avatarPhoto || '');
     setBioInput(userProfile.bio || '');
+    setDobInput(userProfile.dateOfBirth || '');
+    setGenderInput(userProfile.gender || 'unspecified');
+    setHeightInput(userProfile.heightCm ? String(userProfile.heightCm) : '');
+    setWeightInput(userProfile.weightKg ? String(userProfile.weightKg) : '');
+    setCurrencyInput(((userProfile.preferredCurrency || currency || 'INR') as SupportedCurrency));
     setTwoFactorActive(userProfile.twoFactorEnabled);
-  }, [userProfile]);
+  }, [userProfile, currency]);
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -392,21 +430,86 @@ export const SettingsManager: React.FC = () => {
 
   const handleProfileSave = (e: React.FormEvent) => {
     e.preventDefault();
+    const nowIso = new Date().toISOString();
     updateUserProfile({
-      name: nameInput,
+      name: nameInput.trim() || 'Guest',
       nickname: nicknameInput.trim(),
-      email: emailInput,
+      identifier: emailInput.trim(),
+      email: emailInput.trim(),
       avatarPhoto,
       bio: bioInput.trim(),
+      dateOfBirth: dobInput,
+      gender: genderInput,
+      heightCm: heightInput ? Number(heightInput) : undefined,
+      weightKg: weightInput ? Number(weightInput) : undefined,
+      preferredCurrency: currencyInput,
       twoFactorEnabled: twoFactorActive,
+      updatedAt: nowIso,
+      lastSyncedAt: nowIso,
     });
-    pushNotification('Profile Updated', 'Profile photo, display nickname, and credentials saved.', 'system');
+    if (currencyInput && currencyInput !== currency) {
+      setCurrency(currencyInput);
+    }
+    setProfileSavedMsg('Profile saved locally and queued for Multi-Drive Sync.');
+    setTimeout(() => setProfileSavedMsg(''), 3500);
+    pushNotification('Profile Updated', 'Personal profile, photo, metrics, and currency saved.', 'system');
+  };
+
+  const handleGoogleSignInInline = async () => {
+    setProfileAuthError('');
+    clearAuthError();
+    setIsLoggingIn(true);
+    try {
+      await loginWithGoogle();
+    } catch (err: any) {
+      setProfileAuthError(
+        err?.message ||
+          'Google sign-in could not complete in this context. You can use JivanOS Private Vault or any Multi-Drive target without Google login.'
+      );
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleCheckPrimaryDrive = async () => {
+    if (joplinSyncSettings.primaryTarget === 'none') {
+      setSyncDiagResult({
+        success: true,
+        message: 'Local-Only mode is active. Select a sync target (such as JivanOS Private Vault, OneDrive, or Google Drive) to verify remote connectivity.',
+      });
+      return;
+    }
+    setIsCheckingDrive(true);
+    setSyncDiagResult(null);
+    try {
+      const res = await checkDriveConfiguration(joplinSyncSettings.primaryTarget);
+      setSyncDiagResult(res);
+    } catch (err: any) {
+      setSyncDiagResult({
+        success: false,
+        message: err?.message || 'Unable to verify drive configuration.',
+      });
+    } finally {
+      setIsCheckingDrive(false);
+    }
   };
 
   const handleManualBackup = async () => {
-    await triggerManualSync();
-    setBackupStatusMsg('Cloud backup synchronized successfully.');
-    setTimeout(() => setBackupStatusMsg(''), 3500);
+    setIsSyncingNow(true);
+    setBackupStatusMsg('');
+    try {
+      if (joplinSyncSettings.primaryTarget !== 'none') {
+        const res = await syncDriveNow(joplinSyncSettings.primaryTarget);
+        setSyncDiagResult(res);
+        setBackupStatusMsg(res.message);
+      } else {
+        await triggerManualSync();
+        setBackupStatusMsg('Local vault state verified cleanly.');
+      }
+    } finally {
+      setIsSyncingNow(false);
+      setTimeout(() => setBackupStatusMsg(''), 4500);
+    }
   };
 
   const handleSavePassphrase = (e: React.FormEvent) => {
@@ -493,8 +596,12 @@ export const SettingsManager: React.FC = () => {
     {
       id: 'sync',
       category: 'Apps, Cloud & Portability',
-      title: 'Cloud Synchronization & Storage',
-      subtitle: `${syncEmail ? syncEmail : 'Local device storage'} • Remote sync & conflict resolution`,
+      title: 'Multi-Drive Sync & Auto-Backup',
+      subtitle: `${
+        joplinSyncSettings.primaryTarget !== 'none'
+          ? joplinSyncSettings.drives[joplinSyncSettings.primaryTarget]?.label || joplinSyncSettings.primaryTarget
+          : 'Local-First Vault'
+      } • Interval, E2EE & Backup Mirrors`,
       icon: <Cloud className="w-5 h-5 text-sky-600 dark:text-sky-400" />,
       iconBg: 'bg-sky-50 dark:bg-sky-950/60 border border-sky-200/80 dark:border-sky-800/80',
       fillClass: 'text-sky-100/90 dark:text-sky-950/80',
@@ -504,8 +611,8 @@ export const SettingsManager: React.FC = () => {
     {
       id: 'profile',
       category: 'Personal & Security',
-      title: 'Account Profile & Preferences',
-      subtitle: `${userProfile.name || 'Guest'} • Avatar, nickname, bio & 2FA protection`,
+      title: 'Personal Profile & Account',
+      subtitle: `${userProfile.nickname || userProfile.name || 'Local User'} • Photo, DOB, metrics, currency & optional login`,
       icon: <User className="w-5 h-5 text-purple-600 dark:text-purple-400" />,
       iconBg: 'bg-purple-50 dark:bg-purple-950/60 border border-purple-200/80 dark:border-purple-800/80',
       fillClass: 'text-purple-100/90 dark:text-purple-950/80',
@@ -646,16 +753,16 @@ export const SettingsManager: React.FC = () => {
           {/* Petal Status Hero + Instant Material You 4-Quadrant Palette Bar */}
           {!searchQuery && (
             <div className="space-y-[3px] w-full min-w-0">
-              {/* Top Card: User Account & Sync Status */}
+              {/* Top Card: User Profile & Sync Status */}
               <div
                 onClick={() => setActiveSection('profile')}
-                className="rounded-[20px] p-2.5 sm:p-3.5 bg-white dark:bg-zinc-900 border border-slate-200/90 dark:border-zinc-800/90 shadow-2xs hover:bg-slate-50/70 dark:hover:bg-zinc-800/60 transition flex items-center justify-between gap-2.5 cursor-pointer group active:scale-[0.99] w-full min-w-0"
+                className="rounded-[20px] p-3 sm:p-4 bg-white dark:bg-zinc-900 border border-slate-200/90 dark:border-zinc-800/90 shadow-2xs hover:bg-slate-50/70 dark:hover:bg-zinc-800/60 transition flex items-center justify-between gap-3 cursor-pointer group active:scale-[0.99] w-full min-w-0"
               >
-                <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                <div className="flex items-center gap-3 min-w-0 flex-1">
                   {avatarPhoto ? (
                     <img
                       src={avatarPhoto}
-                      alt={userProfile.name}
+                      alt={userProfile.name || 'User'}
                       className="w-11 h-11 rounded-2xl object-cover ring-2 ring-indigo-500/30 shrink-0"
                     />
                   ) : (
@@ -666,27 +773,29 @@ export const SettingsManager: React.FC = () => {
                       sizeClass="w-11 h-11"
                     >
                       <span className="text-white font-extrabold text-sm">
-                        {(userProfile.name || 'G').charAt(0).toUpperCase()}
+                        {(userProfile.nickname || userProfile.name || 'J').charAt(0).toUpperCase()}
                       </span>
                     </PetalShapeBadge>
                   )}
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="text-sm font-bold text-slate-900 dark:text-white truncate group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition">
-                        {userProfile.name || 'Guest'}
+                        {userProfile.nickname || userProfile.name || 'Local User'}
                       </h3>
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          syncEmail
-                            ? 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300'
-                            : 'bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300'
-                        }`}
-                      >
-                        {syncEmail ? 'Cloud Synced' : 'Sign In Required for Cloud'}
+                      <span className="text-[11px] font-medium text-slate-500 dark:text-zinc-400 whitespace-nowrap">
+                        · {firebaseUser
+                          ? 'Cloud Synced'
+                          : joplinSyncSettings.primaryTarget !== 'none'
+                          ? 'Multi-Drive Sync Active'
+                          : 'Local-First Vault'}
                       </span>
                     </div>
                     <p className="text-xs text-slate-500 dark:text-zinc-400 truncate mt-0.5">
-                      {userProfile.email || syncEmail || 'Tap to sign in with your account & enable cloud sync'}
+                      {userProfile.email ||
+                        firebaseUser?.email ||
+                        (joplinSyncSettings.primaryTarget !== 'none'
+                          ? `Primary: ${joplinSyncSettings.drives[joplinSyncSettings.primaryTarget]?.label || joplinSyncSettings.primaryTarget} · Auto-backup ready`
+                          : '100% private on device · Tap to edit profile or connect Multi-Drive Sync')}
                     </p>
                   </div>
                 </div>
@@ -809,60 +918,39 @@ export const SettingsManager: React.FC = () => {
                 </span>
                 <div className="rounded-[22px] bg-white dark:bg-zinc-900 border border-slate-200/90 dark:border-zinc-800/90 p-3.5 sm:p-4 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-2xl bg-slate-900 dark:bg-zinc-800 border border-slate-800 dark:border-zinc-700 flex items-center justify-center shrink-0 shadow-xs">
-                      <svg viewBox="0 0 24 24" className="w-5.5 h-5.5 text-white" fill="none">
-                        <polygon
-                          points="12,2.2 20.5,7.1 20.5,16.9 12,21.8 3.5,16.9 3.5,7.1"
-                          stroke="currentColor"
-                          strokeWidth="1.8"
-                          strokeLinejoin="round"
-                        />
-                        <polygon
-                          points="12,6.8 16.5,9.4 16.5,14.6 12,17.2 7.5,14.6 7.5,9.4"
-                          stroke="currentColor"
-                          strokeWidth="1.4"
-                          strokeLinejoin="round"
-                          opacity="0.72"
-                        />
-                        <line x1="12" y1="2.2" x2="12" y2="6.8" stroke="currentColor" strokeWidth="1.4" />
-                        <line x1="20.5" y1="7.1" x2="16.5" y2="9.4" stroke="currentColor" strokeWidth="1.4" />
-                        <line x1="20.5" y1="16.9" x2="16.5" y2="14.6" stroke="currentColor" strokeWidth="1.4" />
-                        <line x1="12" y1="21.8" x2="12" y2="17.2" stroke="currentColor" strokeWidth="1.4" />
-                        <line x1="3.5" y1="16.9" x2="7.5" y2="14.6" stroke="currentColor" strokeWidth="1.4" />
-                        <line x1="3.5" y1="7.1" x2="7.5" y2="9.4" stroke="currentColor" strokeWidth="1.4" />
-                        <circle cx="12" cy="12" r="1.6" fill="#e11d48" />
-                      </svg>
+                    <div className="w-10 h-10 rounded-2xl bg-slate-900 dark:bg-zinc-800 border border-slate-800 dark:border-zinc-700 flex items-center justify-center shrink-0 shadow-xs text-white">
+                      <JivanLogoMark className="w-6 h-6" />
                     </div>
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <h3 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">
                           JivanOS Open-Source Project
                         </h3>
-                        <span className="px-2 py-0.5 rounded-full text-[9.5px] font-bold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300">
-                          GrapheneOS Inspired
+                        <span className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 tabular-nums">
+                          v{APP_VERSION} · Local-First
                         </span>
                       </div>
                       <p className="text-[11px] text-slate-500 dark:text-zinc-400 mt-0.5">
-                        Source code, issues, and signed in-place upgradable Android APK releases on GitHub
+                        Cross-platform life system with deterministic signed Android APK releases &amp; Multi-Drive Sync
                       </p>
                     </div>
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0 flex-wrap">
                     <a
-                      href="https://github.com/Jaizm6/JivanOS"
+                      href={APP_GITHUB_REPO}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-700 text-slate-800 dark:text-zinc-200 text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer"
+                      className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-700 text-slate-800 dark:text-zinc-200 text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
                     >
                       <span>GitHub Repo</span>
                       <ExternalLink className="w-3 h-3" />
                     </a>
                     <a
-                      href="https://github.com/Jaizm6/JivanOS/releases/tag/latest-apk"
+                      href={APP_GITHUB_RELEASES_URL}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold shadow-2xs transition flex items-center gap-1.5 cursor-pointer"
+                      className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold shadow-2xs transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
                     >
                       <Download className="w-3 h-3" />
                       <span>Latest Android APK</span>
@@ -923,228 +1011,255 @@ export const SettingsManager: React.FC = () => {
           )}
 
           {activeSection === 'sync' && (
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3.5 sm:p-5 shadow-xs w-full min-w-0 overflow-hidden">
-        <div className="flex flex-wrap items-center justify-between gap-2.5 pb-3 border-b border-slate-100 dark:border-slate-800">
-          <div className="flex items-center gap-2.5 min-w-0 flex-1">
-            <div className="w-8 h-8 rounded-xl bg-blue-100 dark:bg-blue-950 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
-              <Cloud className="w-4 h-4" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <h3 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white truncate">
-                Cloud Synchronization &amp; Storage
-              </h3>
-              <p className="text-[11px] text-slate-400 truncate">
-                Encrypted remote backups with conflict resolution
-              </p>
-            </div>
-          </div>
-          <button
-            id="btn-trigger-cloud-sync"
-            onClick={handleManualBackup}
-            disabled={syncState.status === 'syncing'}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-[11px] font-semibold shadow-xs transition shrink-0"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${syncState.status === 'syncing' ? 'animate-spin' : ''}`} />
-            <span>Sync Now</span>
-          </button>
-        </div>
+            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-6 shadow-xs w-full min-w-0 space-y-5">
+              {/* Header */}
+              <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                  <div className="w-9 h-9 rounded-xl bg-sky-100 dark:bg-sky-950 text-sky-600 dark:text-sky-400 flex items-center justify-center shrink-0">
+                    <FolderSync className="w-4.5 h-4.5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                      Multi-Drive Synchronization &amp; Auto-Backup
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                      Local-first storage with automatic background sync and multi-drive mirroring
+                    </p>
+                  </div>
+                </div>
 
-        {/* Target Sync Account Banner */}
-        <div className="mt-3 p-2.5 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/40 flex flex-col sm:flex-row sm:items-center justify-between gap-2 w-full min-w-0">
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="w-6 h-6 rounded-lg bg-indigo-600 text-white flex items-center justify-center shrink-0">
-              <Mail className="w-3.5 h-3.5" />
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="text-[10.5px] font-semibold text-slate-500 dark:text-slate-400">
-                  Target Sync Account:
-                </span>
-                <span className="text-[11px] font-bold text-indigo-700 dark:text-indigo-300 font-mono bg-white dark:bg-slate-900 px-2 py-0.5 rounded-md border border-indigo-200 dark:border-indigo-800 truncate max-w-[180px] sm:max-w-none">
-                  {syncEmail}
-                </span>
+                <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={handleCheckPrimaryDrive}
+                    disabled={isCheckingDrive}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold transition cursor-pointer disabled:opacity-50 whitespace-nowrap"
+                  >
+                    <ShieldCheck className={`w-3.5 h-3.5 text-emerald-500 ${isCheckingDrive ? 'animate-pulse' : ''}`} />
+                    <span>{isCheckingDrive ? 'Checking...' : 'Check Configuration'}</span>
+                  </button>
+                  <button
+                    id="btn-trigger-cloud-sync"
+                    type="button"
+                    onClick={handleManualBackup}
+                    disabled={isSyncingNow || syncState.status === 'syncing' || syncStatus === 'syncing'}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-semibold shadow-xs transition cursor-pointer whitespace-nowrap"
+                  >
+                    <RefreshCw
+                      className={`w-3.5 h-3.5 ${
+                        isSyncingNow || syncState.status === 'syncing' || syncStatus === 'syncing' ? 'animate-spin' : ''
+                      }`}
+                    />
+                    <span>Sync Now</span>
+                  </button>
+                </div>
               </div>
-            </div>
-          </div>
 
-          <div className="flex items-center gap-1.5 w-full sm:w-auto min-w-0">
-            <select
-              value={syncEmail}
-              onChange={(e) => setSyncEmail(e.target.value)}
-              className="flex-1 sm:flex-none min-w-0 text-[11px] font-semibold bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 border border-indigo-200 dark:border-indigo-800 rounded-lg px-2 py-1.5 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 shadow-xs cursor-pointer truncate"
-            >
-              {savedSyncEmails.map((em) => (
-                <option key={em} value={em}>
-                  {em}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={() => setIsBackupModalOpen(true)}
-              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition flex items-center gap-1 shrink-0"
-              title="Manage sync emails & open source storage"
-            >
-              <span>Manage</span>
-            </button>
-          </div>
-        </div>
+              {/* Primary Target + Auto-Sync Interval Selectors */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                <div>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                    Primary Sync Target
+                  </label>
+                  <select
+                    value={joplinSyncSettings.primaryTarget}
+                    onChange={(e) => {
+                      const target = e.target.value as SyncDriveId | 'none';
+                      updateJoplinSyncSettings({ primaryTarget: target });
+                      setSyncDiagResult(null);
+                    }}
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-semibold cursor-pointer"
+                  >
+                    <option value="none">Local Device Only (No Remote Sync)</option>
+                    <option value="jivanos_vault">JivanOS Private Vault (Zero-Login Key + PIN)</option>
+                    <option value="local_folder">Local / Syncthing Folder</option>
+                    <option value="onedrive">Microsoft OneDrive</option>
+                    <option value="gdrive">Google Drive (App Data Folder)</option>
+                    <option value="dropbox">Dropbox</option>
+                    <option value="nextcloud">Nextcloud (WebDAV)</option>
+                    <option value="webdav">WebDAV / Koofr / Home NAS</option>
+                    <option value="s3">S3 / Cloudflare R2 / MinIO / Backblaze B2</option>
+                    <option value="firebase">JivanOS Cloud (Google Account / Firebase)</option>
+                  </select>
+                </div>
 
-        <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
-          <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
-            <span className="text-slate-500 dark:text-slate-400 font-medium">Sync Status</span>
-            <div className="mt-1 font-bold text-slate-900 dark:text-white capitalize flex items-center gap-1.5">
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  syncState.status === 'synced' || syncState.status === 'idle'
-                    ? 'bg-emerald-500'
-                    : syncState.status === 'syncing'
-                    ? 'bg-amber-500 animate-pulse'
-                    : syncState.status === 'offline'
-                    ? 'bg-amber-500'
-                    : 'bg-rose-500'
-                }`}
-              />
-              {syncState.status === 'idle' ? 'Synced' : syncState.status}
-            </div>
-          </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                    Automatic Background Sync Interval
+                  </label>
+                  <select
+                    value={joplinSyncSettings.autoSyncIntervalMinutes}
+                    onChange={(e) =>
+                      updateJoplinSyncSettings({
+                        autoSyncIntervalMinutes: Number(e.target.value) as 0 | 5 | 15 | 30 | 60,
+                      })
+                    }
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-semibold cursor-pointer"
+                  >
+                    <option value={0}>Manual / On-Change Only</option>
+                    <option value={5}>Every 5 minutes (Recommended)</option>
+                    <option value={15}>Every 15 minutes</option>
+                    <option value={30}>Every 30 minutes</option>
+                    <option value={60}>Every 60 minutes</option>
+                  </select>
+                </div>
+              </div>
 
-          <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
-            <span className="text-slate-500 dark:text-slate-400 font-medium">Last Successful Sync</span>
-            <div className="mt-1 font-mono font-bold text-slate-900 dark:text-white">
-              {new Date(syncState.lastSyncTime).toLocaleTimeString([], {
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit',
-              })}
-            </div>
-          </div>
+              {/* Clean Status Strip */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200/80 dark:border-slate-700/80">
+                  <span className="text-slate-500 dark:text-slate-400 font-medium">Connection State</span>
+                  <div className="mt-1 font-bold text-slate-900 dark:text-white capitalize flex items-center gap-1.5">
+                    <span>
+                      {syncStatus === 'syncing' || isSyncingNow
+                        ? 'Syncing...'
+                        : syncStatus === 'error'
+                        ? 'Needs Attention'
+                        : joplinSyncSettings.primaryTarget === 'none'
+                        ? 'Local-First Ready'
+                        : 'Synced'}
+                    </span>
+                  </div>
+                </div>
 
-          <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
-            <span className="text-slate-500 dark:text-slate-400 font-medium">Pending Changes</span>
-            <div className="mt-1 font-bold text-slate-900 dark:text-white">
-              {syncState.pendingChanges} items queued
-            </div>
-          </div>
-        </div>
+                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200/80 dark:border-slate-700/80">
+                  <span className="text-slate-500 dark:text-slate-400 font-medium">Last Successful Sync</span>
+                  <div className="mt-1 font-mono tabular-nums font-bold text-slate-900 dark:text-white">
+                    {lastSyncTime || syncState.lastSyncTime
+                      ? new Date(lastSyncTime || syncState.lastSyncTime).toLocaleTimeString([], {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          second: '2-digit',
+                        })
+                      : 'Not yet synced'}
+                  </div>
+                </div>
 
-        {/* One-Click Drive & Local Backup Options */}
-        <div className="mt-5 pt-4 border-t border-slate-100 dark:border-slate-800 space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-              <Database className="w-3.5 h-3.5 text-indigo-500" />
-              <span>One-Click Cloud Backup (Commercial & Open Source)</span>
-            </span>
-            <button
-              type="button"
-              onClick={() => setIsBackupModalOpen(true)}
-              className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1"
-            >
-              <span>Configure Providers & History</span>
-              <span>→</span>
-            </button>
-          </div>
+                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200/80 dark:border-slate-700/80">
+                  <span className="text-slate-500 dark:text-slate-400 font-medium">Active Auto-Backup Mirrors</span>
+                  <div className="mt-1 font-mono tabular-nums font-bold text-slate-900 dark:text-white">
+                    {
+                      Object.values(joplinSyncSettings.drives).filter(
+                        (d) => d.autoBackupEnabled || d.enabled
+                      ).length
+                    }{' '}
+                    drive(s)
+                  </div>
+                </div>
+              </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 text-xs">
-            <button
-              type="button"
-              onClick={async () => {
-                await createCloudBackup('gdrive', 'manual');
-                setBackupStatusMsg(`Snapshot backed up to Google Drive for ${syncEmail}.`);
-                setTimeout(() => setBackupStatusMsg(''), 3500);
-              }}
-              className="p-2 rounded-xl border border-amber-200/70 dark:border-amber-900/50 bg-amber-50/40 dark:bg-amber-950/20 hover:bg-amber-100/50 text-amber-800 dark:text-amber-300 font-semibold flex flex-col items-center gap-1.5 text-center transition"
-            >
-              <ProviderLogo provider="gdrive" className="w-5 h-5" />
-              <span className="text-[11px] leading-tight">Google Drive</span>
-            </button>
+              {/* Clean Toggles */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-bold text-slate-900 dark:text-white">Auto-Sync on Edit</div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      Debounced background upload whenever tasks, habits, or profile change
+                    </p>
+                  </div>
+                  <M3Switch
+                    checked={joplinSyncSettings.syncOnChange}
+                    onChange={(val) => updateJoplinSyncSettings({ syncOnChange: val })}
+                  />
+                </div>
 
-            <button
-              type="button"
-              onClick={async () => {
-                await createCloudBackup('onedrive', 'manual');
-                setBackupStatusMsg(`Snapshot backed up to OneDrive for ${syncEmail}.`);
-                setTimeout(() => setBackupStatusMsg(''), 3500);
-              }}
-              className="p-2 rounded-xl border border-blue-200/70 dark:border-blue-900/50 bg-blue-50/40 dark:bg-blue-950/20 hover:bg-blue-100/50 text-blue-800 dark:text-blue-300 font-semibold flex flex-col items-center gap-1.5 text-center transition"
-            >
-              <ProviderLogo provider="onedrive" className="w-5 h-5" />
-              <span className="text-[11px] leading-tight">OneDrive</span>
-            </button>
+                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-bold text-slate-900 dark:text-white">Sync on App Launch</div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      Automatically pull newer updates from your primary drive at startup
+                    </p>
+                  </div>
+                  <M3Switch
+                    checked={joplinSyncSettings.syncOnStartup}
+                    onChange={(val) => updateJoplinSyncSettings({ syncOnStartup: val })}
+                  />
+                </div>
 
-            <button
-              type="button"
-              onClick={async () => {
-                await createCloudBackup('nextcloud', 'manual');
-                setBackupStatusMsg(`Encrypted snapshot synced to Nextcloud for ${syncEmail}.`);
-                setTimeout(() => setBackupStatusMsg(''), 3500);
-              }}
-              className="p-2 rounded-xl border border-emerald-200/80 dark:border-emerald-800/60 bg-emerald-50/50 dark:bg-emerald-950/30 hover:bg-emerald-100/50 text-emerald-800 dark:text-emerald-300 font-semibold flex flex-col items-center gap-1.5 text-center transition"
-            >
-              <ProviderLogo provider="nextcloud" className="w-5 h-5" />
-              <span className="text-[11px] leading-tight">Nextcloud</span>
-            </button>
+                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-bold text-slate-900 dark:text-white">Sync Personal Profile Details</div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      Include avatar photo, DOB, name, metrics &amp; currency in snapshots
+                    </p>
+                  </div>
+                  <M3Switch
+                    checked={joplinSyncSettings.syncPersonalDetails}
+                    onChange={(val) => updateJoplinSyncSettings({ syncPersonalDetails: val })}
+                  />
+                </div>
 
-            <button
-              type="button"
-              onClick={async () => {
-                await createCloudBackup('minio_s3', 'manual');
-                setBackupStatusMsg(`Encrypted snapshot uploaded to MinIO S3 for ${syncEmail}.`);
-                setTimeout(() => setBackupStatusMsg(''), 3500);
-              }}
-              className="p-2 rounded-xl border border-teal-200/80 dark:border-teal-800/60 bg-teal-50/50 dark:bg-teal-950/30 hover:bg-teal-100/50 text-teal-800 dark:text-teal-300 font-semibold flex flex-col items-center gap-1.5 text-center transition"
-            >
-              <ProviderLogo provider="minio_s3" className="w-5 h-5" />
-              <span className="text-[11px] leading-tight">MinIO S3</span>
-            </button>
+                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-bold text-slate-900 dark:text-white">End-to-End Encryption (AES-256)</div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      Encrypt payloads client-side before sending to remote drives
+                    </p>
+                  </div>
+                  <M3Switch
+                    checked={joplinSyncSettings.e2eeEnabled}
+                    onChange={(val) => updateJoplinSyncSettings({ e2eeEnabled: val })}
+                  />
+                </div>
+              </div>
 
-            <button
-              type="button"
-              onClick={async () => {
-                await createCloudBackup('mega', 'manual');
-                setBackupStatusMsg(`Encrypted snapshot uploaded to MEGA for ${syncEmail}.`);
-                setTimeout(() => setBackupStatusMsg(''), 3500);
-              }}
-              className="p-2 rounded-xl border border-rose-200/70 dark:border-rose-900/50 bg-rose-50/40 dark:bg-rose-950/20 hover:bg-rose-100/50 text-rose-800 dark:text-rose-300 font-semibold flex flex-col items-center gap-1.5 text-center transition"
-            >
-              <ProviderLogo provider="mega" className="w-5 h-5" />
-              <span className="text-[11px] leading-tight">MEGA</span>
-            </button>
+              {joplinSyncSettings.e2eeEnabled && (
+                <div className="p-3.5 rounded-xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-800/60 space-y-2 text-xs">
+                  <label className="block font-bold text-amber-900 dark:text-amber-200">
+                    Client-Side E2EE Sync Passphrase
+                  </label>
+                  <input
+                    type="password"
+                    value={joplinSyncSettings.e2eePassphrase || ''}
+                    onChange={(e) => updateJoplinSyncSettings({ e2eePassphrase: e.target.value })}
+                    placeholder="Enter a shared passphrase across your devices..."
+                    className="w-full px-3 py-2 rounded-xl border border-amber-200 dark:border-amber-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono text-xs"
+                  />
+                </div>
+              )}
 
-            <button
-              type="button"
-              onClick={async () => {
-                await createCloudBackup('proton', 'manual');
-                setBackupStatusMsg(`Zero-access backup created on Proton Drive for ${syncEmail}.`);
-                setTimeout(() => setBackupStatusMsg(''), 3500);
-              }}
-              className="p-2 rounded-xl border border-purple-200/70 dark:border-purple-900/50 bg-purple-50/40 dark:bg-purple-950/20 hover:bg-purple-100/50 text-purple-800 dark:text-purple-300 font-semibold flex flex-col items-center gap-1.5 text-center transition"
-            >
-              <ProviderLogo provider="proton" className="w-5 h-5" />
-              <span className="text-[11px] leading-tight">Proton</span>
-            </button>
+              {/* Diagnostic / Sync Feedback */}
+              {(syncDiagResult || backupStatusMsg) && (
+                <div
+                  className={`p-3 rounded-xl text-xs flex items-start gap-2.5 border ${
+                    syncDiagResult && !syncDiagResult.success
+                      ? 'bg-rose-50 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800'
+                      : 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
+                  }`}
+                >
+                  {syncDiagResult && !syncDiagResult.success ? (
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  ) : (
+                    <Check className="w-4 h-4 shrink-0 mt-0.5" />
+                  )}
+                  <span>{syncDiagResult?.message || backupStatusMsg}</span>
+                </div>
+              )}
 
-            <button
-              type="button"
-              onClick={() => {
-                downloadLocalBackupFile();
-                setBackupStatusMsg('Local JSON backup exported to downloads.');
-                setTimeout(() => setBackupStatusMsg(''), 3500);
-              }}
-              className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-semibold flex flex-col items-center gap-1.5 text-center transition"
-            >
-              <ProviderLogo provider="local" className="w-5 h-5" />
-              <span className="text-[11px] leading-tight">Local JSON</span>
-            </button>
-          </div>
-        </div>
+              {/* Actions Footer */}
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setIsBackupModalOpen(true)}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold transition flex items-center gap-2 cursor-pointer shadow-2xs whitespace-nowrap"
+                >
+                  <Server className="w-3.5 h-3.5" />
+                  <span>Configure Drives, Pairing Key &amp; Backups</span>
+                </button>
 
-        {backupStatusMsg && (
-          <div className="mt-3 p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 text-xs flex items-center gap-2 border border-emerald-200 dark:border-emerald-800">
-            <Check className="w-4 h-4" />
-            <span>{backupStatusMsg}</span>
-          </div>
-        )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    downloadLocalBackupFile();
+                    setBackupStatusMsg('Local JSON snapshot exported to your downloads folder.');
+                    setTimeout(() => setBackupStatusMsg(''), 3500);
+                  }}
+                  className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold transition flex items-center gap-2 cursor-pointer whitespace-nowrap"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Export Local JSON</span>
+                </button>
+              </div>
             </div>
           )}
 
@@ -2229,165 +2344,321 @@ export const SettingsManager: React.FC = () => {
             </div>
           )}
 
-          {/* Profile & 2FA Security Card */}
+          {/* Profile, Health Metrics & Optional Login Card */}
           {activeSection === 'profile' && (
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 sm:p-6 shadow-xs">
-        <div className="flex items-center gap-2.5 pb-3 border-b border-slate-100 dark:border-slate-800">
-          <div className="w-8 h-8 rounded-xl bg-emerald-100 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
-            <Shield className="w-4 h-4" />
-          </div>
-          <div>
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-              User Profile, Photo &amp; Security
-            </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Personalized nickname, compressed avatar, and TOTP 2FA protection
-            </p>
-          </div>
-        </div>
+            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-6 shadow-xs space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                  <div className="w-9 h-9 rounded-xl bg-purple-100 dark:bg-purple-950 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0">
+                    <User className="w-4.5 h-4.5" />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                      Personal Profile &amp; Local-First Identity
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Stored on your device first and synced to any connected drive
+                    </p>
+                  </div>
+                </div>
 
-        <form onSubmit={handleProfileSave} className="mt-4 space-y-4 text-xs">
-          {/* Profile Photo Upload Row */}
-          <div className="flex items-center gap-4 p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
-            <div className="relative shrink-0">
-              {avatarPhoto ? (
-                <img
-                  src={avatarPhoto}
-                  alt="Profile"
-                  className="w-14 h-14 rounded-2xl object-cover border border-slate-200 dark:border-slate-700 shadow-xs"
-                />
-              ) : (
-                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white font-black text-xl flex items-center justify-center shadow-xs">
-                  {nameInput ? nameInput.charAt(0).toUpperCase() : 'J'}
+                {firebaseUser ? (
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400 truncate max-w-[180px]">
+                      {firebaseUser.email || 'Google Connected'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => logout()}
+                      className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <LogOut className="w-3.5 h-3.5" />
+                      <span>Sign Out</span>
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleGoogleSignInInline}
+                    disabled={isLoggingIn}
+                    className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-xs font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-2 transition cursor-pointer disabled:opacity-50 whitespace-nowrap"
+                  >
+                    <Cloud className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>{isLoggingIn ? 'Signing In...' : 'Optional Google Sign-In'}</span>
+                  </button>
+                )}
+              </div>
+
+              {(authError || profileAuthError) && (
+                <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-xs text-rose-700 dark:text-rose-300 flex items-start justify-between gap-2">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>{profileAuthError || authError}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProfileAuthError('');
+                      clearAuthError();
+                    }}
+                    className="text-rose-500 hover:text-rose-700 font-bold shrink-0 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               )}
-              <label
-                htmlFor="settings-photo-upload"
-                className="absolute -bottom-1 -right-1 w-6 h-6 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center shadow-xs cursor-pointer transition"
-                title="Upload Photo"
-              >
-                <Camera className="w-3 h-3" />
-                <input
-                  id="settings-photo-upload"
-                  type="file"
-                  accept="image/*"
-                  onChange={handlePhotoUpload}
-                  className="hidden"
-                />
-              </label>
-            </div>
 
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-slate-900 dark:text-white text-xs">
-                  Profile Photo
-                </span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 font-medium">
-                  Auto-Compressed
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                Images are automatically cropped and compressed to lightweight 256x256 WebP to preserve storage.
-              </p>
-              {photoError && (
-                <p className="text-[11px] text-rose-500 font-semibold mt-1">{photoError}</p>
-              )}
-            </div>
+              <form onSubmit={handleProfileSave} className="space-y-4 text-xs">
+                {/* Profile Photo Upload Row */}
+                <div className="flex items-center gap-4 p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
+                  <div className="relative shrink-0">
+                    {avatarPhoto ? (
+                      <img
+                        src={avatarPhoto}
+                        alt="Profile"
+                        className="w-16 h-16 rounded-2xl object-cover border border-slate-200 dark:border-slate-700 shadow-xs"
+                      />
+                    ) : (
+                      <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white font-black text-xl flex items-center justify-center shadow-xs">
+                        {(nicknameInput || nameInput || 'J').charAt(0).toUpperCase()}
+                      </div>
+                    )}
+                    <label
+                      htmlFor="settings-photo-upload"
+                      className="absolute -bottom-1 -right-1 w-6 h-6 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center shadow-xs cursor-pointer transition"
+                      title="Upload Photo"
+                    >
+                      <Camera className="w-3 h-3" />
+                      <input
+                        id="settings-photo-upload"
+                        type="file"
+                        accept="image/*"
+                        onChange={handlePhotoUpload}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
 
-            {avatarPhoto && (
-              <button
-                type="button"
-                onClick={() => setAvatarPhoto('')}
-                className="p-2 rounded-xl text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition shrink-0"
-                title="Remove photo"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-            )}
-          </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-bold text-slate-900 dark:text-white text-xs">
+                      Profile Photo · Auto-compressed WebP
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      Cropped to 256×256 WebP so your avatar syncs cleanly across drives without bloating snapshots.
+                    </p>
+                    {photoError && (
+                      <p className="text-[11px] text-rose-500 font-semibold mt-1">{photoError}</p>
+                    )}
+                  </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">
-                Full Name
-              </label>
-              <input
-                type="text"
-                value={nameInput}
-                onChange={e => setNameInput(e.target.value)}
-                placeholder="Your full name"
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-              />
-            </div>
-            <div>
-              <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">
-                Nickname / Display Name
-              </label>
-              <input
-                type="text"
-                value={nicknameInput}
-                onChange={e => setNicknameInput(e.target.value)}
-                placeholder="Display name"
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-              />
-            </div>
-            <div>
-              <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">
-                Account Email
-              </label>
-              <input
-                type="email"
-                value={emailInput}
-                onChange={e => setEmailInput(e.target.value)}
-                placeholder="you@example.com"
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-              />
-            </div>
-          </div>
+                  {avatarPhoto && (
+                    <button
+                      type="button"
+                      onClick={() => setAvatarPhoto('')}
+                      className="p-2 rounded-xl text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition shrink-0 cursor-pointer"
+                      title="Remove photo"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
 
-          <div>
-            <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">
-              Personal Bio / Philosophy
-            </label>
-            <input
-              type="text"
-              value={bioInput}
-              onChange={e => setBioInput(e.target.value)}
-              placeholder="Focusing on health, mindfulness, and productive consistency."
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-            />
-          </div>
+                {/* Identity Fields */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">
+                      Full Name
+                    </label>
+                    <input
+                      type="text"
+                      value={nameInput}
+                      onChange={e => setNameInput(e.target.value)}
+                      placeholder="Your full name"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">
+                      Nickname / Display Name
+                    </label>
+                    <input
+                      type="text"
+                      value={nicknameInput}
+                      onChange={e => setNicknameInput(e.target.value)}
+                      placeholder="Display name"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">
+                      Contact Email (Optional)
+                    </label>
+                    <input
+                      type="email"
+                      value={emailInput}
+                      onChange={e => setEmailInput(e.target.value)}
+                      placeholder="Optional email"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                    />
+                  </div>
+                </div>
 
-          <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <Smartphone className="w-4 h-4 text-emerald-500" />
-              <div>
-                <span className="font-semibold text-slate-900 dark:text-white">
-                  Two-Factor Authentication (2FA / TOTP)
-                </span>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Require one-time verification code on new devices
-                </p>
-              </div>
-            </div>
-            <input
-              type="checkbox"
-              checked={twoFactorActive}
-              onChange={e => setTwoFactorActive(e.target.checked)}
-              className="w-4 h-4 accent-emerald-600 rounded"
-            />
-          </div>
+                {/* DOB, Gender, Health Metrics & Currency */}
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                  <div>
+                    <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">
+                      Date of Birth
+                    </label>
+                    <input
+                      type="date"
+                      value={dobInput}
+                      onChange={e => setDobInput(e.target.value)}
+                      className="w-full px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white tabular-nums"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">
+                      Gender
+                    </label>
+                    <select
+                      value={genderInput}
+                      onChange={e => setGenderInput(e.target.value as any)}
+                      className="w-full px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white cursor-pointer"
+                    >
+                      <option value="unspecified">Prefer not to say</option>
+                      <option value="male">Male</option>
+                      <option value="female">Female</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">
+                      Height (cm)
+                    </label>
+                    <input
+                      type="number"
+                      min={50}
+                      max={260}
+                      value={heightInput}
+                      onChange={e => setHeightInput(e.target.value)}
+                      placeholder="170"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white tabular-nums"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">
+                      Weight (kg)
+                    </label>
+                    <input
+                      type="number"
+                      min={15}
+                      max={300}
+                      step="0.1"
+                      value={weightInput}
+                      onChange={e => setWeightInput(e.target.value)}
+                      placeholder="68"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white tabular-nums"
+                    />
+                  </div>
+                  <div className="col-span-2 sm:col-span-1">
+                    <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">
+                      Currency
+                    </label>
+                    <select
+                      value={currencyInput}
+                      onChange={e => setCurrencyInput(e.target.value as SupportedCurrency)}
+                      className="w-full px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white cursor-pointer"
+                    >
+                      <option value="INR">INR (₹)</option>
+                      <option value="USD">USD ($)</option>
+                      <option value="EUR">EUR (€)</option>
+                      <option value="GBP">GBP (£)</option>
+                      <option value="AED">AED</option>
+                      <option value="JPY">JPY (¥)</option>
+                      <option value="CAD">CAD ($)</option>
+                      <option value="AUD">AUD ($)</option>
+                    </select>
+                  </div>
+                </div>
 
-          <div className="flex justify-end">
-            <button
-              type="submit"
-              disabled={isCompressingPhoto}
-              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold transition shadow-xs disabled:opacity-50"
-            >
-              Save Profile
-            </button>
-          </div>
-        </form>
+                <div>
+                  <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">
+                    Personal Bio / Philosophy
+                  </label>
+                  <input
+                    type="text"
+                    value={bioInput}
+                    onChange={e => setBioInput(e.target.value)}
+                    placeholder="Focusing on health, mindfulness, and productive consistency."
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                  />
+                </div>
+
+                {/* Sync Profile & 2FA Toggles */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <FolderSync className="w-4 h-4 text-indigo-500 shrink-0" />
+                      <div className="min-w-0">
+                        <span className="font-semibold text-slate-900 dark:text-white block truncate">
+                          Sync Personal Details
+                        </span>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Include photo, DOB &amp; metrics in Multi-Drive Sync
+                        </p>
+                      </div>
+                    </div>
+                    <M3Switch
+                      checked={joplinSyncSettings.syncPersonalDetails}
+                      onChange={(val) => updateJoplinSyncSettings({ syncPersonalDetails: val })}
+                    />
+                  </div>
+
+                  <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <Smartphone className="w-4 h-4 text-emerald-500 shrink-0" />
+                      <div className="min-w-0">
+                        <span className="font-semibold text-slate-900 dark:text-white block truncate">
+                          Two-Factor Auth (2FA)
+                        </span>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Require verification code on new devices
+                        </p>
+                      </div>
+                    </div>
+                    <M3Switch
+                      checked={twoFactorActive}
+                      onChange={setTwoFactorActive}
+                    />
+                  </div>
+                </div>
+
+                {profileSavedMsg && (
+                  <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
+                    <Check className="w-4 h-4 shrink-0" />
+                    <span>{profileSavedMsg}</span>
+                  </div>
+                )}
+
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setIsBackupModalOpen(true)}
+                    className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 font-semibold transition cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Activity className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>Open Multi-Drive Hub</span>
+                  </button>
+
+                  <button
+                    type="submit"
+                    disabled={isCompressingPhoto}
+                    className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold transition shadow-xs disabled:opacity-50 cursor-pointer"
+                  >
+                    Save Profile
+                  </button>
+                </div>
+              </form>
             </div>
           )}
 

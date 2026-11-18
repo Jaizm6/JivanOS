@@ -755,6 +755,7 @@ export type CloudBackupProvider =
   | 'icloud';
 
 export type SyncDriveId =
+  | 'jivanos_vault'
   | 'local_folder'
   | 'onedrive'
   | 'gdrive'
@@ -769,6 +770,9 @@ export interface SyncDriveConfig {
   enabled: boolean;
   autoBackupEnabled?: boolean;
   label?: string;
+  // JivanOS Private Sync Vault (zero-OAuth Joplin-Server-style pairing key)
+  vaultId?: string;
+  vaultPin?: string;
   // WebDAV / Nextcloud
   serverUrl?: string;
   username?: string;

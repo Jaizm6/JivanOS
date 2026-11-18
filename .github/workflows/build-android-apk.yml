@@ -47,7 +47,7 @@ jobs:
           yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses > /dev/null 2>&1 || true
           "$SDKMANAGER" --sdk_root="$SDK_ROOT" "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
-      - name: Install Dependencies, Generate GrapheneOS Icons & Build Web App
+      - name: Install Dependencies, Generate JivanOS Icons & Build Web App
         run: |
           npm install --legacy-peer-deps
           npm install --no-save --legacy-peer-deps react-is postcss
@@ -77,7 +77,7 @@ jobs:
           npx cap add android
           npx cap sync android
 
-          # Apply GrapheneOS custom launcher icon across all Android mipmap densities
+          # Apply JivanOS geometric launcher icon across all Android mipmap densities
           node -e '
             const sharp = require("'"$GITHUB_WORKSPACE"'/node_modules/sharp");
             const fs = require("fs");
@@ -103,36 +103,86 @@ jobs:
               if (fs.existsSync(bgXml)) {
                 fs.writeFileSync(bgXml, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<resources>\n    <color name=\"ic_launcher_background\">#090D16</color>\n</resources>\n");
               }
-              console.log("Android native mipmap launcher icons updated with GrapheneOS emblem.");
+              console.log("Android native mipmap launcher icons updated with JivanOS emblem.");
             })();
           '
 
-          # Auto-increment versionCode & versionName and configure deterministic signing so APKs update in-place without uninstalling
-          VER_CODE=$((100 + ${GITHUB_RUN_NUMBER:-1}))
-          VER_NAME="2.1.${GITHUB_RUN_NUMBER:-1}"
-          BUILD_GRADLE="/tmp/cap-project/android/app/build.gradle"
-          if [ -f "$BUILD_GRADLE" ]; then
-            sed -i "s/versionCode 1/versionCode ${VER_CODE}/g" "$BUILD_GRADLE"
-            sed -i "s/versionName \"1.0\"/versionName \"${VER_NAME}\"/g" "$BUILD_GRADLE"
-          fi
-
-          # Ensure persistent deterministic debug keystore so every GitHub Actions build shares the same certificate
+          # Decode persistent repository keystore so every release shares the exact same signing certificate
           mkdir -p "$HOME/.android"
-          if [ -f "$GITHUB_WORKSPACE/android-signing/debug.keystore.b64" ]; then
-            base64 -d "$GITHUB_WORKSPACE/android-signing/debug.keystore.b64" > "$HOME/.android/debug.keystore"
+          if [ ! -f "$GITHUB_WORKSPACE/android-signing/debug.keystore.b64" ]; then
+            echo "ERROR: Missing android-signing/debug.keystore.b64"
+            exit 1
           fi
+          base64 -d "$GITHUB_WORKSPACE/android-signing/debug.keystore.b64" > /tmp/jivanos-release.keystore
+          cp /tmp/jivanos-release.keystore "$HOME/.android/debug.keystore"
+          keytool -list -v -keystore /tmp/jivanos-release.keystore -storepass android -alias androiddebugkey | head -n 20
+
+          # Deterministically set versionCode (30000+run_number), versionName (3.0.x), and explicit release/debug signingConfigs
+          VER_CODE=$((30000 + ${GITHUB_RUN_NUMBER:-1}))
+          VER_NAME="3.0.${GITHUB_RUN_NUMBER:-1}"
+          echo "JIVANOS_VER_NAME=$VER_NAME" >> $GITHUB_ENV
+          echo "JIVANOS_VER_CODE=$VER_CODE" >> $GITHUB_ENV
+
+          node -e '
+            const fs = require("fs");
+            const gradlePath = "/tmp/cap-project/android/app/build.gradle";
+            let gradle = fs.readFileSync(gradlePath, "utf8");
+            const verCode = Number(process.env.JIVANOS_VER_CODE || 30001);
+            const verName = process.env.JIVANOS_VER_NAME || "3.0.1";
+
+            gradle = gradle.replace(/applicationId\s+"[^"]+"/, "applicationId \"com.jivanos.lifesystem\"");
+            gradle = gradle.replace(/versionCode\s+\d+/, "versionCode " + verCode);
+            gradle = gradle.replace(/versionName\s+"[^"]+"/, "versionName \"" + verName + "\"");
+
+            const signingBlock = `
+    signingConfigs {
+        debug {
+            storeFile file("/tmp/jivanos-release.keystore")
+            storePassword "android"
+            keyAlias "androiddebugkey"
+            keyPassword "android"
+            v1SigningEnabled true
+            v2SigningEnabled true
+        }
+        release {
+            storeFile file("/tmp/jivanos-release.keystore")
+            storePassword "android"
+            keyAlias "androiddebugkey"
+            keyPassword "android"
+            v1SigningEnabled true
+            v2SigningEnabled true
+        }
+    }
+`;
+            gradle = gradle.replace(/buildTypes\s*\{/, signingBlock + "\n    buildTypes {");
+            gradle = gradle.replace(/(release\s*\{)/, "$1\n            signingConfig signingConfigs.release");
+            gradle = gradle.replace(/(debug\s*\{)/, "$1\n            signingConfig signingConfigs.debug");
+            if (!gradle.includes("debug {")) {
+              gradle = gradle.replace(/buildTypes\s*\{/, "buildTypes {\n        debug {\n            signingConfig signingConfigs.debug\n        }");
+            }
+            fs.writeFileSync(gradlePath, gradle, "utf8");
+            console.log("Updated build.gradle -> versionCode=" + verCode + ", versionName=" + verName + ", explicit signingConfigs attached");
+          '
 
           MANIFEST="/tmp/cap-project/android/app/src/main/AndroidManifest.xml"
           if [ -f "$MANIFEST" ]; then
             sed -i 's|<application|<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.VIBRATE" />\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n    <application|g' "$MANIFEST"
           fi
 
-      - name: Compile Installable Android APK with Gradle
+      - name: Compile & Verify Signed Release Android APK with Gradle
         run: |
           cd /tmp/cap-project/android
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
-          cp app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/JivanOS.apk"
+          ./gradlew assembleRelease --no-daemon
+          APK_PATH="app/build/outputs/apk/release/app-release.apk"
+          if [ ! -f "$APK_PATH" ]; then
+            APK_PATH="app/build/outputs/apk/release/app-release-unsigned.apk"
+          fi
+          cp "$APK_PATH" "$GITHUB_WORKSPACE/JivanOS.apk"
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)
+          if [ -n "$APKSIGNER" ]; then
+            "$APKSIGNER" verify --print-certs "$GITHUB_WORKSPACE/JivanOS.apk"
+          fi
           ls -lh "$GITHUB_WORKSPACE/JivanOS.apk"
 
       - name: Upload JivanOS.apk to Workflow Artifacts
@@ -148,5 +198,9 @@ jobs:
         run: |
           gh release delete latest-apk --yes --cleanup-tag 2>/dev/null || true
           gh release create latest-apk JivanOS.apk \
-            --title "JivanOS Android APK (v2.1.${GITHUB_RUN_NUMBER:-1})" \
-            --notes "Download JivanOS.apk below under Assets on your Android phone and tap it to install or update in-place over your existing JivanOS app."
+            --title "JivanOS Android APK (v${JIVANOS_VER_NAME:-3.0.1})" \
+            --notes "## JivanOS v${JIVANOS_VER_NAME:-3.0.1} (Build ${JIVANOS_VER_CODE:-30001})
+
+- **In-Place Updates**: Explicit v1/v2 APK signature pinning (`com.jivanos.lifesystem`) ensures seamless future updates without uninstalling.
+- **Note when upgrading from legacy v2.1.x APKs**: If your currently installed v2.1.x APK was built with an older mismatched keystore, Android will show a one-time package conflict error. Export a JSON backup (or sync to a drive), uninstall the old v2.1.x APK once, and install v3.0.x — every update after this will install cleanly in-place.
+- **What's New**: Joplin-style Multi-Drive Sync + JivanOS Private Sync Vault, Check Config diagnostics, overhauled Settings & Profile hub, and updated JivanOS emblem."

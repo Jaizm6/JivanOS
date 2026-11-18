@@ -1,7 +1,7 @@
 // JivanOS Service Worker & Notification Handler
 // Supports background notifications, FCM push payload delivery, and notification action clicks
 
-const CACHE_NAME = 'omnilifeos-v2';
+const CACHE_NAME = 'jivanos-v3';
 const PRECACHE_ASSETS = [
   '/manifest.json',
   '/icon.svg',
