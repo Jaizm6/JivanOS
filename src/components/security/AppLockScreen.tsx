@@ -94,11 +94,8 @@ export const AppLockScreen: React.FC = () => {
           </div>
         </div>
 
-        <h2 className="text-xl font-bold tracking-tight text-white flex items-center gap-1.5">
-          <span>Jivan</span>
-          <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-950/60 text-emerald-300 border border-emerald-800/50 font-mono">
-            Life OS
-          </span>
+        <h2 className="text-xl font-bold tracking-tight text-white">
+          Jivan<span className="text-indigo-400">OS</span>
         </h2>
         <p className="text-xs text-slate-400 mt-1">
           {appLock.lockType === 'biometric' || appLock.lockType === 'both' || appLock.biometricEnabled

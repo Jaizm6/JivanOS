@@ -918,9 +918,7 @@ export const SettingsManager: React.FC = () => {
                 </span>
                 <div className="rounded-[22px] bg-white dark:bg-zinc-900 border border-slate-200/90 dark:border-zinc-800/90 p-3.5 sm:p-4 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-2xl bg-slate-900 dark:bg-zinc-800 border border-slate-800 dark:border-zinc-700 flex items-center justify-center shrink-0 shadow-xs text-white">
-                      <JivanLogoMark className="w-6 h-6" />
-                    </div>
+                    <JivanLogoMark withFrame className="w-10 h-10 shrink-0 shadow-xs" />
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <h3 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">

@@ -29,41 +29,9 @@ import { ActiveTab } from '../../types';
 import { soundEngine } from '../../utils/audio';
 import { showAndroidToast } from '../common/AndroidToast';
 
-/**
- * Minimal JivanOS geometric emblem
- */
-export const JivanLogoMark: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) => (
-  <svg viewBox="0 0 64 64" fill="none" className={className} aria-hidden="true">
-    <circle
-      cx="32"
-      cy="32"
-      r="22"
-      stroke="currentColor"
-      strokeOpacity="0.28"
-      strokeWidth="3.2"
-      strokeDasharray="96 42"
-      strokeDashoffset="10"
-      strokeLinecap="round"
-    />
-    <path
-      d="M36.5 16 V36.5 C36.5 43.2 31.4 48 24.8 48 C20.8 48 17.5 46 15.8 43"
-      stroke="currentColor"
-      strokeWidth="5.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
-    <line
-      x1="27"
-      y1="16"
-      x2="42"
-      y2="16"
-      stroke="#818cf8"
-      strokeWidth="4.4"
-      strokeLinecap="round"
-    />
-    <circle cx="46.5" cy="23.5" r="3.4" fill="#34d399" />
-  </svg>
-);
+import { JivanLogoMark } from '../common/JivanLogo';
+import { SidebarClockCard } from './SidebarClockCard';
+export { JivanLogoMark };
 
 export const Sidebar: React.FC = () => {
   const {
@@ -95,47 +63,6 @@ export const Sidebar: React.FC = () => {
     firebaseUser,
     setIsAIChatOpen,
   } = useApp();
-
-  // Live Digital & Analog Clock state
-  const [now, setNow] = useState<Date>(() => new Date());
-  useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(id);
-  }, []);
-
-  const clockParts = useMemo(() => {
-    const rawHours = now.getHours();
-    const rawMinutes = now.getMinutes();
-    const rawSeconds = now.getSeconds();
-    const period = rawHours >= 12 ? 'PM' : 'AM';
-    const h12 = rawHours % 12 || 12;
-    const hours = String(h12).padStart(2, '0');
-    const minutes = String(rawMinutes).padStart(2, '0');
-    const seconds = String(rawSeconds).padStart(2, '0');
-    const weekday = now.toLocaleDateString(undefined, { weekday: 'short' }).toUpperCase();
-    const dayNum = now.getDate();
-    const monthLong = now.toLocaleDateString(undefined, { month: 'long' });
-    const yearNum = now.getFullYear();
-
-    // Smooth angles for live SVG Analog Clock
-    const secondAngle = rawSeconds * 6;
-    const minuteAngle = rawMinutes * 6 + rawSeconds * 0.1;
-    const hourAngle = (rawHours % 12) * 30 + rawMinutes * 0.5;
-
-    return {
-      hours,
-      minutes,
-      seconds,
-      period,
-      weekday,
-      dayNum,
-      monthLong,
-      yearNum,
-      secondAngle,
-      minuteAngle,
-      hourAngle,
-    };
-  }, [now]);
 
   // Exclude fixed-course/deadline meds from refill stock alerts
   const lowStockMeds = useMemo(
@@ -411,9 +338,7 @@ export const Sidebar: React.FC = () => {
                     className="w-9 h-9 rounded-full object-cover ring-2 ring-indigo-500/35 dark:ring-indigo-400/35"
                   />
                 ) : (
-                  <div className="w-9 h-9 rounded-2xl bg-[#0B1020] dark:bg-zinc-950 text-slate-100 ring-1 ring-slate-200/80 dark:ring-zinc-700/80 flex items-center justify-center shadow-xs">
-                    <JivanLogoMark className="w-6 h-6" />
-                  </div>
+                  <JivanLogoMark withFrame className="w-9 h-9 shadow-xs" />
                 )}
                 <span
                   className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ring-2 ring-white dark:ring-zinc-900 ${
@@ -476,156 +401,8 @@ export const Sidebar: React.FC = () => {
 
           {/* 2. SCROLLABLE MATERIAL 3 EXPRESSIVE BODY (overscroll-contain locks scroll inside drawer) */}
           <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain no-scrollbar space-y-2 pr-0.5">
-            {/* ONEPLUS-STYLE DIGITAL CLOCK + DATE (LEFT ~3/4) & FULL-HEIGHT LIVE ANALOG CLOCK (RIGHT ~1/4) */}
-            <div className="p-2 sm:p-2.5 rounded-[20px] bg-white dark:bg-zinc-900/95 border border-slate-200/80 dark:border-zinc-800/80 shadow-2xs flex items-center justify-between gap-2">
-              {/* Left Section: Enlarged Digital Clock on Top + Full Date Strip Below */}
-              <div className="min-w-0 flex-1 h-[74px] sm:h-[78px] flex flex-col justify-between pr-2.5 border-r border-slate-200/70 dark:border-zinc-800">
-                {/* Digital Clock Row */}
-                <div className="flex items-center justify-between gap-1.5 min-w-0 flex-1">
-                  <div className="text-[42px] sm:text-[45px] font-black tracking-[-0.045em] tabular-nums leading-[0.82] flex items-baseline shrink-0 select-none">
-                    <span className="text-rose-600 dark:text-rose-500">{clockParts.hours}</span>
-                    <span className="text-slate-900 dark:text-white">:{clockParts.minutes}</span>
-                  </div>
-
-                  {/* Stacked :SS and AM/PM badge with guaranteed right clearance from divider */}
-                  <div className="flex flex-col items-end justify-between h-[40px] sm:h-[42px] py-0.5 mr-0.5 leading-none shrink-0">
-                    <span className="text-[12.5px] sm:text-[13.5px] font-mono font-extrabold text-emerald-600 dark:text-emerald-400 tabular-nums leading-none">
-                      :{clockParts.seconds}
-                    </span>
-                    <span className="px-1.5 py-[3px] rounded-md bg-slate-100 dark:bg-zinc-800 text-[9.5px] sm:text-[10px] font-black tracking-wider text-slate-700 dark:text-zinc-200 uppercase leading-none">
-                      {clockParts.period}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Crisp Horizontal Divider */}
-                <div className="h-px w-full bg-slate-100 dark:bg-zinc-800/90 my-1 shrink-0" />
-
-                {/* Date Row Directly Below Digital Clock — spans full left column width with zero truncation */}
-                <div className="flex items-center justify-between gap-1 pr-0.5 text-[11px] sm:text-[11.5px] font-extrabold tracking-[-0.02em] leading-none whitespace-nowrap min-w-0">
-                  <div className="flex items-center gap-1 min-w-0">
-                    <span className="text-rose-600 dark:text-rose-400 uppercase tracking-wider shrink-0">
-                      {clockParts.weekday}
-                    </span>
-                    <span className="text-slate-300 dark:text-zinc-700 shrink-0">•</span>
-                    <span className="text-slate-800 dark:text-zinc-100">
-                      {clockParts.dayNum} {clockParts.monthLong}
-                    </span>
-                  </div>
-                  <span className="text-emerald-600 dark:text-emerald-400 font-black tabular-nums shrink-0">
-                    {clockParts.yearNum}
-                  </span>
-                </div>
-              </div>
-
-              {/* Right Section: Full-Height Live Analog Clock Face with Numbers 1-12 */}
-              <div className="shrink-0 flex items-center justify-center">
-                <svg
-                  width="76"
-                  height="76"
-                  viewBox="0 0 86 86"
-                  className="w-[74px] h-[74px] sm:w-[78px] sm:h-[78px] overflow-visible select-none block"
-                  aria-label="Live analog clock"
-                >
-                  {/* Outer Bezel */}
-                  <circle
-                    cx="43"
-                    cy="43"
-                    r="41.5"
-                    className="fill-[#f4f7fc] dark:fill-zinc-950 stroke-slate-200/95 dark:stroke-zinc-800"
-                    strokeWidth="2"
-                  />
-
-                  {/* Subtle Minute/Hour Rim Ticks */}
-                  {Array.from({ length: 12 }).map((_, idx) => {
-                    const angleRad = ((idx * 30 - 90) * Math.PI) / 180;
-                    const x1 = 43 + 37.5 * Math.cos(angleRad);
-                    const y1 = 43 + 37.5 * Math.sin(angleRad);
-                    const x2 = 43 + 39.8 * Math.cos(angleRad);
-                    const y2 = 43 + 39.8 * Math.sin(angleRad);
-                    return (
-                      <line
-                        key={`tick_${idx}`}
-                        x1={x1}
-                        y1={y1}
-                        x2={x2}
-                        y2={y2}
-                        className="stroke-slate-300 dark:stroke-zinc-700"
-                        strokeWidth="1.2"
-                        strokeLinecap="round"
-                      />
-                    );
-                  })}
-
-                  {/* 12 Hour Numbers */}
-                  {Array.from({ length: 12 }).map((_, idx) => {
-                    const num = idx === 0 ? 12 : idx;
-                    const angleRad = ((idx * 30 - 90) * Math.PI) / 180;
-                    const rNum = 31.5;
-                    const x = 43 + rNum * Math.cos(angleRad);
-                    const y = 43 + rNum * Math.sin(angleRad);
-                    return (
-                      <text
-                        key={num}
-                        x={x}
-                        y={y}
-                        textAnchor="middle"
-                        dominantBaseline="central"
-                        fontSize="8"
-                        fontWeight="800"
-                        className={
-                          num === 12
-                            ? 'fill-rose-600 dark:fill-rose-500 font-mono'
-                            : 'fill-slate-700 dark:fill-zinc-300 font-mono'
-                        }
-                      >
-                        {num}
-                      </text>
-                    );
-                  })}
-
-                  {/* Hour Hand */}
-                  <line
-                    x1="43"
-                    y1="43"
-                    x2="43"
-                    y2="25"
-                    transform={`rotate(${clockParts.hourAngle} 43 43)`}
-                    className="stroke-slate-900 dark:stroke-white"
-                    strokeWidth="2.8"
-                    strokeLinecap="round"
-                  />
-
-                  {/* Minute Hand */}
-                  <line
-                    x1="43"
-                    y1="43"
-                    x2="43"
-                    y2="18.5"
-                    transform={`rotate(${clockParts.minuteAngle} 43 43)`}
-                    className="stroke-indigo-600 dark:stroke-indigo-400"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                  />
-
-                  {/* Second Hand (OnePlus Red) */}
-                  <line
-                    x1="43"
-                    y1="48"
-                    x2="43"
-                    y2="15"
-                    transform={`rotate(${clockParts.secondAngle} 43 43)`}
-                    className="stroke-rose-600 dark:stroke-rose-500"
-                    strokeWidth="1.25"
-                    strokeLinecap="round"
-                  />
-
-                  {/* Center Cap */}
-                  <circle cx="43" cy="43" r="3" className="fill-rose-600 dark:fill-rose-500" />
-                  <circle cx="43" cy="43" r="1.25" className="fill-white dark:fill-zinc-900" />
-                </svg>
-              </div>
-            </div>
+            {/* REVAMPED DIGITAL & ANALOG CLOCK WIDGET */}
+            <SidebarClockCard />
 
             {/* SECONDARY STACKABLE SWIPE-UP / SWIPE-DOWN NOTIFICATION & ALERT STACK CARD */}
             {currentAlertCard && (
