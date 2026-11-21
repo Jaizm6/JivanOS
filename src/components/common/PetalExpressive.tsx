@@ -442,7 +442,7 @@ export interface PetalColorStyleSpec {
 }
 
 export const PETAL_COLOR_STYLES: PetalColorStyleSpec[] = [
-  { id: 'tonal_spot', label: 'Tonal Spot', desc: 'Balanced Material 4 default harmony' },
+  { id: 'tonal_spot', label: 'Tonal Spot', desc: 'Balanced default color harmony' },
   { id: 'vibrant', label: 'Vibrant', desc: 'Rich, high-chroma accents and lively containers' },
   { id: 'expressive', label: 'Expressive', desc: 'Bold tertiary shifts and playful contrast' },
   { id: 'fruit_salad', label: 'Fruit Salad', desc: 'Dual-tone energetic highlight harmony' },

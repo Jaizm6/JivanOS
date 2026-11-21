@@ -2,7 +2,7 @@
   "entities": {
     "UserSyncDoc": {
       "title": "UserSyncDoc",
-      "description": "Authenticated user's synchronized JivanOS state and profile snapshot",
+      "description": "Authenticated user's legacy synchronized JivanOS state and profile snapshot",
       "type": "object",
       "properties": {
         "email": {
@@ -97,6 +97,126 @@
         }
       },
       "required": ["userId", "quoteId", "reminderTime", "enabled"]
+    },
+    "JivanCloudBackup": {
+      "title": "JivanCloudBackup",
+      "description": "Phase 5A JivanOS Cloud real-time backup document synced via Firestore",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "schemaVersion": {
+          "type": "number"
+        },
+        "app": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Firestore server Timestamp"
+        },
+        "deviceId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "deviceName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "platform": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "subscriptionStatus": {
+          "type": "string",
+          "enum": ["active", "trial", "expired"]
+        },
+        "data": {
+          "type": "object",
+          "description": "Structured JivanOS collections map (tasks, habits, bills, medications, settings, etc.)"
+        }
+      },
+      "required": ["userId", "schemaVersion", "app", "updatedAt", "deviceId", "subscriptionStatus", "data"]
+    },
+    "JivanCloudSubscription": {
+      "title": "JivanCloudSubscription",
+      "description": "Server-managed JivanOS Cloud paid subscription document (read-only for client)",
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["active", "expired"]
+        },
+        "plan": {
+          "type": "string",
+          "enum": ["monthly", "yearly"]
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["status", "expiresAt"]
+    },
+    "JivanCloudTrial": {
+      "title": "JivanCloudTrial",
+      "description": "Create-once immutable 14-day free trial document verified against server clock",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "trialStartedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "trialEndsAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["userId", "trialStartedAt", "trialEndsAt"]
+    },
+    "JivanCloudSyncHistoryEntry": {
+      "title": "JivanCloudSyncHistoryEntry",
+      "description": "Individual sync event entry (last 10 retained per user)",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "deviceId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "deviceName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "platform": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "itemCounts": {
+          "type": "object"
+        }
+      },
+      "required": ["userId", "deviceId", "deviceName", "platform", "timestamp", "itemCounts"]
     }
   },
   "firestore": {
@@ -111,6 +231,22 @@
     "/users/{userId}/reminders/{reminderId}": {
       "schema": "QuoteReminder",
       "description": "User scheduled quote reminders"
+    },
+    "/users/{userId}/jivanos/backup": {
+      "schema": "JivanCloudBackup",
+      "description": "Phase 5A JivanOS Cloud real-time Firestore backup document"
+    },
+    "/users/{userId}/jivanos/subscription": {
+      "schema": "JivanCloudSubscription",
+      "description": "Server-managed subscription state (readable by owner, not writable by client)"
+    },
+    "/users/{userId}/jivanos/trial": {
+      "schema": "JivanCloudTrial",
+      "description": "Create-once immutable 14-day free trial record"
+    },
+    "/users/{userId}/jivanos/backup/syncHistory/{entryId}": {
+      "schema": "JivanCloudSyncHistoryEntry",
+      "description": "Last 10 sync history records per user"
     }
   }
 }

@@ -152,8 +152,6 @@ async function startServer() {
   app.get('/api/sync/oauth-config', (_req, res) => {
     res.json({
       gdriveClientId: process.env.GOOGLE_DRIVE_CLIENT_ID || '',
-      onedriveClientId: process.env.ONEDRIVE_CLIENT_ID || '',
-      dropboxClientId: process.env.DROPBOX_CLIENT_ID || '',
     });
   });
 
@@ -354,7 +352,7 @@ async function startServer() {
     const providerNames: Record<string, string> = {
       firebase: 'Firebase Cloud Firestore',
       gdrive: 'Google Drive',
-      onedrive: 'Microsoft OneDrive',
+      dropbox: 'Dropbox',
       mega: 'MEGA Cloud',
       proton: 'Proton Drive',
       nextcloud: 'Nextcloud (WebDAV)',
@@ -444,7 +442,7 @@ async function startServer() {
     }
   });
 
-  // OAuth 2.0 Popup Callback Handler for Google Drive, Microsoft OneDrive, and Dropbox
+  // OAuth 2.0 Popup Callback Handler for Google Drive and Dropbox
   const oauthCallbackHandler = (_req: express.Request, res: express.Response) => {
     res.send(`<!DOCTYPE html>
 <html lang="en">
@@ -466,15 +464,21 @@ async function startServer() {
       try {
         var rawHash = window.location.hash ? window.location.hash.substring(1) : '';
         var rawSearch = window.location.search ? window.location.search.substring(1) : '';
-        var params = new URLSearchParams(rawHash || rawSearch);
-        var token = params.get('access_token');
-        var error = params.get('error_description') || params.get('error');
+        var hashParams = new URLSearchParams(rawHash);
+        var searchParams = new URLSearchParams(rawSearch);
+        var token = hashParams.get('access_token') || searchParams.get('access_token');
+        var code = searchParams.get('code') || hashParams.get('code');
+        var state = searchParams.get('state') || hashParams.get('state') || '';
+        var error = searchParams.get('error_description') || hashParams.get('error_description') || searchParams.get('error') || hashParams.get('error');
         if (window.opener) {
-          if (token) {
-            window.opener.postMessage({ type: 'JIVANOS_DRIVE_OAUTH_TOKEN', accessToken: token }, '*');
+          if (code) {
+            window.opener.postMessage({ type: 'JIVANOS_DRIVE_OAUTH_CODE', code: code, state: state }, '*');
+            document.getElementById('status').textContent = 'Connected! Closing window...';
+          } else if (token) {
+            window.opener.postMessage({ type: 'JIVANOS_DRIVE_OAUTH_TOKEN', accessToken: token, state: state }, '*');
             document.getElementById('status').textContent = 'Connected! Closing window...';
           } else {
-            window.opener.postMessage({ type: 'JIVANOS_DRIVE_OAUTH_ERROR', error: error || 'No access token returned.' }, '*');
+            window.opener.postMessage({ type: 'JIVANOS_DRIVE_OAUTH_ERROR', error: error || 'No authorization response returned.' }, '*');
             document.getElementById('status').textContent = error || 'Authorization cancelled.';
           }
           setTimeout(function() { window.close(); }, 400);
@@ -492,6 +496,31 @@ async function startServer() {
 </html>`);
   };
   app.get(['/auth/oauth-callback', '/auth/oauth-callback/', '/auth/callback', '/auth/callback/'], oauthCallbackHandler);
+
+  // Stateless zero-logging Telegram Bot file download fallback (browser CORS safety for restore)
+  app.post('/api/sync/telegram-file', async (req, res) => {
+    const { botToken, filePath } = req.body || {};
+    if (
+      typeof botToken !== 'string' ||
+      typeof filePath !== 'string' ||
+      !/^\d+:[A-Za-z0-9_-]{20,}$/.test(botToken.trim()) ||
+      !/^[A-Za-z0-9_./-]{1,256}$/.test(filePath.trim()) ||
+      filePath.includes('..')
+    ) {
+      return res.status(400).json({ success: false, error: 'Invalid Telegram file download request.' });
+    }
+    try {
+      const targetUrl = `https://api.telegram.org/file/bot${botToken.trim()}/${filePath.trim().replace(/^\/+/, '')}`;
+      const tgRes = await fetch(targetUrl);
+      if (!tgRes.ok) {
+        return res.status(tgRes.status).json({ success: false, error: `Telegram file download failed (HTTP ${tgRes.status}).` });
+      }
+      const text = await tgRes.text();
+      return res.status(200).type('application/json').send(text);
+    } catch {
+      return res.status(502).json({ success: false, error: 'Could not reach Telegram file server.' });
+    }
+  });
 
   // WebDAV / Nextcloud Server Proxy (Prevents CORS blocks on self-hosted Nextcloud/ownCloud/Koofr/pCloud/NAS)
   app.post('/api/backup/webdav-proxy', async (req, res) => {
@@ -1571,12 +1600,36 @@ Your Objective:
   let viteReadyPromise: Promise<void> | null = null;
 
   if (isDev) {
-    app.use(async (req, res, next) => {
-      if (!viteMiddleware && viteReadyPromise) {
-        await viteReadyPromise;
+    viteReadyPromise = (async () => {
+      try {
+        const { createServer: createViteServer } = await import('vite');
+        const vite = await createViteServer({
+          server: {
+            middlewareMode: true,
+            hmr: false,
+            ws: false,
+            watch: null,
+          },
+          appType: 'spa',
+        });
+        viteServer = vite;
+        viteMiddleware = vite.middlewares;
+        console.log('[Vite] Dev middleware ready');
+      } catch (viteErr: any) {
+        console.error('Vite middleware initialization error:', viteErr?.message || viteErr);
       }
-      if (viteMiddleware) {
-        return viteMiddleware(req, res, next);
+    })();
+
+    app.use(async (req, res, next) => {
+      try {
+        if (!viteMiddleware && viteReadyPromise) {
+          await viteReadyPromise;
+        }
+        if (viteMiddleware) {
+          return viteMiddleware(req, res, next);
+        }
+      } catch (err) {
+        return next(err);
       }
       next();
     });
@@ -1594,31 +1647,12 @@ Your Objective:
     });
   }
 
-  // Listen immediately so control plane health checks on port 3000 succeed without waiting for Vite bundle warmup
+  // Listen immediately so health checks on port 3000 succeed right away while Vite middleware finishes attaching
   const server = app.listen(port, '0.0.0.0', () => {
     console.log(`Server active on port ${port} (mode: ${isDev ? 'development' : 'production'})`);
   });
 
-  if (isDev) {
-    viteReadyPromise = (async () => {
-      try {
-        const { createServer: createViteServer } = await import('vite');
-        const vite = await createViteServer({
-          server: {
-            middlewareMode: true,
-            hmr: false,
-            ws: false,
-            watch: null,
-          },
-          appType: 'spa',
-        });
-        viteServer = vite;
-        viteMiddleware = vite.middlewares;
-      } catch (viteErr: any) {
-        console.error('Vite middleware initialization error:', viteErr?.message || viteErr);
-      }
-    })();
-  } else {
+  if (!isDev) {
     const distPath = path.join(process.cwd(), 'dist');
     if (!fs.existsSync(path.join(distPath, 'index.html'))) {
       console.log('dist/index.html not found, executing on-demand client build with Vite...');

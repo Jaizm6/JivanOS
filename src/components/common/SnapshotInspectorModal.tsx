@@ -99,8 +99,8 @@ export const SnapshotInspectorModal: React.FC<SnapshotInspectorModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-60 overflow-y-auto bg-black/65 backdrop-blur-xs p-3 sm:p-4 flex min-h-full items-center justify-center animate-in fade-in duration-150">
-      <div className="w-full max-w-3xl rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
+    <div className="fixed inset-0 z-[100001] bg-black/65 backdrop-blur-xs p-2.5 sm:p-4 flex items-center justify-center animate-in fade-in duration-150">
+      <div className="w-full max-w-3xl rounded-2xl sm:rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl flex flex-col max-h-[92dvh] overflow-hidden">
         {/* Header */}
         <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0 bg-slate-50/50 dark:bg-slate-900/50">
           <div className="flex items-center gap-3">

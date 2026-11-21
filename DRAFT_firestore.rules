@@ -6,7 +6,7 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // Phase 3: Hardened Global Helpers
+    // Global Helpers
     function isSignedIn() {
       return request.auth != null && request.auth.token.email_verified == true;
     }
@@ -25,6 +25,24 @@ service cloud.firestore {
 
     function existing() {
       return resource.data;
+    }
+
+    // Subscription & Trial Entitlement Helpers (Server-Trusted)
+    function hasActivePaidSubscription(userId) {
+      return exists(/databases/$(database)/documents/users/$(userId)/jivanos/subscription)
+        && get(/databases/$(database)/documents/users/$(userId)/jivanos/subscription).data.status == 'active'
+        && get(/databases/$(database)/documents/users/$(userId)/jivanos/subscription).data.expiresAt is timestamp
+        && get(/databases/$(database)/documents/users/$(userId)/jivanos/subscription).data.expiresAt > request.time;
+    }
+
+    function hasActiveTrial(userId) {
+      return exists(/databases/$(database)/documents/users/$(userId)/jivanos/trial)
+        && get(/databases/$(database)/documents/users/$(userId)/jivanos/trial).data.trialEndsAt is timestamp
+        && get(/databases/$(database)/documents/users/$(userId)/jivanos/trial).data.trialEndsAt > request.time;
+    }
+
+    function isCloudEntitled(userId) {
+      return hasActivePaidSubscription(userId) || hasActiveTrial(userId);
     }
 
     // Validation Blueprint 1: UserSyncDoc (/users/{userId})
@@ -60,6 +78,44 @@ service cloud.firestore {
         && data.reminderTime is string && data.reminderTime.size() >= 1 && data.reminderTime.size() <= 32
         && data.enabled is bool
         && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
+    }
+
+    // Validation Blueprint 4: JivanCloudTrial (/users/{userId}/jivanos/trial)
+    function isValidJivanCloudTrial(data, userId) {
+      return data.keys().hasAll(['userId', 'trialStartedAt', 'trialEndsAt'])
+        && data.keys().hasOnly(['userId', 'trialStartedAt', 'trialEndsAt'])
+        && data.userId is string && data.userId == userId && data.userId == request.auth.uid
+        && data.trialStartedAt is timestamp && data.trialStartedAt == request.time
+        && data.trialEndsAt is timestamp
+        && data.trialEndsAt > request.time
+        && data.trialEndsAt <= request.time + duration.value(14, 'd') + duration.value(5, 'm');
+    }
+
+    // Validation Blueprint 5: JivanCloudBackup (/users/{userId}/jivanos/backup)
+    function isValidJivanCloudBackup(data, userId) {
+      return data.keys().hasAll(['userId', 'schemaVersion', 'app', 'updatedAt', 'deviceId', 'subscriptionStatus', 'data'])
+        && data.keys().hasOnly(['userId', 'schemaVersion', 'app', 'updatedAt', 'deviceId', 'deviceName', 'platform', 'subscriptionStatus', 'data'])
+        && data.userId is string && data.userId == userId && data.userId == request.auth.uid
+        && data.schemaVersion is number && data.schemaVersion == 1
+        && data.app is string && data.app == 'JivanOS' && data.app.size() <= 32
+        && data.updatedAt is timestamp && data.updatedAt == request.time
+        && data.deviceId is string && isValidId(data.deviceId)
+        && (!('deviceName' in data) || (data.deviceName is string && data.deviceName.size() >= 1 && data.deviceName.size() <= 120))
+        && (!('platform' in data) || (data.platform is string && data.platform.size() >= 1 && data.platform.size() <= 32))
+        && data.subscriptionStatus is string && data.subscriptionStatus in ['active', 'trial']
+        && data.data is map;
+    }
+
+    // Validation Blueprint 6: JivanCloudSyncHistoryEntry (/users/{userId}/jivanos/backup/syncHistory/{entryId})
+    function isValidSyncHistoryEntry(data, userId) {
+      return data.keys().hasAll(['userId', 'deviceId', 'deviceName', 'platform', 'timestamp', 'itemCounts'])
+        && data.keys().hasOnly(['userId', 'deviceId', 'deviceName', 'platform', 'timestamp', 'itemCounts'])
+        && data.userId is string && data.userId == userId && data.userId == request.auth.uid
+        && data.deviceId is string && isValidId(data.deviceId)
+        && data.deviceName is string && data.deviceName.size() >= 1 && data.deviceName.size() <= 120
+        && data.platform is string && data.platform.size() >= 1 && data.platform.size() <= 32
+        && data.timestamp is timestamp && data.timestamp == request.time
+        && data.itemCounts is map;
     }
 
     // Startup connectivity check path (read-only)
@@ -110,6 +166,59 @@ service cloud.firestore {
           && exists(/databases/$(database)/documents/users/$(userId));
         allow delete: if isOwner(userId) && isValidId(userId) && isValidId(reminderId)
           && exists(/databases/$(database)/documents/users/$(userId));
+      }
+
+      // Phase 5A: Server-Managed Subscription Status (/users/{userId}/jivanos/subscription)
+      // Readable by owning user; NEVER writable from client SDK (Admin SDK / Cloud Functions only).
+      match /jivanos/subscription {
+        allow get: if isOwner(userId) && isValidId(userId);
+        allow list, create, update, delete: if false;
+      }
+
+      // Phase 5A: Automatic 14-Day Free Trial (/users/{userId}/jivanos/trial)
+      // Create-once immutable record verified strictly against server request.time.
+      match /jivanos/trial {
+        allow get: if isOwner(userId) && isValidId(userId);
+        allow list: if false;
+        allow create: if isOwner(userId) && isValidId(userId)
+          && isValidJivanCloudTrial(incoming(), userId)
+          && !exists(/databases/$(database)/documents/users/$(userId)/jivanos/trial);
+        allow update, delete: if false;
+      }
+
+      // Phase 5A: JivanOS Cloud Real-Time Backup Document (/users/{userId}/jivanos/backup)
+      // Readable even when expired so users can export their last backup;
+      // Writes strictly require active paid subscription OR active 14-day trial and forbid spoofing "active".
+      match /jivanos/backup {
+        allow get: if isOwner(userId) && isValidId(userId);
+        allow list: if false;
+        allow create: if isOwner(userId) && isValidId(userId)
+          && isValidJivanCloudBackup(incoming(), userId)
+          && (
+            (incoming().subscriptionStatus == 'active' && hasActivePaidSubscription(userId)) ||
+            (incoming().subscriptionStatus == 'trial' && hasActiveTrial(userId))
+          );
+        allow update: if isOwner(userId) && isValidId(userId)
+          && isValidJivanCloudBackup(incoming(), userId)
+          && incoming().userId == existing().userId
+          && incoming().diff(existing()).affectedKeys().hasOnly(['schemaVersion', 'app', 'updatedAt', 'deviceId', 'deviceName', 'platform', 'subscriptionStatus', 'data'])
+          && (
+            (incoming().subscriptionStatus == 'active' && hasActivePaidSubscription(userId)) ||
+            (incoming().subscriptionStatus == 'trial' && hasActiveTrial(userId))
+          );
+        allow delete: if false;
+
+        // Sync History Subcollection (/users/{userId}/jivanos/backup/syncHistory/{entryId})
+        match /syncHistory/{entryId} {
+          allow get: if isOwner(userId) && isValidId(userId) && isValidId(entryId);
+          allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+          allow create: if isOwner(userId) && isValidId(userId) && isValidId(entryId)
+            && isValidSyncHistoryEntry(incoming(), userId)
+            && isCloudEntitled(userId);
+          allow update: if false;
+          allow delete: if isOwner(userId) && isValidId(userId) && isValidId(entryId)
+            && isCloudEntitled(userId);
+        }
       }
     }
   }

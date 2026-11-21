@@ -28,14 +28,15 @@ export class ErrorBoundary extends React.Component<Props, State> {
   }
 
   public componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
-    console.error('Uncaught error in component tree:', error, errorInfo);
     const msg = error?.message || '';
     const isStaleChunkOrReactMismatch =
       msg.includes("reading 'useState'") ||
       msg.includes("reading 'useEffect'") ||
       msg.includes("reading 'useContext'") ||
       msg.includes('Invalid hook call') ||
-      msg.includes('dynamically imported module');
+      msg.includes('dynamically imported module') ||
+      msg.includes('Importing a module script failed') ||
+      msg.includes('ChunkLoadError');
 
     if (isStaleChunkOrReactMismatch && typeof window !== 'undefined') {
       try {
@@ -50,6 +51,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
         // Fallback to normal error UI
       }
     }
+    console.error('Uncaught error in component tree:', error, errorInfo);
     this.setState({ errorInfo });
   }
 

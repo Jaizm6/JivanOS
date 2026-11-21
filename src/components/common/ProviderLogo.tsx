@@ -3,7 +3,6 @@ import React from 'react';
 export type ProviderId =
   | 'jivanos_vault'
   | 'gdrive'
-  | 'onedrive'
   | 'dropbox'
   | 'nextcloud'
   | 'minio_s3'
@@ -83,28 +82,6 @@ export const ProviderLogo: React.FC<ProviderLogoProps> = ({
           <path
             d="m73.4 26.5-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3l-13.75 23.8 16.15 28h27.45c0-1.55-.4-3.1-1.2-4.5z"
             fill="#FFBA00"
-          />
-        </svg>
-      );
-
-    case 'onedrive':
-      // Official Microsoft OneDrive dual overlapping clouds
-      return (
-        <svg
-          viewBox="0 0 24 24"
-          className={className}
-          style={sizeStyle}
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          <path
-            d="M13.6 8.5C12.9 8.5 12.2 8.8 11.7 9.3C11.1 7.4 9.3 6 7.2 6C4.6 6 2.5 8.1 2.5 10.7C2.5 10.9 2.5 11.2 2.6 11.4C1.1 12.1 0 13.7 0 15.5C0 18 2 20 4.5 20H13.6C16.8 20 19.4 17.4 19.4 14.2C19.4 11.1 16.8 8.5 13.6 8.5Z"
-            fill="#0078D4"
-          />
-          <path
-            d="M19.5 9.5C19.2 9.5 18.9 9.5 18.6 9.6C17.9 7.5 15.9 6 13.5 6C12.7 6 11.9 6.2 11.2 6.6C11.7 7.2 12.1 7.8 12.4 8.5C12.8 8.5 13.2 8.5 13.6 8.5C16.8 8.5 19.4 11.1 19.4 14.2C19.4 14.9 19.3 15.5 19 16.1C21.3 15.6 23 13.5 23 11C23 8.2 20.8 6 18 6C17.7 6 17.4 6 17.1 6.1C16.5 4.3 14.8 3 12.8 3C10.7 3 8.9 4.4 8.3 6.3C9 6.1 9.7 6 10.5 6C12.6 6 14.5 7.4 15.1 9.3C15.6 8.8 16.3 8.5 17 8.5C17.9 8.5 18.7 8.9 19.2 9.5H19.5Z"
-            fill="#28A8EA"
-            opacity="0.9"
           />
         </svg>
       );

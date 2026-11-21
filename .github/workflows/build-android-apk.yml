@@ -1,4 +1,4 @@
-name: Build JivanOS Android APK
+name: Build JivanOS Android Release APK & AAB
 
 on:
   push:
@@ -9,8 +9,8 @@ permissions:
   contents: write
 
 jobs:
-  build-apk:
-    name: Compile Standalone Android APK
+  build-android:
+    name: Build Signed Android Release APK & AAB
     runs-on: ubuntu-latest
 
     steps:
@@ -66,6 +66,12 @@ jobs:
           npm run build
 
       - name: Package Web Bundle into Native Android Project (Capacitor 6)
+        env:
+          KEYSTORE_FILE: ${{ secrets.KEYSTORE_FILE }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
         run: |
           rm -rf /tmp/cap-project
           mkdir -p /tmp/cap-project
@@ -77,7 +83,7 @@ jobs:
           npx cap add android
           npx cap sync android
 
-          # Apply JivanOS geometric launcher icon across all Android mipmap densities
+          # Apply JivanOS launcher icon across all Android mipmap densities
           node -e '
             const sharp = require("'"$GITHUB_WORKSPACE"'/node_modules/sharp");
             const fs = require("fs");
@@ -107,17 +113,25 @@ jobs:
             })();
           '
 
-          # Decode persistent repository keystore so every release shares the exact same signing certificate
-          mkdir -p "$HOME/.android"
-          if [ ! -f "$GITHUB_WORKSPACE/android-signing/debug.keystore.b64" ]; then
-            echo "ERROR: Missing android-signing/debug.keystore.b64"
+          # Decode production release keystore from GitHub Secrets into android/app/release.jks
+          # (Falls back to repository debug keystore only if KEYSTORE_FILE secret is not configured yet)
+          if [ -n "$KEYSTORE_FILE" ]; then
+            echo "Decoding secrets.KEYSTORE_FILE -> /tmp/cap-project/android/app/release.jks"
+            printf '%s' "$KEYSTORE_FILE" | tr -d '\r\n ' | base64 -d > /tmp/cap-project/android/app/release.jks
+            echo "USING_PROD_KEYSTORE=true" >> $GITHUB_ENV
+          elif [ -f "$GITHUB_WORKSPACE/android-signing/debug.keystore.b64" ]; then
+            echo "WARNING: secrets.KEYSTORE_FILE not set; falling back to repository debug keystore"
+            base64 -d "$GITHUB_WORKSPACE/android-signing/debug.keystore.b64" > /tmp/cap-project/android/app/release.jks
+            echo "KEYSTORE_PASSWORD=android" >> $GITHUB_ENV
+            echo "KEY_ALIAS=androiddebugkey" >> $GITHUB_ENV
+            echo "KEY_PASSWORD=android" >> $GITHUB_ENV
+            echo "USING_PROD_KEYSTORE=false" >> $GITHUB_ENV
+          else
+            echo "ERROR: Missing secrets.KEYSTORE_FILE and no fallback keystore available."
             exit 1
           fi
-          base64 -d "$GITHUB_WORKSPACE/android-signing/debug.keystore.b64" > /tmp/jivanos-release.keystore
-          cp /tmp/jivanos-release.keystore "$HOME/.android/debug.keystore"
-          keytool -list -v -keystore /tmp/jivanos-release.keystore -storepass android -alias androiddebugkey | head -n 20
 
-          # Deterministically set versionCode (30000+run_number), versionName (3.0.x), and explicit release/debug signingConfigs
+          # Deterministically set versionCode (30000+run_number), versionName (3.0.x), namespace, applicationId, and env-driven release signingConfig
           VER_CODE=$((30000 + ${GITHUB_RUN_NUMBER:-1}))
           VER_NAME="3.0.${GITHUB_RUN_NUMBER:-1}"
           export JIVANOS_VER_CODE="$VER_CODE"
@@ -132,28 +146,21 @@ jobs:
             const verCode = Number(process.env.JIVANOS_VER_CODE || 30001);
             const verName = process.env.JIVANOS_VER_NAME || "3.0.1";
 
-            gradle = gradle.replace(/applicationId\s+"[^"]+"/, "applicationId \"com.jivanos.lifesystem\"");
+            gradle = gradle.replace(/namespace\s+"[^"]+"/, "namespace \"com.jaiz.jivanos\"");
+            gradle = gradle.replace(/applicationId\s+"[^"]+"/, "applicationId \"com.jaiz.jivanos\"");
             gradle = gradle.replace(/versionCode\s+\d+/, "versionCode " + verCode);
             gradle = gradle.replace(/versionName\s+"[^"]+"/, "versionName \"" + verName + "\"");
 
             const signingBlock = [
               "",
               "    signingConfigs {",
-              "        debug {",
-              "            storeFile file(\"/tmp/jivanos-release.keystore\")",
-              "            storePassword \"android\"",
-              "            keyAlias \"androiddebugkey\"",
-              "            keyPassword \"android\"",
-              "            v1SigningEnabled true",
-              "            v2SigningEnabled true",
-              "        }",
               "        release {",
-              "            storeFile file(\"/tmp/jivanos-release.keystore\")",
-              "            storePassword \"android\"",
-              "            keyAlias \"androiddebugkey\"",
-              "            keyPassword \"android\"",
-              "            v1SigningEnabled true",
-              "            v2SigningEnabled true",
+              "            storeFile file(\"release.jks\")",
+              "            storePassword System.getenv(\"KEYSTORE_PASSWORD\")",
+              "            keyAlias System.getenv(\"KEY_ALIAS\")",
+              "            keyPassword System.getenv(\"KEY_PASSWORD\")",
+              "            enableV1Signing true",
+              "            enableV2Signing true",
               "        }",
               "    }",
               ""
@@ -167,44 +174,175 @@ jobs:
             let fromBt = gradle.slice(btMatch.index);
 
             fromBt = fromBt.replace(/(\brelease\s*\{)/, "$1\n            signingConfig signingConfigs.release");
-            if (/\bdebug\s*\{/.test(fromBt)) {
-              fromBt = fromBt.replace(/(\bdebug\s*\{)/, "$1\n            signingConfig signingConfigs.debug");
-            } else {
-              fromBt = fromBt.replace(/buildTypes\s*\{/, "buildTypes {\n        debug {\n            signingConfig signingConfigs.debug\n        }");
-            }
 
             gradle = beforeBt + signingBlock + "\n    " + fromBt;
             fs.writeFileSync(gradlePath, gradle, "utf8");
-            console.log("Updated build.gradle -> versionCode=" + verCode + ", versionName=" + verName + ", explicit signingConfigs attached");
+            console.log("Updated build.gradle -> namespace/applicationId=com.jaiz.jivanos, versionCode=" + verCode + ", versionName=" + verName + ", signingConfigs.release attached");
           '
+
+          # Copy pure-Android offline Local Backup + Phase 2 Google Drive + Phase 4 Dropbox Sync native sources
+          JAVA_PKG_DIR="/tmp/cap-project/android/app/src/main/java/com/jaiz/jivanos"
+          mkdir -p "$JAVA_PKG_DIR"
+          cp "$GITHUB_WORKSPACE/android-native/JivanLocalBackupBridge.java" "$JAVA_PKG_DIR/JivanLocalBackupBridge.java"
+          cp "$GITHUB_WORKSPACE/android-native/JivanDriveAppDataClient.java" "$JAVA_PKG_DIR/JivanDriveAppDataClient.java"
+          cp "$GITHUB_WORKSPACE/android-native/JivanDriveSyncWorker.java" "$JAVA_PKG_DIR/JivanDriveSyncWorker.java"
+          cp "$GITHUB_WORKSPACE/android-native/JivanGoogleDrivePlugin.java" "$JAVA_PKG_DIR/JivanGoogleDrivePlugin.java"
+          cp "$GITHUB_WORKSPACE/android-native/DropboxAuth.kt" "$JAVA_PKG_DIR/DropboxAuth.kt"
+          cp "$GITHUB_WORKSPACE/android-native/DropboxSyncProvider.kt" "$JAVA_PKG_DIR/DropboxSyncProvider.kt"
+          cp "$GITHUB_WORKSPACE/android-native/SyncProvider.kt" "$JAVA_PKG_DIR/SyncProvider.kt"
+          cp "$GITHUB_WORKSPACE/android-native/MainActivity.java" "$JAVA_PKG_DIR/MainActivity.java"
+          mkdir -p "/tmp/cap-project/android/app/src/main/res/xml"
+          cp "$GITHUB_WORKSPACE/android-native/file_paths.xml" "/tmp/cap-project/android/app/src/main/res/xml/file_paths.xml"
+
+          # Enable Kotlin Android plugin + add Google Sign-In, WorkManager, Dropbox SDK, and EncryptedSharedPreferences
+          node -e '
+            const fs = require("fs");
+
+            // 1. Add Kotlin Gradle plugin classpath to root android/build.gradle
+            const rootGradlePath = "/tmp/cap-project/android/build.gradle";
+            let rootGradle = fs.readFileSync(rootGradlePath, "utf8");
+            if (!rootGradle.includes("kotlin-gradle-plugin")) {
+              rootGradle = rootGradle.replace(
+                /(dependencies\s*\{)/,
+                "$1\n        classpath \"org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.24\""
+              );
+              fs.writeFileSync(rootGradlePath, rootGradle, "utf8");
+              console.log("Added kotlin-gradle-plugin to android/build.gradle");
+            }
+
+            // 2. Apply kotlin-android plugin, kotlinOptions, and Phase 2 + Phase 4 dependencies to android/app/build.gradle
+            const gradlePath = "/tmp/cap-project/android/app/build.gradle";
+            let gradle = fs.readFileSync(gradlePath, "utf8");
+            if (!gradle.includes("kotlin-android")) {
+              gradle = gradle.replace(
+                /(apply plugin:\s*[\x27"]com\.android\.application[\x27"])/,
+                "$1\napply plugin: \"kotlin-android\""
+              );
+            }
+            if (!gradle.includes("kotlinOptions")) {
+              gradle = gradle.replace(
+                /(android\s*\{)/,
+                "$1\n    kotlinOptions {\n        jvmTarget = \"17\"\n    }"
+              );
+            }
+            const depsToAdd = [
+              "    implementation \"com.google.android.gms:play-services-auth:21.2.0\"",
+              "    implementation \"androidx.work:work-runtime:2.9.1\"",
+              "    implementation \"com.dropbox.core:dropbox-core-sdk:7.0.0\"",
+              "    implementation \"com.dropbox.core:dropbox-android-sdk:7.0.0\"",
+              "    implementation \"androidx.security:security-crypto:1.1.0-alpha06\""
+            ].join("\n");
+            if (!gradle.includes("dropbox-core-sdk")) {
+              gradle = gradle.replace(/(dependencies\s*\{)/, "$1\n" + depsToAdd);
+            }
+            fs.writeFileSync(gradlePath, gradle, "utf8");
+
+            // 3. Ensure minSdkVersion >= 26 (required by dropbox-android-sdk:7.0.0)
+            const varsPath = "/tmp/cap-project/android/variables.gradle";
+            if (fs.existsSync(varsPath)) {
+              let vars = fs.readFileSync(varsPath, "utf8");
+              vars = vars.replace(/minSdkVersion\s*=\s*\d+/, "minSdkVersion = 26");
+              fs.writeFileSync(varsPath, vars, "utf8");
+            }
+
+            // 4. Prevent Jetifier issues with jackson-core bundled in Dropbox SDK
+            const propsPath = "/tmp/cap-project/android/gradle.properties";
+            if (fs.existsSync(propsPath)) {
+              let props = fs.readFileSync(propsPath, "utf8");
+              if (!props.includes("android.jetifier.ignorelist")) {
+                props += "\nandroid.jetifier.ignorelist=jackson-core,fastdoubleparser\n";
+                fs.writeFileSync(propsPath, props, "utf8");
+              }
+            }
+
+            console.log("Updated android/app/build.gradle with Kotlin + Google Drive + Dropbox SDK + WorkManager + EncryptedSharedPreferences (minSdk 26)");
+          '
+
+          # Inject google-services.json at build time from GitHub Secret GOOGLE_SERVICES_JSON (never hardcoded)
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            echo "Injecting secrets.GOOGLE_SERVICES_JSON -> /tmp/cap-project/android/app/google-services.json"
+            node -e '
+              const fs = require("fs");
+              const raw = (process.env.GOOGLE_SERVICES_JSON || "").trim();
+              let jsonText = raw;
+              if (!raw.startsWith("{")) {
+                jsonText = Buffer.from(raw.replace(/\s+/g, ""), "base64").toString("utf8");
+              }
+              JSON.parse(jsonText);
+              fs.writeFileSync("/tmp/cap-project/android/app/google-services.json", jsonText, "utf8");
+              console.log("Validated and wrote android/app/google-services.json");
+            '
+          else
+            echo "WARNING: secrets.GOOGLE_SERVICES_JSON is not set; Google Sign-In SDK will require it for production Android Drive sync."
+          fi
 
           MANIFEST="/tmp/cap-project/android/app/src/main/AndroidManifest.xml"
           if [ -f "$MANIFEST" ]; then
-            sed -i 's|<application|<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.VIBRATE" />\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n    <application|g' "$MANIFEST"
+            sed -i 's|<application|<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.VIBRATE" />\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />\n    <application|g' "$MANIFEST"
+
+            # Register Dropbox OAuth2 PKCE Redirect Activity (db-7vi2yjqec4ezw1q://2/token)
+            node -e '
+              const fs = require("fs");
+              const manifestPath = "/tmp/cap-project/android/app/src/main/AndroidManifest.xml";
+              let xml = fs.readFileSync(manifestPath, "utf8");
+              if (!xml.includes("com.dropbox.core.android.AuthActivity")) {
+                const dropboxActivity = [
+                  "        <activity",
+                  "            android:name=\"com.dropbox.core.android.AuthActivity\"",
+                  "            android:configChanges=\"orientation|keyboard\"",
+                  "            android:exported=\"true\"",
+                  "            android:launchMode=\"singleTask\">",
+                  "            <intent-filter>",
+                  "                <data android:scheme=\"db-7vi2yjqec4ezw1q\" />",
+                  "                <action android:name=\"android.intent.action.VIEW\" />",
+                  "                <category android:name=\"android.intent.category.BROWSABLE\" />",
+                  "                <category android:name=\"android.intent.category.DEFAULT\" />",
+                  "            </intent-filter>",
+                  "        </activity>"
+                ].join("\n");
+                xml = xml.replace("</application>", dropboxActivity + "\n    </application>");
+                fs.writeFileSync(manifestPath, xml, "utf8");
+                console.log("Registered Dropbox AuthActivity (scheme db-7vi2yjqec4ezw1q) in AndroidManifest.xml");
+              }
+            '
           fi
 
-      - name: Compile & Verify Signed Release Android APK with Gradle
+      - name: Compile & Verify Signed Release Android APK and AAB
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD || env.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS || env.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || env.KEY_PASSWORD }}
         run: |
           cd /tmp/cap-project/android
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon
+          ./gradlew assembleRelease bundleRelease --no-daemon
+
           APK_PATH="app/build/outputs/apk/release/app-release.apk"
           if [ ! -f "$APK_PATH" ]; then
-            APK_PATH="app/build/outputs/apk/release/app-release-unsigned.apk"
+            echo "ERROR: Signed release APK was not produced at $APK_PATH"
+            exit 1
           fi
           cp "$APK_PATH" "$GITHUB_WORKSPACE/JivanOS.apk"
+
+          AAB_PATH="app/build/outputs/bundle/release/app-release.aab"
+          if [ -f "$AAB_PATH" ]; then
+            cp "$AAB_PATH" "$GITHUB_WORKSPACE/JivanOS.aab"
+          fi
+
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)
           if [ -n "$APKSIGNER" ]; then
             "$APKSIGNER" verify --print-certs "$GITHUB_WORKSPACE/JivanOS.apk"
           fi
-          ls -lh "$GITHUB_WORKSPACE/JivanOS.apk"
+          ls -lh "$GITHUB_WORKSPACE/JivanOS.apk" "$GITHUB_WORKSPACE/JivanOS.aab" || ls -lh "$GITHUB_WORKSPACE/JivanOS.apk"
 
-      - name: Upload JivanOS.apk to Workflow Artifacts
+      - name: Upload Signed Release APK & AAB Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: JivanOS-Android-APK
-          path: JivanOS.apk
-          if-no-files-found: error
+          name: JivanOS-Android-Release
+          path: |
+            JivanOS.apk
+            JivanOS.aab
+          if-no-files-found: warn
 
       - name: Publish JivanOS.apk to GitHub Releases
         env:
@@ -214,9 +352,9 @@ jobs:
           printf '%s\n' \
             "## JivanOS v${JIVANOS_VER_NAME:-3.0.1} (Build ${JIVANOS_VER_CODE:-30001})" \
             "" \
-            "- **In-Place Updates**: Explicit v1/v2 APK signature pinning (com.jivanos.lifesystem) ensures seamless future updates without uninstalling." \
-            "- **Note when upgrading from legacy v2.1.x APKs**: If your currently installed v2.1.x APK was built with an older mismatched keystore, Android will show a one-time package conflict error. Export a JSON backup (or sync to a drive), uninstall the old v2.1.x APK once, and install v3.0.x — every update after this will install cleanly in-place." \
-            "- **What's New**: Joplin-style Multi-Drive Sync + JivanOS Private Sync Vault, Check Configuration diagnostics, overhauled Settings & Profile hub, and updated JivanOS emblem." \
+            "- **Package ID**: \`com.jaiz.jivanos\`" \
+            "- **In-Place Updates**: Signed with your release keystore (\`v1/v2\` verified) so future updates install smoothly without uninstalling." \
+            "- **Offline Backup & Auto-Snapshots**: Pure Android MediaStore Downloads export, Share Sheet integration, and rotating 3-slot private snapshots." \
             > /tmp/release-notes.md
           gh release create latest-apk JivanOS.apk \
             --title "JivanOS Android APK (v${JIVANOS_VER_NAME:-3.0.1})" \

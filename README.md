@@ -24,7 +24,7 @@
 - **Tasks, Kanban & Eisenhower Matrix**: Organize tasks across customizable workflow stages (`To Do`, `In Progress`, `Waiting`, `Review`, `Done`) or prioritize via the 4-quadrant Eisenhower Matrix (`DO`, `PLAN`, `PASS`, `SKIP`).
 - **Hourly Timeline & Daily Schedule**: Drag-free time blocking (`hourly`, `priority`, `deadline`, and printable views) with recurring schedules and conflict-free calendar integration.
 - **Pomodoro Focus Timer & Analytics**: Integrated sidebar & dedicated focus sessions tied directly to tasks, plus productivity and streak analytics.
-- **Goals, Tags & Daily Wisdom Quotes**: Long-term milestone tracking, cross-module tag filtering, and customizable quote typography & transition cards.
+- **Goals, Tags & Daily Wisdom Quotes**: Long-term milestone tracking, cross-module tag filtering, and curated daily wisdom quotes.
 
 ### Health, Habits & Finance
 - **Medications & Dose Logger**: Flexible dosage frequencies (`daily`, `twice_daily`, `thrice_daily`, `alternate_days`, `every_N_days`, `custom_dates`), refill threshold alerts, and `taken` / `skipped` / `snoozed` logs.
@@ -49,9 +49,55 @@
 
 | Platform | Runtime | Offline Local-First | Sync Support |
 | :--- | :--- | :--- | :--- |
-| **Android** | Native Capacitor APK (`com.jivanos.lifesystem`) | Yes | Private Vault, Syncthing/Local Folder, OneDrive, GDrive, Dropbox, Nextcloud, WebDAV, S3 |
-| **iOS / iPadOS** | Installable PWA (Safari Share → Add to Home Screen) | Yes | Private Vault, OneDrive, GDrive, Dropbox, Nextcloud, WebDAV, S3, Firebase |
-| **Windows / macOS / Linux** | Desktop Web / Installable Chrome & Edge PWA | Yes | All 9 targets including direct Local / Syncthing Folder access |
+| **Android** | Native Capacitor APK (`com.jaiz.jivanos`) | Yes | Google Drive, Dropbox, JivanOS Cloud, Telegram, MEGA, WebDAV/Nextcloud, S3, Local Backup |
+| **Windows / Linux** | Native Tauri v2 Desktop App (`com.jaiz.jivanos`, ~10 MB) | Yes | OS Keychain + Loopback OAuth PKCE for Google Drive, Dropbox, Telegram, MEGA, JivanOS Cloud, WebDAV, S3 |
+| **iOS / macOS / Web** | Installable PWA (Safari / Chrome / Edge) | Yes | Google Drive, Dropbox, JivanOS Cloud, Telegram, MEGA, WebDAV/Nextcloud, S3 |
+
+---
+
+## Desktop Installation
+
+JivanOS ships a lightweight native desktop wrapper powered by **Tauri v2** (`src-tauri/`) for **Windows** and **Linux** (~10 MB installer footprint using system WebView2 / WebKitGTK). The window defaults to `420×820` (`min 380×700`, resizable) to preserve JivanOS's tall, mobile-first layout alongside native OS window controls.
+
+### Installing Prebuilt Releases (GitHub Actions)
+Download the latest build artifact from the **`Build Tauri Desktop Apps`** workflow (`/.github/workflows/build.yml`):
+- **Windows (`JivanOS-Windows`)**:
+  - `.exe` (NSIS installer — recommended for quick per-user install)
+  - `.msi` (Windows Installer package)
+- **Linux (`JivanOS-Linux`)**:
+  - `.AppImage` (portable — run `chmod +x JivanOS_*.AppImage && ./JivanOS_*.AppImage`)
+  - `.deb` (Debian/Ubuntu — run `sudo dpkg -i JivanOS_*.deb`)
+
+### Desktop-Native Features
+- **OS Keychain Token Storage (`src/desktop/KeychainService.ts`)**: OAuth and Telegram sync credentials are stored natively in **Windows Credential Manager** or **Linux `libsecret`** (GNOME Keyring / KWallet) instead of browser `localStorage`.
+- **OAuth 2.0 PKCE Loopback (`src/desktop/OAuthLoopback.ts`)**: Clicking **Connect Google Drive** or **Connect Dropbox** opens your default system browser and captures the authorization code over an ephemeral `http://127.0.0.1:{port}/callback` listener with strict CSRF `state` verification.
+- **System Tray & Native Notifications (`src/desktop/TrayService.ts`)**: Tray icon tooltip shows live sync status (e.g., `Synced 5 min ago`), with quick actions for **Sync Now**, **Open JivanOS**, and **Quit**, plus native desktop sync notifications.
+- **Global Keyboard Shortcuts**:
+  - `Ctrl+S` — Sync Now
+  - `Ctrl+E` — Export Local Backup
+  - `Ctrl+,` — Open Settings
+- **Auto-Launch on Startup**: Optional **Launch on startup** toggle in **Settings** (desktop-only, disabled by default).
+
+### OAuth Redirect URIs for Desktop Providers
+- **Google Drive**: `http://localhost` (Google accepts any ephemeral loopback port for installed desktop apps)
+- **Dropbox**: `http://localhost:{port}/callback` (enable localhost loopback redirect in Dropbox App Console)
+- **pCloud**: `http://localhost:{port}/callback`
+
+### Signing Keys & Local Desktop Builds
+Generate a Tauri signing keypair once and store the private key and password securely in Bitwarden (**JivanOS Keystore**) and GitHub Repository Secrets (`TAURI_PRIVATE_KEY`, `TAURI_KEY_PASSWORD`):
+
+```bash
+# Generate Tauri signing keys (never commit the private key!)
+npm run tauri -- signer generate -w ~/.tauri/jivanos.key
+
+# Run JivanOS in desktop dev mode
+npm run tauri:dev
+
+# Build release desktop installers locally
+npm run tauri:build
+```
+
+> **Linux local build prerequisites**: `sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev libsecret-1-dev`
 
 ---
 
@@ -63,9 +109,9 @@
 
 ---
 
-## OAuth Callback URLs (Self-Hosting / Cloud Sync)
+## OAuth Callback URLs (Web / Self-Hosting)
 
-When configuring OneDrive, Google Drive, or Dropbox OAuth client credentials, register the following redirect URI:
+When configuring Google Drive or Dropbox OAuth client credentials for web deployments, register the following redirect URI:
 - Local development: `http://localhost:3000/auth/oauth-callback`
 - Deployed instance: `https://<your-host>/auth/oauth-callback`
 

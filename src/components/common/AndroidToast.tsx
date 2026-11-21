@@ -4,11 +4,16 @@ export interface AndroidToastPayload {
   id: number;
   message: string;
   durationMs?: number;
+  variant?: 'default' | 'success' | 'error';
 }
 
 const ANDROID_TOAST_EVENT = 'jivan_android_toast';
 
-export function showAndroidToast(message: string, durationMs = 1350): void {
+export function showAndroidToast(
+  message: string,
+  durationMs = 1350,
+  variant: 'default' | 'success' | 'error' = 'default'
+): void {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(
     new CustomEvent<AndroidToastPayload>(ANDROID_TOAST_EVENT, {
@@ -16,6 +21,7 @@ export function showAndroidToast(message: string, durationMs = 1350): void {
         id: Date.now() + Math.random(),
         message,
         durationMs,
+        variant,
       },
     })
   );
@@ -170,7 +176,13 @@ export const AndroidToastContainer: React.FC = () => {
             ? 'none'
             : 'transform 160ms cubic-bezier(0.2, 0, 0, 1), opacity 140ms ease-out',
         }}
-        className="pointer-events-auto select-none touch-none cursor-grab active:cursor-grabbing px-3.5 py-1.5 rounded-full bg-zinc-900/92 dark:bg-zinc-100/95 text-white dark:text-zinc-950 text-[11.5px] font-semibold tracking-tight shadow-[0_6px_20px_rgba(0,0,0,0.22)] border border-white/10 dark:border-black/10 backdrop-blur-md max-w-[82vw] truncate animate-in fade-in slide-in-from-bottom-2 duration-150"
+        className={`pointer-events-auto select-none touch-none cursor-grab active:cursor-grabbing px-4 py-2 rounded-full text-[12px] font-semibold tracking-tight shadow-[0_6px_20px_rgba(0,0,0,0.22)] border backdrop-blur-md max-w-[86vw] truncate animate-in fade-in slide-in-from-bottom-2 duration-150 ${
+          toast.variant === 'error'
+            ? 'bg-rose-600 text-white border-rose-500/40'
+            : toast.variant === 'success'
+            ? 'bg-emerald-700 dark:bg-emerald-600 text-white border-emerald-500/30'
+            : 'bg-zinc-900/92 dark:bg-zinc-100/95 text-white dark:text-zinc-950 border-white/10 dark:border-black/10'
+        }`}
       >
         {toast.message}
       </div>

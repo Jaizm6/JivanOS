@@ -5,6 +5,10 @@ import {
   signInWithPopup,
   signInWithRedirect,
   getRedirectResult,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  sendEmailVerification,
+  updateProfile,
   signOut as firebaseSignOut,
   onAuthStateChanged,
   User as FirebaseUser,
@@ -17,10 +21,20 @@ import {
   memoryLocalCache,
   Firestore,
   doc,
+  collection,
+  query,
+  where,
+  orderBy,
+  limit,
   setDoc,
   getDoc,
+  getDocs,
+  addDoc,
+  deleteDoc,
   getDocFromServer,
   onSnapshot,
+  serverTimestamp,
+  Timestamp,
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
@@ -76,7 +90,7 @@ testConnection();
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
-export const GOOGLE_DRIVE_SCOPES = ['https://www.googleapis.com/auth/drive.file'] as const;
+export const GOOGLE_DRIVE_SCOPES = ['https://www.googleapis.com/auth/drive.appdata'] as const;
 export const googleDriveProvider = new GoogleAuthProvider();
 GOOGLE_DRIVE_SCOPES.forEach((scope) => googleDriveProvider.addScope(scope));
 googleDriveProvider.setCustomParameters({ prompt: 'select_account' });
@@ -84,11 +98,13 @@ googleDriveProvider.setCustomParameters({ prompt: 'select_account' });
 // Strict in-memory cache for Google Workspace OAuth access tokens (never stored in localStorage/sessionStorage)
 let cachedGDriveAccessToken: string | null = null;
 let cachedGDriveEmail: string | null = null;
+let cachedGDriveDisplayName: string | null = null;
 
 onAuthStateChanged(auth, (user) => {
   if (!user) {
     cachedGDriveAccessToken = null;
     cachedGDriveEmail = null;
+    cachedGDriveDisplayName = null;
   }
 });
 
@@ -100,15 +116,39 @@ export function getInMemoryGDriveEmail(): string | null {
   return cachedGDriveEmail;
 }
 
-export function setInMemoryGDriveToken(token: string | null, email?: string | null): void {
+export function getInMemoryGDriveDisplayName(): string | null {
+  return cachedGDriveDisplayName;
+}
+
+export function setInMemoryGDriveToken(
+  token: string | null,
+  email?: string | null,
+  displayName?: string | null
+): void {
   const clean = token ? token.trim() : '';
   cachedGDriveAccessToken = clean || null;
   cachedGDriveEmail = clean ? (email ?? cachedGDriveEmail) : null;
+  cachedGDriveDisplayName = clean ? (displayName ?? cachedGDriveDisplayName) : null;
 }
 
 export function clearInMemoryGDriveToken(): void {
   cachedGDriveAccessToken = null;
   cachedGDriveEmail = null;
+  cachedGDriveDisplayName = null;
+}
+
+export async function revokeWebGDriveToken(): Promise<void> {
+  const token = cachedGDriveAccessToken;
+  clearInMemoryGDriveToken();
+  if (!token) return;
+  try {
+    await fetch(`https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(token)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    });
+  } catch {
+    // Best-effort revocation; local in-memory token is already cleared
+  }
 }
 
 export function isRunningInIframe(): boolean {
@@ -136,7 +176,7 @@ export function isCapacitorNative(): boolean {
 export async function signInWithGoogle(): Promise<FirebaseUser | null> {
   if (isCapacitorNative()) {
     throw new Error(
-      'Google Sign-In popup is restricted inside the Android APK WebView (https://localhost). Connect JivanOS Private Vault, OneDrive, Google Drive, Dropbox, Nextcloud, WebDAV, or Syncthing Folder in Multi-Drive Sync — works identically across Android, PC & iOS with zero Google login required.'
+      'Google Sign-In popup is restricted inside the Android APK WebView (https://localhost). Connect JivanOS Private Vault, Google Drive, Dropbox, Nextcloud, WebDAV, or Syncthing Folder in Multi-Drive Sync — works identically across Android, PC & iOS with zero Google login required.'
     );
   }
 
@@ -160,7 +200,7 @@ export async function signInWithGoogle(): Promise<FirebaseUser | null> {
 
     if (code === 'auth/unauthorized-domain') {
       throw new Error(
-        `Domain "${window.location.hostname}" is not authorized in Firebase Auth. Use JivanOS Private Vault, Local Folder, OneDrive, Google Drive, Dropbox, WebDAV, or S3 sync in Multi-Drive Sync — no Google login required.`
+        `Domain "${window.location.hostname}" is not authorized in Firebase Auth. Use JivanOS Private Vault, Local Folder, Google Drive, Dropbox, WebDAV, or S3 sync in Multi-Drive Sync — no Google login required.`
       );
     }
     if (code === 'auth/popup-blocked') {
@@ -176,17 +216,18 @@ export async function signInWithGoogle(): Promise<FirebaseUser | null> {
 }
 
 /**
- * Connect Google Drive via Firebase Auth GoogleAuthProvider using least-privilege drive.file scope.
+ * Connect Google Drive via Firebase Auth GoogleAuthProvider using least-privilege drive.appdata scope ONLY.
  * Avoids redirect_uri_mismatch on dynamic preview URLs and keeps the access token strictly in memory.
  */
 export async function connectGoogleDriveWithFirebase(): Promise<{
   accessToken: string;
   user: FirebaseUser;
   email: string;
+  displayName: string;
 }> {
   if (isCapacitorNative()) {
     throw new Error(
-      'Google Drive sign-in popup is restricted inside the Android APK WebView. Open JivanOS in your mobile browser to sync Google Drive, or use JivanOS Private Vault / Syncthing Folder on Android.'
+      'On Android APK, Google Drive uses the native Google Sign-In SDK (JivanGoogleDrive plugin).'
     );
   }
 
@@ -195,15 +236,18 @@ export async function connectGoogleDriveWithFirebase(): Promise<{
     const credential = GoogleAuthProvider.credentialFromResult(result);
     if (!credential?.accessToken) {
       throw new Error(
-        'Google Drive permission was not returned. Please grant Google Drive file access when signing in.'
+        'Google Drive AppData permission was not returned. Please grant access when signing in.'
       );
     }
     cachedGDriveAccessToken = credential.accessToken;
     cachedGDriveEmail = result.user?.email || '';
+    cachedGDriveDisplayName =
+      result.user?.displayName || (cachedGDriveEmail ? cachedGDriveEmail.split('@')[0] : 'Google User');
     return {
       accessToken: cachedGDriveAccessToken,
       user: result.user,
       email: cachedGDriveEmail,
+      displayName: cachedGDriveDisplayName,
     };
   } catch (error: any) {
     const code = String(error?.code || '');
@@ -224,6 +268,43 @@ export async function connectGoogleDriveWithFirebase(): Promise<{
     }
     throw error;
   }
+}
+
+/**
+ * Sign in to JivanOS Cloud using Email & Password.
+ */
+export async function signInWithEmail(email: string, password: string): Promise<FirebaseUser> {
+  const cleanEmail = email.trim();
+  if (!cleanEmail || !password) {
+    throw new Error('Please enter both your email address and password.');
+  }
+  const cred = await signInWithEmailAndPassword(auth, cleanEmail, password);
+  return cred.user;
+}
+
+/**
+ * Create a new JivanOS Cloud account using Email & Password and trigger email verification.
+ */
+export async function signUpWithEmail(
+  email: string,
+  password: string,
+  displayName?: string
+): Promise<FirebaseUser> {
+  const cleanEmail = email.trim();
+  if (!cleanEmail || password.length < 6) {
+    throw new Error('Enter a valid email address and a password of at least 6 characters.');
+  }
+  const cred = await createUserWithEmailAndPassword(auth, cleanEmail, password);
+  if (displayName?.trim()) {
+    await updateProfile(cred.user, { displayName: displayName.trim().slice(0, 80) }).catch(() => {});
+  }
+  await sendEmailVerification(cred.user).catch(() => {});
+  return cred.user;
+}
+
+export async function resendEmailVerification(): Promise<void> {
+  if (!auth.currentUser) throw new Error('Sign in first to resend verification email.');
+  await sendEmailVerification(auth.currentUser);
 }
 
 export enum OperationType {
@@ -413,9 +494,19 @@ export {
   firebaseSignOut,
   onAuthStateChanged,
   doc,
+  collection,
+  query,
+  where,
+  orderBy,
+  limit,
   setDoc,
   getDoc,
+  getDocs,
+  addDoc,
+  deleteDoc,
   onSnapshot,
+  serverTimestamp,
+  Timestamp,
   firebaseConfig,
 };
 

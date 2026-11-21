@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { Menu } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { QuoteBanner } from '../common/QuoteBanner';
+import { isDesktop } from '../../desktop/KeychainService';
 
 export const Navbar: React.FC = () => {
   const {
@@ -21,6 +22,12 @@ export const Navbar: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [toggleSidebar]);
+
+  // On Tauri desktop, the native OS titlebar ("JivanOS") replaces the web top chrome
+  // to maximize vertical viewport space in the 420×820 mobile-proportioned window.
+  if (isDesktop()) {
+    return null;
+  }
 
   return (
     <header className="sticky top-0 z-40 w-full max-w-full border-b border-slate-200/75 dark:border-zinc-900 bg-[var(--m3-surface-container-low,#f3f6fc)] dark:bg-black transition-colors">

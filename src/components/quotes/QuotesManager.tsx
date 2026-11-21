@@ -119,16 +119,6 @@ export const QuotesManager: React.FC = () => {
   const [editingQuote, setEditingQuote] = useState<QuoteItem | null>(null);
   const [deletingQuote, setDeletingQuote] = useState<QuoteItem | null>(null);
   const [showReminderSettings, setShowReminderSettings] = useState(false);
-  const [transitionStyle, setTransitionStyle] = useState<'fade' | 'slide' | 'scale'>(() => {
-    try {
-      return (
-        (localStorage.getItem('omni_quote_transition_style') as 'fade' | 'slide' | 'scale') ||
-        'fade'
-      );
-    } catch {
-      return 'fade';
-    }
-  });
   const [saveSuccessMsg, setSaveSuccessMsg] = useState(false);
 
   const triggerVibration = (pattern: number = 20) => {
@@ -145,47 +135,6 @@ export const QuotesManager: React.FC = () => {
       return false;
     }
   });
-
-  // Typography preferences (cards always stay Pure White in light mode / M3 dark surface in dark mode)
-  const [quoteFontScale, setQuoteFontScale] = useState<number>(() => {
-    try {
-      return Number(localStorage.getItem('omni_quote_font_scale')) || 1;
-    } catch {
-      return 1;
-    }
-  });
-
-  const [quoteFontFamily, setQuoteFontFamily] = useState<string>(() => {
-    try {
-      return localStorage.getItem('omni_quote_font_family') || 'sans-serif';
-    } catch {
-      return 'sans-serif';
-    }
-  });
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('omni_quote_card_bg', 'default');
-    } catch {}
-    if (typeof document !== 'undefined') {
-      document.documentElement.style.setProperty('--quote-font-scale', String(quoteFontScale));
-      document.documentElement.style.setProperty('--quote-font-family', quoteFontFamily);
-      document.documentElement.style.setProperty('--quote-card-bg', isDark ? '#111319' : '#ffffff');
-      document.documentElement.style.setProperty('--quote-card-border', isDark ? '#2e3444' : '#c4cddb');
-    }
-  }, [quoteFontScale, quoteFontFamily, isDark]);
-
-  useEffect(() => {
-    const handleThemeChange = (e: any) => {
-      if (e.detail) {
-        if (e.detail.fontScale !== undefined) setQuoteFontScale(e.detail.fontScale);
-        if (e.detail.fontFamily !== undefined) setQuoteFontFamily(e.detail.fontFamily);
-        if (e.detail.transitionStyle !== undefined) setTransitionStyle(e.detail.transitionStyle);
-      }
-    };
-    window.addEventListener('omni_quote_theme_changed', handleThemeChange);
-    return () => window.removeEventListener('omni_quote_theme_changed', handleThemeChange);
-  }, []);
 
   const [morningReminderTime, setMorningReminderTime] = useState<string>(() => {
     try {
@@ -565,10 +514,7 @@ export const QuotesManager: React.FC = () => {
             </button>
           </div>
 
-          <p
-            className="text-slate-900 dark:text-white font-semibold leading-[1.35] text-[12.5px] sm:text-[13px] break-words"
-            style={{ fontFamily: quoteFontFamily }}
-          >
+          <p className="text-slate-900 dark:text-white font-semibold leading-[1.35] text-[12.5px] sm:text-[13px] break-words">
             “{toSentenceCase(focusedQuote.text)}”
           </p>
 
@@ -928,7 +874,7 @@ export const QuotesManager: React.FC = () => {
 
             return (
               <article
-                key={`${q.id}-${transitionStyle}`}
+                key={q.id}
                 data-m3-tonal-card="true"
                 data-tonal-tone="neutral"
                 style={{
@@ -976,13 +922,7 @@ export const QuotesManager: React.FC = () => {
                 </div>
 
                 {/* Editorial Quote Body (Compact on phone, expressive on PC) */}
-                <p
-                  className="font-medium text-slate-900 dark:text-zinc-50 leading-[1.38] sm:leading-[1.46] break-words px-0.5"
-                  style={{
-                    fontSize: `${Math.max(0.8, quoteFontScale * 0.84)}rem`,
-                    fontFamily: quoteFontFamily,
-                  }}
-                >
+                <p className="text-[13.5px] font-medium text-slate-900 dark:text-zinc-50 leading-[1.38] sm:leading-[1.46] break-words px-0.5">
                   “{toSentenceCase(q.text)}”
                 </p>
 

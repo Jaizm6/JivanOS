@@ -11,7 +11,6 @@ import {
   Cloud,
   CloudOff,
   PanelLeftClose,
-  User,
   Play,
   Pause,
   RotateCcw,
@@ -28,6 +27,15 @@ import { useApp } from '../../context/AppContext';
 import { ActiveTab } from '../../types';
 import { soundEngine } from '../../utils/audio';
 import { showAndroidToast } from '../common/AndroidToast';
+import {
+  getRealSyncOverview,
+  requestOpenBackupSyncScreen,
+} from '../../sync/syncConnectionState';
+import { DRIVE_SYNC_STATE_EVENT } from '../../utils/googleDriveSync';
+import { DROPBOX_SYNC_STATE_EVENT } from '../../utils/dropboxSync';
+import { TELEGRAM_SYNC_STATE_EVENT } from '../../sync/providers/TelegramSyncProvider';
+import { MEGA_SYNC_STATE_EVENT } from '../../sync/providers/MEGASyncProvider';
+import { JIVANOS_CLOUD_STATE_EVENT } from '../../sync/providers/FirestoreSyncProvider';
 
 import { JivanLogoMark } from '../common/JivanLogo';
 import { SidebarClockCard } from './SidebarClockCard';
@@ -42,7 +50,6 @@ export const Sidebar: React.FC = () => {
     isOnline,
     syncStatus,
     syncWithCloud,
-    syncEmail,
     medications,
     tasks,
     bills,
@@ -55,12 +62,12 @@ export const Sidebar: React.FC = () => {
     setPomodoroDuration,
     isSidebarCollapsed,
     setIsSidebarCollapsed,
-    setIsBackupModalOpen,
     setIsAuthModalOpen,
     unreadNotificationsCount,
     setIsNotificationDrawerOpen,
     profile,
     firebaseUser,
+    joplinSyncSettings,
     setIsAIChatOpen,
   } = useApp();
 
@@ -284,15 +291,38 @@ export const Sidebar: React.FC = () => {
   const thumbY = dialCenter + dialRadius * Math.sin(handRad);
 
   const isOpen = !isSidebarCollapsed;
-  const isAuthenticated = Boolean(firebaseUser || profile.identifier || syncEmail);
-  const displayName =
-    profile.nickname && profile.nickname.trim()
-      ? profile.nickname.trim()
-      : profile.name && profile.name !== 'Guest'
-      ? profile.name
-      : firebaseUser?.displayName
-      ? firebaseUser.displayName.split(' ')[0]
-      : 'Local Vault';
+  const [syncStateTick, setSyncStateTick] = useState(0);
+
+  useEffect(() => {
+    const bump = () => setSyncStateTick(t => t + 1);
+    window.addEventListener(DRIVE_SYNC_STATE_EVENT, bump);
+    window.addEventListener(DROPBOX_SYNC_STATE_EVENT, bump);
+    window.addEventListener(TELEGRAM_SYNC_STATE_EVENT, bump);
+    window.addEventListener(MEGA_SYNC_STATE_EVENT, bump);
+    window.addEventListener(JIVANOS_CLOUD_STATE_EVENT, bump);
+    return () => {
+      window.removeEventListener(DRIVE_SYNC_STATE_EVENT, bump);
+      window.removeEventListener(DROPBOX_SYNC_STATE_EVENT, bump);
+      window.removeEventListener(TELEGRAM_SYNC_STATE_EVENT, bump);
+      window.removeEventListener(MEGA_SYNC_STATE_EVENT, bump);
+      window.removeEventListener(JIVANOS_CLOUD_STATE_EVENT, bump);
+    };
+  }, []);
+
+  const realSyncOverview = useMemo(
+    () => getRealSyncOverview(firebaseUser, joplinSyncSettings),
+    [firebaseUser, joplinSyncSettings, syncStateTick]
+  );
+  const hasRealSyncConnection = realSyncOverview.hasAnyConnected;
+  const hasRealSyncSuccess =
+    hasRealSyncConnection && Boolean(realSyncOverview.latestSyncedAt);
+
+  const openBackupSyncDirect = useCallback(() => {
+    setIsAIChatOpen(false);
+    setActiveTab('settings');
+    requestOpenBackupSyncScreen();
+    setIsSidebarCollapsed(true);
+  }, [setActiveTab, setIsAIChatOpen, setIsSidebarCollapsed]);
 
   const quickPresets = pomodoro.mode === 'break' ? [5, 10, 15, 20] : [15, 25, 45, 60];
   const currentSetMinutes = Math.max(1, Math.round((pomodoro.timeRemaining || 1500) / 60));
@@ -342,7 +372,7 @@ export const Sidebar: React.FC = () => {
                 )}
                 <span
                   className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ring-2 ring-white dark:ring-zinc-900 ${
-                    !isAuthenticated
+                    !hasRealSyncConnection
                       ? 'bg-slate-400'
                       : !isOnline || syncStatus === 'offline'
                       ? 'bg-amber-500'
@@ -350,7 +380,9 @@ export const Sidebar: React.FC = () => {
                       ? 'bg-indigo-500 animate-pulse'
                       : syncStatus === 'error'
                       ? 'bg-rose-500'
-                      : 'bg-emerald-500'
+                      : hasRealSyncSuccess
+                      ? 'bg-emerald-500'
+                      : 'bg-indigo-500'
                   }`}
                 />
               </div>
@@ -358,10 +390,6 @@ export const Sidebar: React.FC = () => {
               <div className="min-w-0 flex-1">
                 <div className="font-extrabold text-[15px] tracking-tight text-slate-900 dark:text-zinc-100 leading-tight truncate">
                   Jivan <span className="text-indigo-600 dark:text-indigo-400">OS</span>
-                </div>
-                <div className="text-[11px] font-semibold text-slate-500 dark:text-zinc-400 truncate flex items-center gap-1 mt-0.5">
-                  <User className="w-3 h-3 shrink-0 text-indigo-600 dark:text-indigo-400" />
-                  <span className="truncate">{displayName}</span>
                 </div>
               </div>
             </button>
@@ -590,10 +618,7 @@ export const Sidebar: React.FC = () => {
               <button
                 type="button"
                 id="sidebar-btn-backup"
-                onClick={() => {
-                  setIsBackupModalOpen(true);
-                  setIsSidebarCollapsed(true);
-                }}
+                onClick={openBackupSyncDirect}
                 className="flex items-center gap-2.5 min-w-0 flex-1 text-left cursor-pointer hover:opacity-90 transition"
               >
                 <span className="w-7 h-7 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
@@ -601,56 +626,60 @@ export const Sidebar: React.FC = () => {
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="text-[12.5px] font-semibold text-slate-800 dark:text-zinc-100 leading-tight truncate">
-                    Backup
+                    Backup &amp; Sync
                   </div>
-                  <div className="text-[10px] text-slate-500 dark:text-zinc-400 truncate">
-                    {syncEmail || firebaseUser?.email || 'Local Only'}
+                  <div className="text-[11px] text-slate-500 dark:text-zinc-400 truncate">
+                    {hasRealSyncConnection
+                      ? realSyncOverview.connectedCount === 1
+                        ? realSyncOverview.connectedProviders[0].label
+                        : `${realSyncOverview.connectedCount} providers connected`
+                      : 'Local only'}
                   </div>
                 </div>
               </button>
 
-              {/* Cloud Sync / Sign In Action Pill */}
+              {/* Real Sync Status Pill — only shows Synced when a real provider is connected and synced */}
               <button
                 type="button"
                 id="btn-sidebar-sync-status"
                 onClick={() => {
-                  if (!isAuthenticated) {
-                    setIsAuthModalOpen(true);
-                    setIsSidebarCollapsed(true);
+                  if (!hasRealSyncConnection) {
+                    openBackupSyncDirect();
                   } else {
                     syncWithCloud();
                   }
                 }}
                 title={
-                  !isAuthenticated
-                    ? 'Sign in to enable Cloud Sync'
+                  !hasRealSyncConnection
+                    ? 'Open Backup & Sync to connect a provider'
                     : syncStatus === 'syncing'
-                    ? 'Syncing with Cloud...'
+                    ? 'Syncing...'
                     : !isOnline || syncStatus === 'offline'
-                    ? 'Offline Mode — Tap to retry'
-                    : 'Cloud Synced — Tap to Sync Now'
+                    ? 'Offline — Tap to retry'
+                    : hasRealSyncSuccess
+                    ? 'Synced — Tap to sync now'
+                    : 'Connected — Tap to sync now'
                 }
-                className={`px-2 py-1.5 rounded-xl border text-[10.5px] font-bold flex items-center gap-1 transition active:scale-95 cursor-pointer shrink-0 ${
-                  !isAuthenticated
-                    ? 'bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border-slate-200 dark:border-zinc-700'
+                className={`px-2 py-1.5 rounded-lg border text-[11px] font-bold flex items-center gap-1 transition active:scale-95 cursor-pointer shrink-0 ${
+                  !hasRealSyncConnection
+                    ? 'bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-300 border-slate-200 dark:border-zinc-700'
                     : syncStatus === 'syncing'
                     ? 'bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800/70'
                     : !isOnline || syncStatus === 'offline'
                     ? 'bg-amber-50 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/70'
                     : syncStatus === 'error'
                     ? 'bg-rose-50 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800/70'
-                    : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200/90 dark:border-emerald-800/70'
+                    : hasRealSyncSuccess
+                    ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200/90 dark:border-emerald-800/70'
+                    : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200/90 dark:border-indigo-800/70'
                 }`}
               >
-                {!isAuthenticated ? (
-                  <>
-                    <Cloud className="w-3 h-3 text-indigo-500" />
-                    <span>Sign In</span>
-                  </>
+                {!hasRealSyncConnection ? (
+                  <span>Not connected</span>
                 ) : syncStatus === 'syncing' ? (
                   <>
                     <RefreshCw className="w-3 h-3 animate-spin text-indigo-600 dark:text-indigo-400" />
-                    <span>Sync</span>
+                    <span>Syncing</span>
                   </>
                 ) : !isOnline || syncStatus === 'offline' ? (
                   <>
@@ -660,12 +689,17 @@ export const Sidebar: React.FC = () => {
                 ) : syncStatus === 'error' ? (
                   <>
                     <Cloud className="w-3 h-3 text-rose-500" />
-                    <span>Retry</span>
+                    <span>Error</span>
                   </>
-                ) : (
+                ) : hasRealSyncSuccess ? (
                   <>
                     <Cloud className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
                     <span>Synced</span>
+                  </>
+                ) : (
+                  <>
+                    <Cloud className="w-3 h-3 text-indigo-600 dark:text-indigo-400" />
+                    <span>Sync</span>
                   </>
                 )}
               </button>

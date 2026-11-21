@@ -1,99 +1,56 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  Settings,
-  Cloud,
-  Shield,
   Bell,
-  Volume2,
-  Database,
-  Lock,
-  Unlock,
-  Key,
-  Smartphone,
-  RefreshCw,
-  Download,
-  Upload,
-  HardDrive,
-  Check,
-  AlertTriangle,
-  User,
-  Fingerprint,
-  KeyRound,
-  ShieldCheck,
-  Mail,
-  Server,
-  Plus,
-  Camera,
-  Trash2,
-  Image as ImageIcon,
-  Palette,
-  Type,
-  Sliders,
-  Eye,
-  Sparkles,
-  ExternalLink,
-  ArrowLeft,
-  Search,
   ChevronRight,
-  Archive,
+  Cloud,
+  ExternalLink,
+  Globe,
+  Monitor,
+  Palette,
+  Search,
+  ShieldCheck,
+  Sparkles,
+  User,
+  Volume2,
   X,
-  Sun,
-  Moon,
-  FolderSync,
-  LogOut,
-  AlertCircle,
-  Activity,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { SupportedCurrency, SyncDriveId } from '../../types';
 import { JivanLogoMark } from '../layout/Sidebar';
-import { APP_VERSION, APP_GITHUB_REPO, APP_GITHUB_RELEASES_URL } from '../../utils/appVersion';
-import { showAndroidToast } from '../common/AndroidToast';
-import {
-  soundEngine,
-  playLockSound,
-  AlarmToneType,
-  NotificationSoundType,
-  EventSoundCategory,
-  NotificationPopupStyle,
-  AlarmPopupStyle,
-  NOTIFICATION_SOUND_OPTIONS,
-  ALARM_TONE_OPTIONS,
-  EVENT_SOUND_ITEMS,
-} from '../../utils/audio';
-import { haptics } from '../../utils/haptics';
-import { notificationService } from '../../utils/notifications';
-import { ProviderLogo } from '../common/ProviderLogo';
-import { compressProfilePhoto } from '../../utils/imageCompressor';
-import { ColorThemeService } from '../../utils/ColorThemeService';
+import { APP_GITHUB_REPO, APP_VERSION } from '../../utils/appVersion';
+import { soundEngine } from '../../utils/audio';
 import { NotificationSettingsModal } from '../notifications/NotificationSettingsModal';
-import { UniversalExportHub } from './UniversalExportHub';
+import { BackupSyncScreen } from './BackupSyncScreen';
+import { PersonalProfileScreen } from './PersonalProfileScreen';
+import { SettingsSubpageHeader } from './SettingsSubpageHeader';
+import { AppearanceSettingsSection } from './AppearanceSettingsSection';
+import { NotificationsSettingsSection } from './NotificationsSettingsSection';
+import { SoundHapticsSettingsSection } from './SoundHapticsSettingsSection';
 import {
-  getVisualPaletteMode,
-  setVisualPaletteMode,
-  VisualPaletteMode,
-} from '../../utils/activityStyles';
+  AiSettingsSection,
+  RegionalScheduleSection,
+  SecuritySettingsSection,
+} from './SecurityAiSystemSections';
 import {
-  PetalShapeBadge,
-  getPetalGroupRadiusClass,
-  PetalFourQuadrantSwatch,
-  PETAL_PALETTE_OPTIONS,
-  PETAL_COLOR_STYLES,
-  PetalColorStyleId,
-  PetalExpressiveShape,
-  getSavedPetalColorStyle,
-  setSavedPetalColorStyle,
-  getSavedAmoledBlack,
-  setSavedAmoledBlack,
-  getSavedExpressiveShapes,
-  setSavedExpressiveShapes,
+  NAVIGATE_SETTINGS_SECTION_EVENT,
+  getRealSyncOverview,
+} from '../../sync/syncConnectionState';
+import { DRIVE_SYNC_STATE_EVENT } from '../../utils/googleDriveSync';
+import { DROPBOX_SYNC_STATE_EVENT } from '../../utils/dropboxSync';
+import { TELEGRAM_SYNC_STATE_EVENT } from '../../sync/providers/TelegramSyncProvider';
+import { MEGA_SYNC_STATE_EVENT } from '../../sync/providers/MEGASyncProvider';
+import { JIVANOS_CLOUD_STATE_EVENT } from '../../sync/providers/FirestoreSyncProvider';
+import {
   M3Switch,
+  PetalExpressiveShape,
+  PetalShapeBadge,
+  getSavedExpressiveShapes,
 } from '../common/PetalExpressive';
+import { showAndroidToast } from '../common/AndroidToast';
+import { isDesktop } from '../../desktop/KeychainService';
+import { TrayService } from '../../desktop/TrayService';
 
 export type SettingsSectionId =
-  | 'phone_install'
-  | 'export'
-  | 'sync'
+  | 'backup_sync'
   | 'profile'
   | 'security'
   | 'appearance'
@@ -102,130 +59,111 @@ export type SettingsSectionId =
   | 'ai'
   | 'system';
 
+interface SettingsRowItem {
+  id: SettingsSectionId;
+  group: 'personalize' | 'data' | 'preferences';
+  title: string;
+  rightValue?: string;
+  keywords: string;
+  icon: React.ReactNode;
+  circleBg: string;
+  fillClass: string;
+  strokeClass: string;
+  shape: PetalExpressiveShape;
+}
+
 export const SettingsManager: React.FC = () => {
-  const {
-    syncState,
-    triggerManualSync,
-    createCloudBackup,
-    downloadLocalBackupFile,
-    setIsBackupModalOpen,
-    syncEmail,
-    savedSyncEmails,
-    setSyncEmail,
-    addSyncEmail,
-    userProfile,
-    updateUserProfile,
-    masterPassphrase,
-    setMasterPassphrase,
-    pushNotification,
-    appLock,
-    configureAppLock,
-    lockApp,
-    theme,
-    setTheme,
-    accentTone,
-    setAccentTone,
-    setIsInstallModalOpen,
-    hydration,
-    toggleWaterReminder,
-    toggleAdaptiveWaterReminder,
-    sendAdaptiveHydrationNotification,
-    currency,
-    setCurrency,
-    scheduleStartHour,
-    scheduleEndHour,
-    setScheduleTimingPreset,
-    joplinSyncSettings,
-    updateJoplinSyncSettings,
-    syncDriveNow,
-    checkDriveConfiguration,
-    firebaseUser,
-    loginWithGoogle,
-    logout,
-    authError,
-    clearAuthError,
-    lastSyncTime,
-    syncStatus,
-  } = useApp();
+  const { theme, userProfile, appLock, joplinSyncSettings, firebaseUser } = useApp();
 
-  const isDark = theme === 'dark' || (typeof document !== 'undefined' && document.documentElement.classList.contains('dark'));
-
-  // Petal v4.4 Theme, Color Style, AMOLED & Expressive Shapes State
-  const [paletteMode, setPaletteModeState] = useState<VisualPaletteMode>(() => getVisualPaletteMode());
-  const [colorStyle, setColorStyleState] = useState<PetalColorStyleId>(() => getSavedPetalColorStyle());
-  const [amoledBlack, setAmoledBlackState] = useState<boolean>(() => getSavedAmoledBlack());
-  const [expressiveShapes, setExpressiveShapesState] = useState<boolean>(() => getSavedExpressiveShapes());
-
-  const handleSelectPetalPalette = (opt: typeof PETAL_PALETTE_OPTIONS[number]) => {
-    if (opt.accentTone) {
-      setAccentTone(opt.accentTone);
-    }
-    const nextMode: VisualPaletteMode = opt.paletteMode || 'colorful';
-    setVisualPaletteMode(nextMode);
-    setPaletteModeState(nextMode);
-    try { soundEngine.playClick?.(); } catch {}
-  };
-
-  const handleSelectColorStyle = (style: PetalColorStyleId) => {
-    setColorStyleState(style);
-    setSavedPetalColorStyle(style);
-    try { soundEngine.playClick?.(); } catch {}
-  };
-
-  const handleToggleAmoled = (enabled: boolean) => {
-    setAmoledBlackState(enabled);
-    setSavedAmoledBlack(enabled);
-    try { soundEngine.playClick?.(); } catch {}
-  };
-
-  const handleToggleExpressiveShapes = (enabled: boolean) => {
-    setExpressiveShapesState(enabled);
-    setSavedExpressiveShapes(enabled);
-    try { soundEngine.playClick?.(); } catch {}
-  };
-
-  const [emailInput, setEmailInput] = useState(userProfile.email || userProfile.identifier || '');
-  const [nameInput, setNameInput] = useState(userProfile.name);
-  const [nicknameInput, setNicknameInput] = useState(userProfile.nickname || '');
-  const [avatarPhoto, setAvatarPhoto] = useState(userProfile.avatarPhoto || '');
-  const [bioInput, setBioInput] = useState(userProfile.bio || '');
-  const [dobInput, setDobInput] = useState(userProfile.dateOfBirth || '');
-  const [genderInput, setGenderInput] = useState<'male' | 'female' | 'other' | 'unspecified'>(
-    userProfile.gender || 'unspecified'
+  const [expressiveShapes, setExpressiveShapes] = useState<boolean>(() =>
+    getSavedExpressiveShapes()
   );
-  const [heightInput, setHeightInput] = useState(userProfile.heightCm ? String(userProfile.heightCm) : '');
-  const [weightInput, setWeightInput] = useState(userProfile.weightKg ? String(userProfile.weightKg) : '');
-  const [currencyInput, setCurrencyInput] = useState<SupportedCurrency>(
-    (userProfile.preferredCurrency || currency || 'INR') as SupportedCurrency
-  );
-  const [profileSavedMsg, setProfileSavedMsg] = useState('');
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
-  const [profileAuthError, setProfileAuthError] = useState('');
-  const [isCompressingPhoto, setIsCompressingPhoto] = useState(false);
-  const [photoError, setPhotoError] = useState('');
-  const [twoFactorActive, setTwoFactorActive] = useState(userProfile.twoFactorEnabled);
-  const [newPassphrase, setNewPassphrase] = useState('');
-  const [showPassModal, setShowPassModal] = useState(false);
-  const [backupStatusMsg, setBackupStatusMsg] = useState('');
-  const [syncDiagResult, setSyncDiagResult] = useState<{ success: boolean; message: string } | null>(null);
-  const [isCheckingDrive, setIsCheckingDrive] = useState(false);
-  const [isSyncingNow, setIsSyncingNow] = useState(false);
-
-  // App Lock State in Settings
-  const [appLockEnabled, setAppLockEnabled] = useState(appLock.isEnabled);
-  const [lockType, setLockType] = useState(appLock.type || appLock.lockType || 'passcode');
-  const [lockPasscode, setLockPasscode] = useState(appLock.passcode);
-  const [requireOnResume, setRequireOnResume] = useState(appLock.requireOnResume ?? false);
-  const [saveLockMsg, setSaveLockMsg] = useState('');
   const [isNotifSettingsOpen, setIsNotifSettingsOpen] = useState(false);
+  const desktopRuntime = isDesktop();
+  const [autoLaunchEnabled, setAutoLaunchEnabled] = useState(false);
+  const [isUpdatingAutoLaunch, setIsUpdatingAutoLaunch] = useState(false);
 
-  // Android-style dedicated section navigation state
-  const [activeSection, setActiveSection] = useState<SettingsSectionId | null>(null);
+  useEffect(() => {
+    if (!desktopRuntime) return;
+    let active = true;
+    TrayService.getAutoLaunchEnabled()
+      .then((enabled) => {
+        if (active) setAutoLaunchEnabled(enabled);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [desktopRuntime]);
+
+  const handleToggleAutoLaunch = async (next: boolean) => {
+    if (!desktopRuntime || isUpdatingAutoLaunch) return;
+    setIsUpdatingAutoLaunch(true);
+    try {
+      const actual = await TrayService.setAutoLaunchEnabled(next);
+      setAutoLaunchEnabled(actual);
+      showAndroidToast(
+        actual ? 'JivanOS will launch on startup' : 'Auto-launch on startup disabled',
+        2200,
+        'default'
+      );
+    } catch {
+      showAndroidToast('Could not update startup preference', 2600, 'error');
+    } finally {
+      setIsUpdatingAutoLaunch(false);
+    }
+  };
+
+  // Dedicated section navigation state (supports deep-linking directly to Backup & Sync in 1 tap)
+  const [activeSection, setActiveSection] = useState<SettingsSectionId | null>(() => {
+    try {
+      const pending = sessionStorage.getItem('jivanos_pending_settings_section');
+      if (pending === 'backup_sync' || pending === 'profile') {
+        sessionStorage.removeItem('jivanos_pending_settings_section');
+        return pending;
+      }
+    } catch {}
+    return null;
+  });
   const [searchQuery, setSearchQuery] = useState('');
 
-  // AI Models & Provider State
+  // Keep real provider sync overview live
+  const [, setSyncStateTick] = useState(0);
+  useEffect(() => {
+    const handleNavigateEvent = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      if (detail?.section === 'backup_sync' || detail?.section === 'profile') {
+        setActiveSection(detail.section);
+        try {
+          sessionStorage.removeItem('jivanos_pending_settings_section');
+        } catch {}
+      }
+    };
+    const bump = () => setSyncStateTick((t) => t + 1);
+    window.addEventListener(NAVIGATE_SETTINGS_SECTION_EVENT, handleNavigateEvent);
+    window.addEventListener(DRIVE_SYNC_STATE_EVENT, bump);
+    window.addEventListener(DROPBOX_SYNC_STATE_EVENT, bump);
+    window.addEventListener(TELEGRAM_SYNC_STATE_EVENT, bump);
+    window.addEventListener(MEGA_SYNC_STATE_EVENT, bump);
+    window.addEventListener(JIVANOS_CLOUD_STATE_EVENT, bump);
+    return () => {
+      window.removeEventListener(NAVIGATE_SETTINGS_SECTION_EVENT, handleNavigateEvent);
+      window.removeEventListener(DRIVE_SYNC_STATE_EVENT, bump);
+      window.removeEventListener(DROPBOX_SYNC_STATE_EVENT, bump);
+      window.removeEventListener(TELEGRAM_SYNC_STATE_EVENT, bump);
+      window.removeEventListener(MEGA_SYNC_STATE_EVENT, bump);
+      window.removeEventListener(JIVANOS_CLOUD_STATE_EVENT, bump);
+    };
+  }, []);
+
+  const realSyncOverview = getRealSyncOverview(firebaseUser, joplinSyncSettings);
+
   const [aiProviderInput, setAiProviderInput] = useState(() => {
-    try { return localStorage.getItem('omni_ai_provider') || 'gemini'; } catch { return 'gemini'; }
+    try {
+      return localStorage.getItem('omni_ai_provider') || 'gemini';
+    } catch {
+      return 'gemini';
+    }
   });
   const [selectedAiModelInput, setSelectedAiModelInput] = useState(() => {
     try {
@@ -235,3035 +173,394 @@ export const SettingsManager: React.FC = () => {
       return 'gemini-4-hydrogen';
     }
   });
-  const [baseUrlInput, setBaseUrlInput] = useState(() => {
-    try { return localStorage.getItem('omni_ai_base_url') || 'https://api.openai.com/v1'; } catch { return 'https://api.openai.com/v1'; }
-  });
-  const [customGeminiKey, setCustomGeminiKey] = useState(() => {
-    try { return localStorage.getItem('omni_custom_gemini_api_key') || ''; } catch { return ''; }
-  });
-  const [customOpenaiKey, setCustomOpenaiKey] = useState(() => {
-    try { return localStorage.getItem('omni_custom_openai_api_key') || ''; } catch { return ''; }
-  });
-  const [customDeepseekKey, setCustomDeepseekKey] = useState(() => {
-    try { return localStorage.getItem('omni_custom_deepseek_api_key') || ''; } catch { return ''; }
-  });
-  const [customQwenKey, setCustomQwenKey] = useState(() => {
-    try { return localStorage.getItem('omni_custom_qwen_api_key') || ''; } catch { return ''; }
-  });
-  const [customLocalKey, setCustomLocalKey] = useState(() => {
-    try { return localStorage.getItem('omni_custom_local_api_key') || 'ollama'; } catch { return 'ollama'; }
-  });
-  const [showApiKey, setShowApiKey] = useState(false);
-  const [aiSettingsMsg, setAiSettingsMsg] = useState('');
-
-  // Timezone State
   const [timezoneInput, setTimezoneInput] = useState(() => {
-    try { return localStorage.getItem('omni_timezone') || 'Asia/Kolkata'; } catch { return 'Asia/Kolkata'; }
-  });
-  const [timezoneMsg, setTimezoneMsg] = useState('');
-
-  const handleProviderChange = (provider: string) => {
-    setAiProviderInput(provider);
-    if (provider === 'gemini') {
-      setSelectedAiModelInput('gemini-4-hydrogen');
-      setBaseUrlInput('https://generativelanguage.googleapis.com');
-    } else if (provider === 'openai') {
-      setSelectedAiModelInput('gpt-4o-mini');
-      setBaseUrlInput('https://api.openai.com/v1');
-    } else if (provider === 'deepseek') {
-      setSelectedAiModelInput('deepseek-chat');
-      setBaseUrlInput('https://api.deepseek.com');
-    } else if (provider === 'qwen') {
-      setSelectedAiModelInput('qwen-max');
-      setBaseUrlInput('https://dashscope-intl.aliyuncs.com/compatible-mode/v1');
-    } else if (provider === 'local') {
-      setSelectedAiModelInput('llama3');
-      setBaseUrlInput('http://localhost:11434/v1');
-    }
-  };
-
-  const handleSaveAiSettings = (e: React.FormEvent) => {
-    e.preventDefault();
     try {
-      localStorage.setItem('omni_ai_provider', aiProviderInput);
-      localStorage.setItem('omni_ai_model', selectedAiModelInput);
-      localStorage.setItem('omni_ai_base_url', baseUrlInput.trim());
-      localStorage.setItem('omni_custom_gemini_api_key', customGeminiKey.trim());
-      localStorage.setItem('omni_custom_openai_api_key', customOpenaiKey.trim());
-      localStorage.setItem('omni_custom_deepseek_api_key', customDeepseekKey.trim());
-      localStorage.setItem('omni_custom_qwen_api_key', customQwenKey.trim());
-      localStorage.setItem('omni_custom_local_api_key', customLocalKey.trim());
-
-      setAiSettingsMsg(`AI provider (${aiProviderInput}) and model preferences saved successfully.`);
-      setTimeout(() => setAiSettingsMsg(''), 3500);
-      pushNotification('AI Settings Updated', `Active provider: ${aiProviderInput.toUpperCase()} (${selectedAiModelInput})`, 'system');
-    } catch (err: any) {
-      setAiSettingsMsg('Failed to save AI preferences.');
-    }
-  };
-  
-  const handleSaveTimezone = (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      localStorage.setItem('omni_timezone', timezoneInput);
-      setTimezoneMsg(`Timezone set to ${timezoneInput}.`);
-      setTimeout(() => setTimezoneMsg(''), 3500);
-      pushNotification('Time Settings Updated', `Timezone updated to ${timezoneInput}`, 'system');
-    } catch (err: any) {
-      setTimezoneMsg('Failed to save timezone preference.');
-    }
-  };
-
-  // Quote Card Typography, Transitions & Live Preview Staging State (isolated from global app state until 'Done')
-  const draftCardBg = 'default';
-  const [draftTransitionStyle, setDraftTransitionStyle] = useState<'fade' | 'slide' | 'scale'>(() => {
-    try { return (localStorage.getItem('omni_quote_transition_style') as 'fade' | 'slide' | 'scale') || 'fade'; } catch { return 'fade'; }
-  });
-  const [draftFontScale, setDraftFontScale] = useState<number>(() => {
-    try { return Number(localStorage.getItem('omni_quote_font_scale')) || 1; } catch { return 1; }
-  });
-  const [draftFontFamily, setDraftFontFamily] = useState<string>(() => {
-    try { return localStorage.getItem('omni_quote_font_family') || 'sans-serif'; } catch { return 'sans-serif'; }
-  });
-  const [animTrigger, setAnimTrigger] = useState(0);
-  const [cardSettingsMsg, setCardSettingsMsg] = useState('');
-
-  // Sync initial state if updated elsewhere
-  React.useEffect(() => {
-    const handleThemeChange = (e: any) => {
-      if (e.detail) {
-        if (e.detail.fontScale !== undefined) setDraftFontScale(e.detail.fontScale);
-        if (e.detail.fontFamily !== undefined) setDraftFontFamily(e.detail.fontFamily);
-        if (e.detail.transitionStyle !== undefined) setDraftTransitionStyle(e.detail.transitionStyle);
-      }
-    };
-    window.addEventListener('omni_quote_theme_changed', handleThemeChange);
-    return () => window.removeEventListener('omni_quote_theme_changed', handleThemeChange);
-  }, []);
-
-  // Sound, Haptics & Notification Permission State
-  const [masterVolume, setMasterVolume] = useState<number>(() => soundEngine.getVolume());
-  const [selectedTone, setSelectedTone] = useState<AlarmToneType>(() => soundEngine.getTone());
-  const [selectedNotificationSound, setSelectedNotificationSound] = useState<NotificationSoundType>(() => soundEngine.getNotificationSound());
-  const [eventSounds, setEventSounds] = useState<Record<EventSoundCategory, string>>(() => soundEngine.getAllEventSounds());
-  const [notifPopupStyle, setNotifPopupStyle] = useState<NotificationPopupStyle>(() => soundEngine.getNotificationPopupStyle());
-  const [alarmPopupStyle, setAlarmPopupStyle] = useState<AlarmPopupStyle>(() => soundEngine.getAlarmPopupStyle());
-  const [alarmCategoryFilter, setAlarmCategoryFilter] = useState<'all' | 'ticktick' | 'tickit'>('all');
-  const [soundToggles, setSoundToggles] = useState<Record<string, boolean>>(() => soundEngine.getAllSoundToggles());
-  const [hapticsEnabled, setHapticsEnabled] = useState<boolean>(() => haptics.getEnabled());
-  const [notifPermission, setNotifPermission] = useState<string>(() =>
-    typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'default'
-  );
-
-  // Auto-sync quote card styling to localStorage and CSS variables whenever adjusted
-  React.useEffect(() => {
-    try {
-      localStorage.setItem('omni_quote_font_scale', String(draftFontScale));
-      localStorage.setItem('omni_quote_font_family', draftFontFamily);
-      localStorage.setItem('omni_quote_card_bg', draftCardBg);
-      localStorage.setItem('omni_quote_transition_style', draftTransitionStyle);
-
-      if (typeof document !== 'undefined') {
-        document.documentElement.style.setProperty('--quote-font-scale', String(draftFontScale));
-        document.documentElement.style.setProperty('--quote-font-family', draftFontFamily);
-        ColorThemeService.applyTheme(draftCardBg, isDark);
-      }
-    } catch {}
-  }, [draftFontScale, draftFontFamily, draftCardBg, draftTransitionStyle, isDark]);
-
-  const handleApplyCardSettings = () => {
-    try {
-      window.dispatchEvent(new CustomEvent('omni_quote_theme_changed', {
-        detail: {
-          fontScale: draftFontScale,
-          fontFamily: draftFontFamily,
-          cardBg: draftCardBg,
-          transitionStyle: draftTransitionStyle,
-        }
-      }));
-
-      soundEngine.playSuccessChime();
-      try { navigator.vibrate?.(40); } catch {}
-      setCardSettingsMsg('Quote card styles and global CSS variables applied successfully.');
-      setTimeout(() => setCardSettingsMsg(''), 3500);
-      pushNotification('Card Style Applied', 'Global typography scale, font family, and card background updated.', 'system');
+      return localStorage.getItem('omni_timezone') || 'Asia/Kolkata';
     } catch {
-      setCardSettingsMsg('Failed to apply card styling preferences.');
+      return 'Asia/Kolkata';
     }
-  };
+  });
 
-  React.useEffect(() => {
-    setNameInput(userProfile.name);
-    setNicknameInput(userProfile.nickname || '');
-    setEmailInput(userProfile.email || userProfile.identifier || '');
-    setAvatarPhoto(userProfile.avatarPhoto || '');
-    setBioInput(userProfile.bio || '');
-    setDobInput(userProfile.dateOfBirth || '');
-    setGenderInput(userProfile.gender || 'unspecified');
-    setHeightInput(userProfile.heightCm ? String(userProfile.heightCm) : '');
-    setWeightInput(userProfile.weightKg ? String(userProfile.weightKg) : '');
-    setCurrencyInput(((userProfile.preferredCurrency || currency || 'INR') as SupportedCurrency));
-    setTwoFactorActive(userProfile.twoFactorEnabled);
-  }, [userProfile, currency]);
+  const notifPerm =
+    typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'default';
+  const volumePct = Math.round((soundEngine.getVolume?.() ?? 0.8) * 100);
+  const shortTz = timezoneInput.split('/').pop()?.replace(/_/g, ' ') || timezoneInput;
+  const providerLabel =
+    aiProviderInput === 'gemini'
+      ? 'Gemini'
+      : aiProviderInput === 'openai'
+        ? 'OpenAI'
+        : aiProviderInput === 'deepseek'
+          ? 'DeepSeek'
+          : aiProviderInput === 'qwen'
+            ? 'Qwen'
+            : 'Local';
 
-  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (!file.type.startsWith('image/')) {
-      setPhotoError('Please select a valid image file (JPG, PNG, WebP).');
-      return;
-    }
-
-    try {
-      setIsCompressingPhoto(true);
-      setPhotoError('');
-      const compressedResult = await compressProfilePhoto(file);
-      setAvatarPhoto(compressedResult.dataUrl);
-    } catch (err: any) {
-      setPhotoError(err.message || 'Failed to process image');
-    } finally {
-      setIsCompressingPhoto(false);
-      e.target.value = '';
-    }
-  };
-
-  const handleProfileSave = (e: React.FormEvent) => {
-    e.preventDefault();
-    const nowIso = new Date().toISOString();
-    updateUserProfile({
-      name: nameInput.trim() || 'Guest',
-      nickname: nicknameInput.trim(),
-      identifier: emailInput.trim(),
-      email: emailInput.trim(),
-      avatarPhoto,
-      bio: bioInput.trim(),
-      dateOfBirth: dobInput,
-      gender: genderInput,
-      heightCm: heightInput ? Number(heightInput) : undefined,
-      weightKg: weightInput ? Number(weightInput) : undefined,
-      preferredCurrency: currencyInput,
-      twoFactorEnabled: twoFactorActive,
-      updatedAt: nowIso,
-      lastSyncedAt: nowIso,
-    });
-    if (currencyInput && currencyInput !== currency) {
-      setCurrency(currencyInput);
-    }
-    setProfileSavedMsg('Profile saved locally and queued for Multi-Drive Sync.');
-    setTimeout(() => setProfileSavedMsg(''), 3500);
-    pushNotification('Profile Updated', 'Personal profile, photo, metrics, and currency saved.', 'system');
-  };
-
-  const handleGoogleSignInInline = async () => {
-    setProfileAuthError('');
-    clearAuthError();
-    setIsLoggingIn(true);
-    try {
-      await loginWithGoogle();
-    } catch (err: any) {
-      setProfileAuthError(
-        err?.message ||
-          'Google sign-in could not complete in this context. You can use JivanOS Private Vault or any Multi-Drive target without Google login.'
-      );
-    } finally {
-      setIsLoggingIn(false);
-    }
-  };
-
-  const handleCheckPrimaryDrive = async () => {
-    if (joplinSyncSettings.primaryTarget === 'none') {
-      setSyncDiagResult({
-        success: true,
-        message: 'Local-Only mode is active. Select a sync target (such as JivanOS Private Vault, OneDrive, or Google Drive) to verify remote connectivity.',
-      });
-      return;
-    }
-    setIsCheckingDrive(true);
-    setSyncDiagResult(null);
-    try {
-      const res = await checkDriveConfiguration(joplinSyncSettings.primaryTarget);
-      setSyncDiagResult(res);
-    } catch (err: any) {
-      setSyncDiagResult({
-        success: false,
-        message: err?.message || 'Unable to verify drive configuration.',
-      });
-    } finally {
-      setIsCheckingDrive(false);
-    }
-  };
-
-  const handleManualBackup = async () => {
-    setIsSyncingNow(true);
-    setBackupStatusMsg('');
-    try {
-      if (joplinSyncSettings.primaryTarget !== 'none') {
-        const res = await syncDriveNow(joplinSyncSettings.primaryTarget);
-        setSyncDiagResult(res);
-        setBackupStatusMsg(res.message);
-      } else {
-        await triggerManualSync();
-        setBackupStatusMsg('Local vault state verified cleanly.');
-      }
-    } finally {
-      setIsSyncingNow(false);
-      setTimeout(() => setBackupStatusMsg(''), 4500);
-    }
-  };
-
-  const handleSavePassphrase = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (newPassphrase.trim()) {
-      setMasterPassphrase(newPassphrase.trim());
-      setShowPassModal(false);
-      setNewPassphrase('');
-      pushNotification('Security Updated', 'Master encryption passphrase updated.', 'system');
-    }
-  };
-
-  const handleSaveAppLock = (e: React.FormEvent) => {
-    e.preventDefault();
-    configureAppLock({
-      isEnabled: appLockEnabled,
-      type: lockType,
-      passcode: lockPasscode || '1234',
-      requireOnResume,
-    });
-    setSaveLockMsg('App Lock & Biometric settings updated.');
-    setTimeout(() => setSaveLockMsg(''), 3000);
-    pushNotification('Security Guard', 'App lock security configuration updated.', 'system');
-  };
-
-  const settingsSections: {
-    id: SettingsSectionId;
-    category: string;
-    title: string;
-    subtitle: string;
-    icon: React.ReactNode;
-    iconBg: string;
-    fillClass: string;
-    strokeClass: string;
-    shape: PetalExpressiveShape;
-    badge?: string;
-  }[] = [
+  // Compact grouped rows — Personal Profile is ONLY the top card (never duplicated below)
+  const settingsRows: SettingsRowItem[] = [
+    // Group 1: Personalize
     {
       id: 'appearance',
-      category: 'Material 4 / Material You Experience',
-      title: 'Appearance, Themes & Color Styles',
-      subtitle: `${theme === 'dark' ? (amoledBlack ? 'AMOLED Black' : 'Dark Slate') : 'Light'} • ${accentTone.toUpperCase()} • Material You 4-Quadrant Palettes`,
-      icon: <Palette className="w-5 h-5 text-amber-600 dark:text-amber-400" />,
-      iconBg: 'bg-amber-50 dark:bg-amber-950/60 border border-amber-200/80 dark:border-amber-800/80',
-      fillClass: 'text-amber-100/90 dark:text-amber-950/80',
-      strokeClass: 'text-amber-300/80 dark:text-amber-800/80',
+      group: 'personalize',
+      title: 'Display & appearance',
+      rightValue: theme === 'dark' ? 'Dark' : 'Light',
+      keywords: 'theme dark light amoled oled palette color harmony shapes appearance',
+      icon: <Palette className="w-4 h-4 text-white" />,
+      circleBg: 'bg-amber-500',
+      fillClass: 'text-amber-500',
+      strokeClass: 'text-amber-500',
       shape: 'cookie12',
-      badge: 'Material 4',
-    },
-    {
-      id: 'notifications',
-      category: 'Material 4 / Material You Experience',
-      title: 'Notifications & Exact Alarms',
-      subtitle: 'Habit pings, water reminder scheduler & audible alarm chimes',
-      icon: <Bell className="w-5 h-5 text-orange-600 dark:text-orange-400" />,
-      iconBg: 'bg-orange-50 dark:bg-orange-950/60 border border-orange-200/80 dark:border-orange-800/80',
-      fillClass: 'text-orange-100/90 dark:text-orange-950/80',
-      strokeClass: 'text-orange-300/80 dark:text-orange-800/80',
-      shape: 'cookie9',
     },
     {
       id: 'sound',
-      category: 'Material 4 / Material You Experience',
-      title: 'Sound Synthesizer & Haptics',
-      subtitle: 'Micro-tone chimes, completion water-drop audio & haptic testers',
-      icon: <Volume2 className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />,
-      iconBg: 'bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200/80 dark:border-indigo-800/80',
-      fillClass: 'text-indigo-100/90 dark:text-indigo-950/80',
-      strokeClass: 'text-indigo-300/80 dark:text-indigo-800/80',
+      group: 'personalize',
+      title: 'Sound & vibration',
+      rightValue: volumePct === 0 ? 'Muted' : `${volumePct}%`,
+      keywords: 'audio volume mute vibration haptics chimes ringtones tones sound',
+      icon: <Volume2 className="w-4 h-4 text-white" />,
+      circleBg: 'bg-emerald-500',
+      fillClass: 'text-emerald-500',
+      strokeClass: 'text-emerald-500',
       shape: 'clover',
     },
     {
-      id: 'export',
-      category: 'Apps, Cloud & Portability',
-      title: 'Universal Data Export Hub',
-      subtitle: 'Super Productivity, Todoist, Google Tasks, iCal, Obsidian, backups',
-      icon: <Archive className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />,
-      iconBg: 'bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200/80 dark:border-indigo-800/80',
-      fillClass: 'text-indigo-100/90 dark:text-indigo-950/80',
-      strokeClass: 'text-indigo-300/80 dark:text-indigo-800/80',
-      shape: 'scallop',
-      badge: 'Multi-App',
+      id: 'notifications',
+      group: 'personalize',
+      title: 'Notifications & alarms',
+      rightValue: notifPerm === 'granted' ? 'On' : undefined,
+      keywords: 'alarms snooze hydration water banner popup toast permission notifications',
+      icon: <Bell className="w-4 h-4 text-white" />,
+      circleBg: 'bg-blue-500',
+      fillClass: 'text-blue-500',
+      strokeClass: 'text-blue-500',
+      shape: 'cookie9',
     },
+
+    // Group 2: Data & Privacy
     {
-      id: 'sync',
-      category: 'Apps, Cloud & Portability',
-      title: 'Multi-Drive Sync & Auto-Backup',
-      subtitle: `${
-        joplinSyncSettings.primaryTarget !== 'none'
-          ? joplinSyncSettings.drives[joplinSyncSettings.primaryTarget]?.label || joplinSyncSettings.primaryTarget
-          : 'Local-First Vault'
-      } • Interval, E2EE & Backup Mirrors`,
-      icon: <Cloud className="w-5 h-5 text-sky-600 dark:text-sky-400" />,
-      iconBg: 'bg-sky-50 dark:bg-sky-950/60 border border-sky-200/80 dark:border-sky-800/80',
-      fillClass: 'text-sky-100/90 dark:text-sky-950/80',
-      strokeClass: 'text-sky-300/80 dark:text-sky-800/80',
-      shape: 'clover',
-    },
-    {
-      id: 'profile',
-      category: 'Personal & Security',
-      title: 'Personal Profile & Account',
-      subtitle: `${userProfile.nickname || userProfile.name || 'Local User'} • Photo, DOB, metrics, currency & optional login`,
-      icon: <User className="w-5 h-5 text-purple-600 dark:text-purple-400" />,
-      iconBg: 'bg-purple-50 dark:bg-purple-950/60 border border-purple-200/80 dark:border-purple-800/80',
-      fillClass: 'text-purple-100/90 dark:text-purple-950/80',
-      strokeClass: 'text-purple-300/80 dark:text-purple-800/80',
+      id: 'backup_sync',
+      group: 'data',
+      title: 'Backup & sync',
+      rightValue: realSyncOverview.hasAnyConnected
+        ? `${realSyncOverview.connectedCount} connected`
+        : 'Not connected',
+      keywords: 'cloud google drive dropbox telegram webdav nextcloud s3 export restore snapshot',
+      icon: <Cloud className="w-4 h-4 text-white" />,
+      circleBg: 'bg-sky-500',
+      fillClass: 'text-sky-500',
+      strokeClass: 'text-sky-500',
       shape: 'cookie12',
     },
     {
       id: 'security',
-      category: 'Personal & Security',
-      title: 'Security, App Lock & Vault',
-      subtitle: `${appLock.isEnabled ? 'App Lock Protected (PIN)' : 'Not configured'} • Vault master key & AES encryption`,
-      icon: <ShieldCheck className="w-5 h-5 text-rose-600 dark:text-rose-400" />,
-      iconBg: 'bg-rose-50 dark:bg-rose-950/60 border border-rose-200/80 dark:border-rose-800/80',
-      fillClass: 'text-rose-100/90 dark:text-rose-950/80',
-      strokeClass: 'text-rose-300/80 dark:text-rose-800/80',
+      group: 'data',
+      title: 'Security & privacy',
+      rightValue: appLock.isEnabled ? 'Locked' : 'Off',
+      keywords: 'lock pin passcode fingerprint biometric aes encryption passphrase vault security',
+      icon: <ShieldCheck className="w-4 h-4 text-white" />,
+      circleBg: 'bg-indigo-600',
+      fillClass: 'text-indigo-600',
+      strokeClass: 'text-indigo-600',
       shape: 'scallop',
-      badge: appLock.isEnabled ? 'Active' : undefined,
     },
+
+    // Group 3: Preferences
     {
       id: 'ai',
-      category: 'Intelligence & System',
-      title: 'AI Engine & Intelligence Providers',
-      subtitle: `${aiProviderInput.toUpperCase()} (${selectedAiModelInput}) • Custom API endpoints & keys`,
-      icon: <Sparkles className="w-5 h-5 text-fuchsia-600 dark:text-fuchsia-400" />,
-      iconBg: 'bg-fuchsia-50 dark:bg-fuchsia-950/60 border border-fuchsia-200/80 dark:border-fuchsia-800/80',
-      fillClass: 'text-fuchsia-100/90 dark:text-fuchsia-950/80',
-      strokeClass: 'text-fuchsia-300/80 dark:text-fuchsia-800/80',
+      group: 'preferences',
+      title: 'Jivan AI',
+      rightValue: providerLabel,
+      keywords: 'gemini openai deepseek qwen ollama local model api key ai assistant',
+      icon: <Sparkles className="w-4 h-4 text-white" />,
+      circleBg: 'bg-violet-500',
+      fillClass: 'text-violet-500',
+      strokeClass: 'text-violet-500',
       shape: 'cookie9',
     },
     {
       id: 'system',
-      category: 'Intelligence & System',
-      title: 'System, Timezone & Storage',
-      subtitle: `Timezone: ${timezoneInput} • Cache status, local database & data reset`,
-      icon: <HardDrive className="w-5 h-5 text-slate-600 dark:text-slate-400" />,
-      iconBg: 'bg-slate-100 dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80',
-      fillClass: 'text-slate-200/90 dark:text-zinc-800/90',
-      strokeClass: 'text-slate-300 dark:text-zinc-700',
+      group: 'preferences',
+      title: 'Regional & schedule',
+      rightValue: shortTz,
+      keywords: 'timezone clock time schedule timeline hours regional system',
+      icon: <Globe className="w-4 h-4 text-white" />,
+      circleBg: 'bg-slate-600 dark:bg-zinc-600',
+      fillClass: 'text-slate-600 dark:text-zinc-600',
+      strokeClass: 'text-slate-600 dark:text-zinc-600',
       shape: 'cookie12',
     },
   ];
 
-  const filteredSections = settingsSections.filter(s => {
+  const searchableRows: SettingsRowItem[] = [
+    {
+      id: 'profile',
+      group: 'personalize',
+      title: 'Personal profile',
+      rightValue: userProfile.preferredCurrency || 'INR',
+      keywords: 'profile account name nickname email avatar photo dob gender currency bio',
+      icon: <User className="w-4 h-4 text-white" />,
+      circleBg: 'bg-orange-500',
+      fillClass: 'text-orange-500',
+      strokeClass: 'text-orange-500',
+      shape: 'cookie9',
+    },
+    ...settingsRows,
+  ];
+
+  const filteredRows = searchableRows.filter((item) => {
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
-    return s.title.toLowerCase().includes(q) || s.subtitle.toLowerCase().includes(q) || s.category.toLowerCase().includes(q);
+    return (
+      item.title.toLowerCase().includes(q) ||
+      (item.rightValue || '').toLowerCase().includes(q) ||
+      item.keywords.toLowerCase().includes(q)
+    );
   });
 
-  const categories = Array.from(new Set(settingsSections.map(s => s.category)));
-  const currentSectionConfig = settingsSections.find(s => s.id === activeSection);
+  const currentSectionConfig = settingsRows.find((s) => s.id === activeSection);
+  const displayName =
+    userProfile.nickname && userProfile.nickname !== 'User'
+      ? userProfile.nickname
+      : userProfile.name && userProfile.name !== 'Guest'
+        ? userProfile.name
+        : 'Personal Profile';
+
+  const renderIcon = (item: SettingsRowItem) => {
+    if (expressiveShapes) {
+      return (
+        <PetalShapeBadge
+          shape={item.shape}
+          fillClass={item.fillClass}
+          strokeClass={item.strokeClass}
+          sizeClass="w-8 h-8"
+        >
+          {item.icon}
+        </PetalShapeBadge>
+      );
+    }
+    return (
+      <span
+        className={`w-8 h-8 rounded-full ${item.circleBg} flex items-center justify-center shrink-0`}
+      >
+        {item.icon}
+      </span>
+    );
+  };
+
+  const renderGroupCard = (items: SettingsRowItem[]) => (
+    <div className="rounded-[22px] bg-white dark:bg-zinc-900 border border-[#E5E7EB]/80 dark:border-zinc-800/90 overflow-hidden">
+      {items.map((item, idx) => (
+        <div key={item.id} className="relative">
+          {idx > 0 && (
+            <div className="ml-[56px] mr-4 border-t border-slate-100 dark:border-zinc-800/80" />
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              setActiveSection(item.id);
+              setSearchQuery('');
+            }}
+            className="w-full min-h-[54px] px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-zinc-800/60 active:bg-slate-100/80 dark:active:bg-zinc-800 transition flex items-center justify-between gap-3 text-left cursor-pointer group"
+          >
+            <div className="flex items-center gap-3 min-w-0 flex-1">
+              {renderIcon(item)}
+              <span className="text-[15px] font-medium text-slate-900 dark:text-zinc-100 truncate">
+                {item.title}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              {item.rightValue && (
+                <span className="text-[13px] text-slate-400 dark:text-zinc-500 tabular-nums whitespace-nowrap">
+                  {item.rightValue}
+                </span>
+              )}
+              <ChevronRight className="w-4 h-4 text-slate-300 dark:text-zinc-600 group-hover:text-slate-500 dark:group-hover:text-zinc-400 transition shrink-0" />
+            </div>
+          </button>
+        </div>
+      ))}
+    </div>
+  );
 
   return (
-    <div className="space-y-4 w-full min-w-0 max-w-4xl mx-auto pb-6 overflow-x-hidden">
-      {/* If no section is selected, render Petal v4.4 Material Expressive Settings Hub */}
+    <div className="w-full min-w-0 max-w-3xl mx-auto pb-8 overflow-x-hidden">
       {activeSection === null ? (
-        <div className="space-y-3.5 w-full min-w-0 max-w-3xl mx-auto animate-view-enter">
-          {/* Petal Expressive Settings Header with Material Gear Badge */}
-          <div className="pt-0.5 pb-0.5 flex items-center justify-between gap-2 w-full min-w-0">
-            <div className="flex items-center gap-2.5 min-w-0 flex-1">
-              <PetalShapeBadge
-                shape={expressiveShapes ? 'cookie12' : 'squircle'}
-                fillClass="text-indigo-100 dark:text-indigo-950/90"
-                strokeClass="text-indigo-300/80 dark:text-indigo-800/80"
-                sizeClass="w-9 h-9"
-              >
-                <Settings className="w-4.5 h-4.5 text-indigo-600 dark:text-indigo-400" />
-              </PetalShapeBadge>
-              <div className="min-w-0 flex-1">
-                <h1 className="text-lg sm:text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight leading-none truncate">
-                  Settings
-                </h1>
-                <p className="text-[11px] text-slate-500 dark:text-zinc-400 mt-0.5 truncate">
-                  Material 3 Expressive, Cloud Sync &amp; Security
-                </p>
-              </div>
-            </div>
+        <div className="px-3.5 sm:px-5 pt-2 pb-4 space-y-3.5 w-full min-w-0 animate-view-enter">
+          {/* Clean Phone-Style Settings Title */}
+          <header className="px-1 pt-1">
+            <h1 className="text-[28px] font-semibold text-slate-900 dark:text-white tracking-tight leading-tight">
+              Settings
+            </h1>
+          </header>
 
-            {/* Quick Light / Dark Pill */}
-            <div className="flex items-center gap-0.5 p-0.5 rounded-full bg-slate-200/80 dark:bg-zinc-900 border border-slate-300/60 dark:border-zinc-800 shrink-0">
-              <button
-                type="button"
-                onClick={() => {
-                  if (theme !== 'light') {
-                    setTheme('light');
-                    showAndroidToast('Light mode');
-                  }
-                }}
-                className={`px-2 py-1 rounded-full text-[10.5px] font-bold flex items-center gap-1 transition cursor-pointer ${
-                  theme === 'light'
-                    ? 'bg-white text-slate-900 shadow-2xs'
-                    : 'text-slate-500 dark:text-zinc-400 hover:text-slate-800'
-                }`}
-              >
-                <Sun className="w-3.5 h-3.5 text-amber-500" />
-                <span className="hidden sm:inline">Light</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (theme !== 'dark') {
-                    setTheme('dark');
-                    showAndroidToast('Dark mode');
-                  }
-                }}
-                className={`px-2 py-1 rounded-full text-[10.5px] font-bold flex items-center gap-1 transition cursor-pointer ${
-                  theme === 'dark'
-                    ? 'bg-indigo-600 text-white shadow-2xs'
-                    : 'text-slate-500 dark:text-zinc-400 hover:text-white'
-                }`}
-              >
-                <Moon className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Dark</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Petal Search Bar */}
+          {/* Compact Soft Pill Search Bar */}
           <div className="relative w-full min-w-0">
-            <Search className="w-3.5 h-3.5 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
             <input
               type="text"
               value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              placeholder="Search settings (theme, palette, export, backup)..."
-              className="w-full pl-9 pr-8 py-2 rounded-[18px] bg-white dark:bg-zinc-900 border border-slate-200/90 dark:border-zinc-800 focus:border-indigo-500 text-xs font-medium text-slate-800 dark:text-zinc-200 placeholder-slate-400 transition outline-hidden shadow-2xs"
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search"
+              aria-label="Search settings"
+              className="w-full h-10 pl-10 pr-9 rounded-full bg-slate-200/75 dark:bg-zinc-800/80 focus:bg-white dark:focus:bg-zinc-900 border border-transparent focus:border-[#4F46E5]/50 text-sm text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500 transition outline-hidden"
             />
             {searchQuery && (
               <button
                 type="button"
                 onClick={() => setSearchQuery('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 cursor-pointer"
+                aria-label="Clear search"
+                className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200 flex items-center justify-center cursor-pointer"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
 
-          {/* Petal Status Hero + Instant Material You 4-Quadrant Palette Bar */}
-          {!searchQuery && (
-            <div className="space-y-[3px] w-full min-w-0">
-              {/* Top Card: User Profile & Sync Status */}
-              <div
+          {searchQuery ? (
+            filteredRows.length === 0 ? (
+              <div className="p-8 text-center text-sm text-slate-500 dark:text-zinc-400 bg-white dark:bg-zinc-900 rounded-[22px] border border-[#E5E7EB]/80 dark:border-zinc-800">
+                No settings matching &ldquo;{searchQuery}&rdquo;
+              </div>
+            ) : (
+              renderGroupCard(filteredRows)
+            )
+          ) : (
+            <div className="space-y-3 w-full min-w-0">
+              {/* Single Compact Account / Profile Card (Never duplicated in list) */}
+              <button
+                type="button"
                 onClick={() => setActiveSection('profile')}
-                className="rounded-[20px] p-3 sm:p-4 bg-white dark:bg-zinc-900 border border-slate-200/90 dark:border-zinc-800/90 shadow-2xs hover:bg-slate-50/70 dark:hover:bg-zinc-800/60 transition flex items-center justify-between gap-3 cursor-pointer group active:scale-[0.99] w-full min-w-0"
+                className="w-full rounded-[22px] px-4 py-3 bg-white dark:bg-zinc-900 border border-[#E5E7EB]/80 dark:border-zinc-800/90 hover:bg-slate-50 dark:hover:bg-zinc-800/60 active:bg-slate-100/80 dark:active:bg-zinc-800 transition flex items-center justify-between gap-3 text-left cursor-pointer group"
               >
                 <div className="flex items-center gap-3 min-w-0 flex-1">
-                  {avatarPhoto ? (
+                  {userProfile.avatarPhoto ? (
                     <img
-                      src={avatarPhoto}
-                      alt={userProfile.name || 'User'}
-                      className="w-11 h-11 rounded-2xl object-cover ring-2 ring-indigo-500/30 shrink-0"
+                      src={userProfile.avatarPhoto}
+                      alt={displayName}
+                      referrerPolicy="no-referrer"
+                      className="w-11 h-11 rounded-full object-cover border border-slate-200 dark:border-zinc-700 shrink-0"
                     />
                   ) : (
-                    <PetalShapeBadge
-                      shape={expressiveShapes ? 'cookie9' : 'squircle'}
-                      fillClass="text-indigo-600 dark:text-indigo-500"
-                      strokeClass="text-indigo-400/40"
-                      sizeClass="w-11 h-11"
-                    >
-                      <span className="text-white font-extrabold text-sm">
-                        {(userProfile.nickname || userProfile.name || 'J').charAt(0).toUpperCase()}
-                      </span>
-                    </PetalShapeBadge>
+                    <span className="w-11 h-11 rounded-full bg-indigo-100 dark:bg-indigo-950 text-[#4F46E5] dark:text-indigo-300 font-semibold text-base flex items-center justify-center shrink-0">
+                      {(userProfile.nickname || userProfile.name || 'J').charAt(0).toUpperCase()}
+                    </span>
                   )}
+
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="text-sm font-bold text-slate-900 dark:text-white truncate group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition">
-                        {userProfile.nickname || userProfile.name || 'Local User'}
-                      </h3>
-                      <span className="text-[11px] font-medium text-slate-500 dark:text-zinc-400 whitespace-nowrap">
-                        · {firebaseUser
-                          ? 'Cloud Synced'
-                          : joplinSyncSettings.primaryTarget !== 'none'
-                          ? 'Multi-Drive Sync Active'
-                          : 'Local-First Vault'}
-                      </span>
+                    <div className="text-[16px] font-semibold text-slate-900 dark:text-white leading-tight truncate">
+                      {displayName}
                     </div>
                     <p className="text-xs text-slate-500 dark:text-zinc-400 truncate mt-0.5">
-                      {userProfile.email ||
-                        firebaseUser?.email ||
-                        (joplinSyncSettings.primaryTarget !== 'none'
-                          ? `Primary: ${joplinSyncSettings.drives[joplinSyncSettings.primaryTarget]?.label || joplinSyncSettings.primaryTarget} · Auto-backup ready`
-                          : '100% private on device · Tap to edit profile or connect Multi-Drive Sync')}
+                      {userProfile.email || firebaseUser?.email || 'Manage profile, currency & account'}
                     </p>
                   </div>
                 </div>
-                <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-indigo-500 group-hover:translate-x-0.5 transition shrink-0" />
-              </div>
-            </div>
-          )}
+                <ChevronRight className="w-4 h-4 text-slate-300 dark:text-zinc-600 group-hover:text-slate-500 transition shrink-0" />
+              </button>
 
-          {/* Categorized Petal Grouped Containment Cards */}
-          {searchQuery ? (
-            <div className="space-y-2">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 px-3 block">
-                Search Results ({filteredSections.length})
-              </span>
-              {filteredSections.length === 0 ? (
-                <div className="p-8 text-center text-xs text-slate-400 bg-white dark:bg-zinc-900 rounded-[24px] border border-slate-200 dark:border-zinc-800">
-                  No settings found matching &quot;{searchQuery}&quot;
-                </div>
-              ) : (
-                <div className="space-y-[3px]">
-                  {filteredSections.map((item, idx) => {
-                    const radiusClass = getPetalGroupRadiusClass(idx, filteredSections.length);
-                    return (
-                      <div
-                        key={item.id}
-                        onClick={() => {
-                          setActiveSection(item.id);
-                          setSearchQuery('');
-                        }}
-                        className={`${radiusClass} bg-white dark:bg-zinc-900 border border-slate-200/90 dark:border-zinc-800/90 p-3.5 sm:p-4 hover:bg-slate-50/90 dark:hover:bg-zinc-800/60 active:scale-[0.985] transition flex items-center justify-between gap-3 cursor-pointer group shadow-2xs`}
-                      >
-                        <div className="flex items-center gap-3.5 min-w-0">
-                          <PetalShapeBadge
-                            shape={expressiveShapes ? item.shape : 'squircle'}
-                            fillClass={item.fillClass}
-                            strokeClass={item.strokeClass}
-                            sizeClass="w-10 h-10"
-                          >
-                            {item.icon}
-                          </PetalShapeBadge>
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition truncate">
-                                {item.title}
-                              </span>
-                              {item.badge && (
-                                <span className="px-1.5 py-0.5 rounded-md text-[9.5px] font-bold bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-300">
-                                  {item.badge}
-                                </span>
-                              )}
-                            </div>
-                            <p className="text-[11px] sm:text-xs text-slate-500 dark:text-zinc-400 truncate mt-0.5">
-                              {item.subtitle}
-                            </p>
-                          </div>
-                        </div>
-                        <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-indigo-500 group-hover:translate-x-0.5 transition shrink-0" />
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="space-y-3.5 w-full min-w-0">
-              {categories.map(cat => {
-                const items = settingsSections.filter(s => s.category === cat);
-                return (
-                  <div key={cat} className="space-y-1 w-full min-w-0">
-                    <span className="text-[10.5px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 px-2.5 block">
-                      {cat}
+              {/* Group 1: Display, Sound, Notifications */}
+              {renderGroupCard(settingsRows.filter((r) => r.group === 'personalize'))}
+
+              {/* Group 2: Backup & Sync, Security & Privacy */}
+              {renderGroupCard(settingsRows.filter((r) => r.group === 'data'))}
+
+              {/* Group 3: AI, Regional & Schedule */}
+              {renderGroupCard(settingsRows.filter((r) => r.group === 'preferences'))}
+
+              {/* Desktop-Only Auto-Launch Toggle (Tauri v2 Windows/Linux) */}
+              {desktopRuntime && (
+                <div className="w-full min-h-[54px] rounded-[22px] px-4 py-2.5 bg-white dark:bg-zinc-900 border border-[#E5E7EB]/80 dark:border-zinc-800/90 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <span className="w-8 h-8 rounded-full bg-indigo-500 text-white flex items-center justify-center shrink-0">
+                      <Monitor className="w-4 h-4" />
                     </span>
-                    <div className="space-y-[3px] w-full min-w-0">
-                      {items.map((item, idx) => {
-                        const radiusClass = getPetalGroupRadiusClass(idx, items.length);
-                        return (
-                          <div
-                            key={item.id}
-                            onClick={() => setActiveSection(item.id)}
-                            className={`${radiusClass} bg-white dark:bg-zinc-900 border border-slate-200/90 dark:border-zinc-800/90 p-2.5 sm:p-3.5 hover:bg-slate-50/90 dark:hover:bg-zinc-800/60 active:scale-[0.985] transition flex items-center justify-between gap-2.5 cursor-pointer group shadow-2xs select-none w-full min-w-0`}
-                          >
-                            <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                              <PetalShapeBadge
-                                shape={expressiveShapes ? item.shape : 'squircle'}
-                                fillClass={item.fillClass}
-                                strokeClass={item.strokeClass}
-                                sizeClass="w-9 h-9"
-                              >
-                                {item.icon}
-                              </PetalShapeBadge>
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-1.5 min-w-0">
-                                  <span className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition truncate">
-                                    {item.title}
-                                  </span>
-                                  {item.badge && (
-                                    <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/60 shrink-0">
-                                      {item.badge}
-                                    </span>
-                                  )}
-                                </div>
-                                <p className="text-[10.5px] sm:text-xs text-slate-500 dark:text-zinc-400 truncate mt-0.5">
-                                  {item.subtitle}
-                                </p>
-                              </div>
-                            </div>
-                            <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-indigo-500 group-hover:translate-x-0.5 transition shrink-0" />
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
-
-              {/* About & Open Source Card */}
-              <div className="space-y-1 w-full min-w-0 pt-1">
-                <span className="text-[10.5px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 px-2.5 block">
-                  About &amp; Open Source
-                </span>
-                <div className="rounded-[22px] bg-white dark:bg-zinc-900 border border-slate-200/90 dark:border-zinc-800/90 p-3.5 sm:p-4 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <JivanLogoMark withFrame className="w-10 h-10 shrink-0 shadow-xs" />
                     <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">
-                          JivanOS Open-Source Project
-                        </h3>
-                        <span className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 tabular-nums">
-                          v{APP_VERSION} · Local-First
-                        </span>
+                      <div className="text-[15px] font-medium text-slate-900 dark:text-zinc-100 truncate">
+                        Launch on startup
                       </div>
-                      <p className="text-[11px] text-slate-500 dark:text-zinc-400 mt-0.5">
-                        Cross-platform life system with deterministic signed Android APK releases &amp; Multi-Drive Sync
-                      </p>
+                      <div className="text-[11.5px] text-slate-500 dark:text-zinc-400 truncate">
+                        Start JivanOS automatically when you sign in
+                      </div>
                     </div>
                   </div>
-
-                  <div className="flex items-center gap-2 shrink-0 flex-wrap">
-                    <a
-                      href={APP_GITHUB_REPO}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-700 text-slate-800 dark:text-zinc-200 text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
-                    >
-                      <span>GitHub Repo</span>
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
-                    <a
-                      href={APP_GITHUB_RELEASES_URL}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold shadow-2xs transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
-                    >
-                      <Download className="w-3 h-3" />
-                      <span>Latest Android APK</span>
-                    </a>
-                  </div>
+                  <M3Switch
+                    id="toggle-desktop-autostart"
+                    checked={autoLaunchEnabled}
+                    onChange={(next) => {
+                      void handleToggleAutoLaunch(next);
+                    }}
+                    disabled={isUpdatingAutoLaunch}
+                  />
                 </div>
-              </div>
+              )}
+
+              {/* Compact About Card */}
+              <a
+                href={APP_GITHUB_REPO}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full min-h-[54px] rounded-[22px] px-4 py-2.5 bg-white dark:bg-zinc-900 border border-[#E5E7EB]/80 dark:border-zinc-800/90 hover:bg-slate-50 dark:hover:bg-zinc-800/60 transition flex items-center justify-between gap-3 group"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <JivanLogoMark withFrame className="w-8 h-8 shrink-0" />
+                  <span className="text-[15px] font-medium text-slate-900 dark:text-zinc-100 truncate">
+                    About JivanOS
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0 text-[13px] text-slate-400 dark:text-zinc-500 tabular-nums">
+                  <span>v{APP_VERSION}</span>
+                  <ExternalLink className="w-3.5 h-3.5 text-slate-300 dark:text-zinc-600 group-hover:text-slate-500 transition" />
+                </div>
+              </a>
             </div>
           )}
         </div>
+      ) : activeSection === 'backup_sync' ? (
+        <BackupSyncScreen onBack={() => setActiveSection(null)} />
+      ) : activeSection === 'profile' ? (
+        <PersonalProfileScreen
+          onBack={() => setActiveSection(null)}
+          onManageSync={() => setActiveSection('backup_sync')}
+        />
       ) : (
-        /* Dedicated Subpage Page View */
-        <div className="space-y-4 w-full min-w-0 max-w-full overflow-x-hidden animate-view-enter">
-          {/* Subpage Header with Back Button & Expressive Shape Badge */}
-          <div className="flex items-center justify-between pb-2.5 border-b border-slate-200/80 dark:border-zinc-800 gap-2 w-full min-w-0">
-            <div className="flex items-center gap-2 min-w-0 flex-1">
-              <button
-                type="button"
-                onClick={() => setActiveSection(null)}
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-200 text-[11px] font-bold transition cursor-pointer shadow-2xs shrink-0 active:scale-95"
-                title="Return to Settings Overview"
-              >
-                <ArrowLeft className="w-3.5 h-3.5 stroke-[2.5]" />
-                <span>Settings</span>
-              </button>
+        <div className="px-3.5 sm:px-5 pt-1 pb-8 space-y-4 w-full min-w-0 animate-view-enter">
+          <SettingsSubpageHeader
+            title={currentSectionConfig?.title || 'Settings'}
+            onBack={() => setActiveSection(null)}
+          />
 
-              <div className="flex items-center gap-2 min-w-0 flex-1">
-                <PetalShapeBadge
-                  shape={expressiveShapes && currentSectionConfig ? currentSectionConfig.shape : 'squircle'}
-                  fillClass={currentSectionConfig?.fillClass}
-                  strokeClass={currentSectionConfig?.strokeClass}
-                  sizeClass="w-8 h-8"
-                >
-                  {currentSectionConfig?.icon}
-                </PetalShapeBadge>
-                <div className="min-w-0 flex-1">
-                  <h2 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white leading-tight truncate">
-                    {currentSectionConfig?.title}
-                  </h2>
-                  <span className="text-[10.5px] text-slate-500 dark:text-zinc-400 block truncate">
-                    {currentSectionConfig?.category}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setActiveSection(null)}
-              className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer hidden sm:inline shrink-0"
-            >
-              All Settings
-            </button>
-          </div>
-
-          {activeSection === 'export' && (
-            <UniversalExportHub />
-          )}
-
-          {activeSection === 'sync' && (
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-6 shadow-xs w-full min-w-0 space-y-5">
-              {/* Header */}
-              <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
-                <div className="flex items-center gap-3 min-w-0 flex-1">
-                  <div className="w-9 h-9 rounded-xl bg-sky-100 dark:bg-sky-950 text-sky-600 dark:text-sky-400 flex items-center justify-center shrink-0">
-                    <FolderSync className="w-4.5 h-4.5" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <h3 className="text-sm font-bold text-slate-900 dark:text-white truncate">
-                      Multi-Drive Synchronization &amp; Auto-Backup
-                    </h3>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                      Local-first storage with automatic background sync and multi-drive mirroring
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 shrink-0 flex-wrap">
-                  <button
-                    type="button"
-                    onClick={handleCheckPrimaryDrive}
-                    disabled={isCheckingDrive}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold transition cursor-pointer disabled:opacity-50 whitespace-nowrap"
-                  >
-                    <ShieldCheck className={`w-3.5 h-3.5 text-emerald-500 ${isCheckingDrive ? 'animate-pulse' : ''}`} />
-                    <span>{isCheckingDrive ? 'Checking...' : 'Check Configuration'}</span>
-                  </button>
-                  <button
-                    id="btn-trigger-cloud-sync"
-                    type="button"
-                    onClick={handleManualBackup}
-                    disabled={isSyncingNow || syncState.status === 'syncing' || syncStatus === 'syncing'}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-semibold shadow-xs transition cursor-pointer whitespace-nowrap"
-                  >
-                    <RefreshCw
-                      className={`w-3.5 h-3.5 ${
-                        isSyncingNow || syncState.status === 'syncing' || syncStatus === 'syncing' ? 'animate-spin' : ''
-                      }`}
-                    />
-                    <span>Sync Now</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Primary Target + Auto-Sync Interval Selectors */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                <div>
-                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                    Primary Sync Target
-                  </label>
-                  <select
-                    value={joplinSyncSettings.primaryTarget}
-                    onChange={(e) => {
-                      const target = e.target.value as SyncDriveId | 'none';
-                      updateJoplinSyncSettings({ primaryTarget: target });
-                      setSyncDiagResult(null);
-                    }}
-                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-semibold cursor-pointer"
-                  >
-                    <option value="none">Local Device Only (No Remote Sync)</option>
-                    <option value="jivanos_vault">JivanOS Private Vault (Zero-Login Key + PIN)</option>
-                    <option value="local_folder">Local / Syncthing Folder</option>
-                    <option value="onedrive">Microsoft OneDrive</option>
-                    <option value="gdrive">Google Drive (App Data Folder)</option>
-                    <option value="dropbox">Dropbox</option>
-                    <option value="nextcloud">Nextcloud (WebDAV)</option>
-                    <option value="webdav">WebDAV / Koofr / Home NAS</option>
-                    <option value="s3">S3 / Cloudflare R2 / MinIO / Backblaze B2</option>
-                    <option value="firebase">JivanOS Cloud (Google Account / Firebase)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                    Automatic Background Sync Interval
-                  </label>
-                  <select
-                    value={joplinSyncSettings.autoSyncIntervalMinutes}
-                    onChange={(e) =>
-                      updateJoplinSyncSettings({
-                        autoSyncIntervalMinutes: Number(e.target.value) as 0 | 5 | 15 | 30 | 60,
-                      })
-                    }
-                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-semibold cursor-pointer"
-                  >
-                    <option value={0}>Manual / On-Change Only</option>
-                    <option value={5}>Every 5 minutes (Recommended)</option>
-                    <option value={15}>Every 15 minutes</option>
-                    <option value={30}>Every 30 minutes</option>
-                    <option value={60}>Every 60 minutes</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Clean Status Strip */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200/80 dark:border-slate-700/80">
-                  <span className="text-slate-500 dark:text-slate-400 font-medium">Connection State</span>
-                  <div className="mt-1 font-bold text-slate-900 dark:text-white capitalize flex items-center gap-1.5">
-                    <span>
-                      {syncStatus === 'syncing' || isSyncingNow
-                        ? 'Syncing...'
-                        : syncStatus === 'error'
-                        ? 'Needs Attention'
-                        : joplinSyncSettings.primaryTarget === 'none'
-                        ? 'Local-First Ready'
-                        : 'Synced'}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200/80 dark:border-slate-700/80">
-                  <span className="text-slate-500 dark:text-slate-400 font-medium">Last Successful Sync</span>
-                  <div className="mt-1 font-mono tabular-nums font-bold text-slate-900 dark:text-white">
-                    {lastSyncTime || syncState.lastSyncTime
-                      ? new Date(lastSyncTime || syncState.lastSyncTime).toLocaleTimeString([], {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                          second: '2-digit',
-                        })
-                      : 'Not yet synced'}
-                  </div>
-                </div>
-
-                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200/80 dark:border-slate-700/80">
-                  <span className="text-slate-500 dark:text-slate-400 font-medium">Active Auto-Backup Mirrors</span>
-                  <div className="mt-1 font-mono tabular-nums font-bold text-slate-900 dark:text-white">
-                    {
-                      Object.values(joplinSyncSettings.drives).filter(
-                        (d) => d.autoBackupEnabled || d.enabled
-                      ).length
-                    }{' '}
-                    drive(s)
-                  </div>
-                </div>
-              </div>
-
-              {/* Clean Toggles */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="font-bold text-slate-900 dark:text-white">Auto-Sync on Edit</div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                      Debounced background upload whenever tasks, habits, or profile change
-                    </p>
-                  </div>
-                  <M3Switch
-                    checked={joplinSyncSettings.syncOnChange}
-                    onChange={(val) => updateJoplinSyncSettings({ syncOnChange: val })}
-                  />
-                </div>
-
-                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="font-bold text-slate-900 dark:text-white">Sync on App Launch</div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                      Automatically pull newer updates from your primary drive at startup
-                    </p>
-                  </div>
-                  <M3Switch
-                    checked={joplinSyncSettings.syncOnStartup}
-                    onChange={(val) => updateJoplinSyncSettings({ syncOnStartup: val })}
-                  />
-                </div>
-
-                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="font-bold text-slate-900 dark:text-white">Sync Personal Profile Details</div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                      Include avatar photo, DOB, name, metrics &amp; currency in snapshots
-                    </p>
-                  </div>
-                  <M3Switch
-                    checked={joplinSyncSettings.syncPersonalDetails}
-                    onChange={(val) => updateJoplinSyncSettings({ syncPersonalDetails: val })}
-                  />
-                </div>
-
-                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="font-bold text-slate-900 dark:text-white">End-to-End Encryption (AES-256)</div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                      Encrypt payloads client-side before sending to remote drives
-                    </p>
-                  </div>
-                  <M3Switch
-                    checked={joplinSyncSettings.e2eeEnabled}
-                    onChange={(val) => updateJoplinSyncSettings({ e2eeEnabled: val })}
-                  />
-                </div>
-              </div>
-
-              {joplinSyncSettings.e2eeEnabled && (
-                <div className="p-3.5 rounded-xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-800/60 space-y-2 text-xs">
-                  <label className="block font-bold text-amber-900 dark:text-amber-200">
-                    Client-Side E2EE Sync Passphrase
-                  </label>
-                  <input
-                    type="password"
-                    value={joplinSyncSettings.e2eePassphrase || ''}
-                    onChange={(e) => updateJoplinSyncSettings({ e2eePassphrase: e.target.value })}
-                    placeholder="Enter a shared passphrase across your devices..."
-                    className="w-full px-3 py-2 rounded-xl border border-amber-200 dark:border-amber-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono text-xs"
-                  />
-                </div>
-              )}
-
-              {/* Diagnostic / Sync Feedback */}
-              {(syncDiagResult || backupStatusMsg) && (
-                <div
-                  className={`p-3 rounded-xl text-xs flex items-start gap-2.5 border ${
-                    syncDiagResult && !syncDiagResult.success
-                      ? 'bg-rose-50 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800'
-                      : 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
-                  }`}
-                >
-                  {syncDiagResult && !syncDiagResult.success ? (
-                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                  ) : (
-                    <Check className="w-4 h-4 shrink-0 mt-0.5" />
-                  )}
-                  <span>{syncDiagResult?.message || backupStatusMsg}</span>
-                </div>
-              )}
-
-              {/* Actions Footer */}
-              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => setIsBackupModalOpen(true)}
-                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold transition flex items-center gap-2 cursor-pointer shadow-2xs whitespace-nowrap"
-                >
-                  <Server className="w-3.5 h-3.5" />
-                  <span>Configure Drives, Pairing Key &amp; Backups</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    downloadLocalBackupFile();
-                    setBackupStatusMsg('Local JSON snapshot exported to your downloads folder.');
-                    setTimeout(() => setBackupStatusMsg(''), 3500);
-                  }}
-                  className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold transition flex items-center gap-2 cursor-pointer whitespace-nowrap"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Export Local JSON</span>
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Alarms, Notifications & Hydration Reminders Section */}
-          {activeSection === 'notifications' && (
-            <div className="space-y-4 w-full min-w-0 overflow-hidden">
-              {/* Card 1: Exact Alarms & Audio Chimes Modal Launcher */}
-              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-5 shadow-xs space-y-4 w-full min-w-0 overflow-hidden">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                    <div className="w-9 h-9 rounded-xl bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
-                      <Bell className="w-4.5 h-4.5" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <h3 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">
-                        Alarms, Notifications &amp; Audio Chimes
-                      </h3>
-                      <p className="text-[11px] text-slate-400">
-                        Configure exact-time reminders, snooze intervals, and alarm stack behavior
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsNotifSettingsOpen(true)}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs transition shrink-0 cursor-pointer"
-                  >
-                    <Bell className="w-3.5 h-3.5" />
-                    <span>Open Alarm Studio</span>
-                  </button>
-                </div>
-
-                {/* Browser Push Permission Row */}
-                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 flex flex-wrap items-center justify-between gap-2.5">
-                  <div>
-                    <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                      <span>System Browser Notification Permission</span>
-                      <span
-                        className={`text-[10px] px-2 py-0.5 rounded-full font-extrabold uppercase ${
-                          notifPermission === 'granted'
-                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
-                            : 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
-                        }`}
-                      >
-                        {notifPermission}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                      Required for background desktop &amp; mobile banner alerts when Jivan is minimized
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {notifPermission !== 'granted' && (
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          const ok = await notificationService.requestPermission();
-                          setNotifPermission(ok ? 'granted' : 'denied');
-                        }}
-                        className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold transition cursor-pointer"
-                      >
-                        Grant Permission
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        soundEngine.playAlarmChime();
-                        pushNotification('Test Reminder Alert', 'Exact-time notification and chime verified!', 'task');
-                      }}
-                      className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 text-[11px] font-bold transition cursor-pointer"
-                    >
-                      Send Test Alert
-                    </button>
-                  </div>
-                </div>
-
-                {/* Notification Pop-Up Style (Dynamic Island / Android Heads-Up / Compact Card) */}
-                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 space-y-2.5">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <div className="text-xs font-bold text-slate-900 dark:text-white">
-                        Notification Pop-Up Style (TickTick Task Card / Camera Pill / Android)
-                      </div>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Choose how in-app notifications pop up on your screen
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        pushNotification(
-                          'YouTube Task',
-                          'Search about what value I can provide on YouTube',
-                          'task',
-                          { sound: 'task' }
-                        );
-                      }}
-                      className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[10.5px] font-bold transition cursor-pointer"
-                    >
-                      Test Notification Pop-Up
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
-                    {[
-                      {
-                        id: 'ticktick_card' as NotificationPopupStyle,
-                        title: 'TickTick Task Pop-Up',
-                        desc: 'Dark bottom-sheet card with schedule range, Focus target ◉, Snooze & Complete',
-                        badge: 'Task Pop-Up',
-                      },
-                      {
-                        id: 'dynamic_island' as NotificationPopupStyle,
-                        title: 'Dynamic Island / Pill',
-                        desc: 'Camera cutout pill that expands into an interactive capsule',
-                        badge: 'Camera Pill',
-                      },
-                      {
-                        id: 'android_heads_up' as NotificationPopupStyle,
-                        title: 'Android Heads-Up',
-                        desc: 'Material 3 pop-up card with Mark Done & Snooze bar',
-                        badge: 'Android',
-                      },
-                      {
-                        id: 'compact_card' as NotificationPopupStyle,
-                        title: 'Compact Card',
-                        desc: 'Classic JivanOS compact swipeable toast card',
-                        badge: 'Classic',
-                      },
-                    ].map((opt) => {
-                      const active = notifPopupStyle === opt.id;
-                      return (
-                        <button
-                          key={opt.id}
-                          type="button"
-                          onClick={() => {
-                            setNotifPopupStyle(opt.id);
-                            soundEngine.setNotificationPopupStyle(opt.id);
-                            haptics.toggle();
-                          }}
-                          className={`p-2.5 rounded-xl border text-left transition flex flex-col justify-between gap-1 cursor-pointer ${
-                            active
-                              ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/60 ring-2 ring-indigo-500/30'
-                              : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300">
-                              {opt.badge}
-                            </span>
-                            {active && <span className="w-2 h-2 rounded-full bg-indigo-600" />}
-                          </div>
-                          <div>
-                            <div className="text-xs font-bold text-slate-900 dark:text-white">
-                              {opt.title}
-                            </div>
-                            <div className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight mt-0.5">
-                              {opt.desc}
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Active Alarm Display Style Selector */}
-                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 space-y-2.5">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <div className="text-xs font-bold text-slate-900 dark:text-white">
-                        Active Alarm Display Style (TickTick Task Pop-Up / Floating PiP Card)
-                      </div>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Display the TickTick Bottom Task Pop-Up Card or a draggable Floating PiP Card when an alarm triggers
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        window.dispatchEvent(
-                          new CustomEvent('omnilifeos_trigger_alarm', {
-                            detail: {
-                              id: `settings_pip_alarm_${Date.now()}`,
-                              source: 'task',
-                              title: 'YouTube Task',
-                              subtitle: 'Search about what value I can provide on YouTube',
-                              dueDateLabel: 'Yesterday, 9:00am - 9:20am',
-                              listIcon: '👋',
-                              listLabel: 'Welcome',
-                              dueTime: '09:00',
-                              reminderType: 'alarm',
-                            },
-                          })
-                        );
-                      }}
-                      className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[10.5px] font-bold transition cursor-pointer"
-                    >
-                      Test Task Pop-Up Card
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    {[
-                      {
-                        id: 'ticktick_card' as AlarmPopupStyle,
-                        title: 'TickTick Task Pop-Up',
-                        desc: 'Bottom-sheet task reminder card with schedule time, ◉ Focus, Snooze & Complete',
-                        badge: 'TickTick Card',
-                      },
-                      {
-                        id: 'pip_card' as AlarmPopupStyle,
-                        title: 'Floating PiP Alarm Card',
-                        desc: 'Draggable Picture-in-Picture card with live active timer, minimize to pill/bar, snooze & complete',
-                        badge: 'PiP Active Card',
-                      },
-                      {
-                        id: 'classic_banner' as AlarmPopupStyle,
-                        title: 'Classic Top Alarm Banner',
-                        desc: 'Standard top-center grouped alarm stack banner',
-                        badge: 'Top Banner',
-                      },
-                    ].map((opt) => {
-                      const active = alarmPopupStyle === opt.id;
-                      return (
-                        <button
-                          key={opt.id}
-                          type="button"
-                          onClick={() => {
-                            setAlarmPopupStyle(opt.id);
-                            soundEngine.setAlarmPopupStyle(opt.id);
-                            haptics.toggle();
-                          }}
-                          className={`p-2.5 rounded-xl border text-left transition flex flex-col justify-between gap-1 cursor-pointer ${
-                            active
-                              ? 'border-rose-500 bg-rose-50/70 dark:bg-rose-950/40 ring-2 ring-rose-500/30'
-                              : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded bg-rose-100 dark:bg-rose-900/60 text-rose-700 dark:text-rose-300">
-                              {opt.badge}
-                            </span>
-                            {active && <span className="w-2 h-2 rounded-full bg-rose-500" />}
-                          </div>
-                          <div>
-                            <div className="text-xs font-bold text-slate-900 dark:text-white">
-                              {opt.title}
-                            </div>
-                            <div className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight mt-0.5">
-                              {opt.desc}
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-
-              {/* Card 2: Smart Hydration & Water Reminder Scheduler */}
-              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-5 shadow-xs space-y-3.5 w-full min-w-0 overflow-hidden">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">
-                      Smart Hydration &amp; Water Reminders
-                    </h4>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Automatic water intake alerts with liquid water-drop chime
-                    </p>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={Boolean(hydration.reminderEnabled)}
-                    onChange={(e) => toggleWaterReminder(e.target.checked, hydration.reminderIntervalHours || 2)}
-                    className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 space-y-2">
-                    <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300">
-                      Reminder Frequency Interval
-                    </label>
-                    <div className="grid grid-cols-4 gap-1.5">
-                      {[1, 2, 3, 4].map((hrs) => {
-                        const active = (hydration.reminderIntervalHours || 2) === hrs;
-                        return (
-                          <button
-                            key={hrs}
-                            type="button"
-                            onClick={() => toggleWaterReminder(true, hrs)}
-                            className={`py-1.5 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
-                              active
-                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
-                                : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
-                            }`}
-                          >
-                            Every {hrs}h
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 flex items-center justify-between gap-2">
-                    <div>
-                      <div className="text-xs font-bold text-slate-900 dark:text-white">
-                        Adaptive Pace Coaching
-                      </div>
-                      <p className="text-[10.5px] text-slate-500 dark:text-slate-400">
-                        Adjusts reminder urgency based on daily {hydration.targetMl}ml target
-                      </p>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={Boolean(hydration.adaptiveRemindersEnabled)}
-                      onChange={(e) => toggleAdaptiveWaterReminder(e.target.checked)}
-                      className="w-4 h-4 accent-indigo-600 rounded cursor-pointer shrink-0"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex justify-end">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      soundEngine.playWaterDropNotification();
-                      sendAdaptiveHydrationNotification(true);
-                    }}
-                    className="px-3.5 py-1.5 rounded-xl bg-sky-50 dark:bg-sky-950/50 text-sky-600 dark:text-sky-300 border border-sky-200 dark:border-sky-800/70 text-[11px] font-bold hover:bg-sky-100 transition cursor-pointer"
-                  >
-                    Test Water Drop Reminder
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* AI Models & Providers Configuration Card */}
-          {activeSection === 'ai' && (
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3.5 sm:p-5 shadow-xs w-full min-w-0 overflow-hidden">
-        <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-          <div className="flex items-center gap-2.5 min-w-0 flex-1">
-            <div className="w-8 h-8 rounded-xl bg-purple-100 dark:bg-purple-950 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0">
-              <Key className="w-4 h-4" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <h3 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">
-                AI Models &amp; Provider API Keys
-              </h3>
-              <p className="text-[11px] text-slate-400">
-                Select your preferred AI provider and model, and input your API key
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <form onSubmit={handleSaveAiSettings} className="mt-4 space-y-4">
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-              Select AI Provider
-            </label>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              {[
-                { id: 'gemini', label: 'Google Gemini' },
-                { id: 'openai', label: 'OpenAI ChatGPT' },
-                { id: 'deepseek', label: 'DeepSeek' },
-                { id: 'qwen', label: 'Qwen (Alibaba)' },
-                { id: 'local', label: 'Local AI / Ollama' },
-              ].map(p => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => handleProviderChange(p.id)}
-                  className={`px-3 py-2 rounded-xl text-xs font-semibold border transition text-center cursor-pointer ${
-                    aiProviderInput === p.id
-                      ? 'bg-indigo-600 border-indigo-600 text-white shadow-xs'
-                      : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
-                  }`}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-              Select Model for {aiProviderInput.toUpperCase()}
-            </label>
-            <select
-              value={selectedAiModelInput}
-              onChange={(e) => setSelectedAiModelInput(e.target.value)}
-              className="w-full text-xs font-semibold bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 shadow-xs cursor-pointer"
-            >
-              {aiProviderInput === 'gemini' && (
-                <>
-                  <option value="gemini-4-hydrogen">Gemini 4 Hydrogen (Fast &amp; Balanced - Recommended)</option>
-                  <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite (Ultra-Low Latency)</option>
-                  <option value="gemini-4-argon">Gemini 4 Argon (Complex Reasoning - Paid)</option>
-                </>
-              )}
-              {aiProviderInput === 'openai' && (
-                <>
-                  <option value="gpt-4o">GPT-4o (Flagship Multimodal)</option>
-                  <option value="gpt-4o-mini">GPT-4o Mini (Fast &amp; Cost-Effective)</option>
-                  <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
-                </>
-              )}
-              {aiProviderInput === 'deepseek' && (
-                <>
-                  <option value="deepseek-chat">DeepSeek Chat (V3)</option>
-                  <option value="deepseek-reasoner">DeepSeek Reasoner (R1 - Advanced Logic)</option>
-                </>
-              )}
-              {aiProviderInput === 'qwen' && (
-                <>
-                  <option value="qwen-max">Qwen Max (Flagship)</option>
-                  <option value="qwen-plus">Qwen Plus</option>
-                  <option value="qwen-turbo">Qwen Turbo</option>
-                </>
-              )}
-              {aiProviderInput === 'local' && (
-                <>
-                  <option value="llama3">Llama 3</option>
-                  <option value="llama3.1">Llama 3.1</option>
-                  <option value="mistral">Mistral</option>
-                  <option value="phi3">Phi-3</option>
-                  <option value="qwen2.5">Qwen 2.5</option>
-                  <option value="custom">Custom Model Name</option>
-                </>
-              )}
-            </select>
-          </div>
-
-          {aiProviderInput !== 'gemini' && (
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                API Base URL (OpenAI-compatible / Ollama endpoint)
-              </label>
-              <input
-                type="text"
-                value={baseUrlInput}
-                onChange={(e) => setBaseUrlInput(e.target.value)}
-                placeholder="https://api.openai.com/v1 or http://localhost:11434/v1"
-                className="w-full text-xs bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 font-mono shadow-xs"
-              />
-              <p className="mt-1 text-[11px] text-slate-400">
-                Endpoint base URL for DeepSeek, Qwen, Ollama (`http://localhost:11434/v1`), or LM Studio.
-              </p>
-            </div>
-          )}
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-              API Key for {aiProviderInput.toUpperCase()}
-            </label>
-            <div className="relative">
-              <input
-                type={showApiKey ? 'text' : 'password'}
-                value={
-                  aiProviderInput === 'gemini' ? customGeminiKey :
-                  aiProviderInput === 'openai' ? customOpenaiKey :
-                  aiProviderInput === 'deepseek' ? customDeepseekKey :
-                  aiProviderInput === 'qwen' ? customQwenKey : customLocalKey
-                }
-                onChange={(e) => {
-                  const val = e.target.value;
-                  if (aiProviderInput === 'gemini') setCustomGeminiKey(val);
-                  else if (aiProviderInput === 'openai') setCustomOpenaiKey(val);
-                  else if (aiProviderInput === 'deepseek') setCustomDeepseekKey(val);
-                  else if (aiProviderInput === 'qwen') setCustomQwenKey(val);
-                  else if (aiProviderInput === 'local') setCustomLocalKey(val);
-                }}
-                placeholder={`Enter API key for ${aiProviderInput}...`}
-                className="w-full text-xs bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 pr-16 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 font-mono shadow-xs"
-              />
-              <button
-                type="button"
-                onClick={() => setShowApiKey(!showApiKey)}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline px-2 py-1"
-              >
-                {showApiKey ? 'Hide' : 'Show'}
-              </button>
-            </div>
-            <p className="mt-1 text-[11px] text-slate-400">
-              Persisted securely in browser storage. For local Ollama instances, leave default or enter any token.
-            </p>
-          </div>
-
-          {aiSettingsMsg && (
-            <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs font-semibold text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
-              <Check className="w-4 h-4 shrink-0" />
-              <span>{aiSettingsMsg}</span>
-            </div>
-          )}
-
-          <div className="flex justify-end pt-2">
-            <button
-              type="submit"
-              className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-xs transition flex items-center gap-1.5 cursor-pointer"
-            >
-              <Check className="w-3.5 h-3.5" />
-              <span>Save AI Provider &amp; API Key</span>
-            </button>
-          </div>
-        </form>
-            </div>
-          )}
-
-          {/* System, Regional Timezone, Currency & Schedule Defaults */}
-          {activeSection === 'system' && (
-            <div className="space-y-4 w-full min-w-0 overflow-hidden">
-              {/* Card 1: Regional Timezone */}
-              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 sm:p-6 shadow-xs">
-                <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-xl bg-amber-100 dark:bg-amber-950 text-amber-600 dark:text-amber-400 flex items-center justify-center">
-                      <RefreshCw className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                        Regional Time &amp; Timezone
-                      </h3>
-                      <p className="text-xs text-slate-400">
-                        Set your timezone for exact-time alarms, daily streaks, and timeline blocks
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      try {
-                        const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
-                        if (detected) {
-                          setTimezoneInput(detected);
-                          localStorage.setItem('omni_timezone', detected);
-                          setTimezoneMsg(`Auto-detected device timezone: ${detected}`);
-                          setTimeout(() => setTimezoneMsg(''), 3500);
-                        }
-                      } catch {}
-                    }}
-                    className="px-3 py-1.5 rounded-xl bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/70 text-[11px] font-bold hover:bg-amber-100 transition cursor-pointer"
-                  >
-                    Auto-Detect Timezone
-                  </button>
-                </div>
-
-                <form onSubmit={handleSaveTimezone} className="mt-4 space-y-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                      Active Timezone
-                    </label>
-                    <select
-                      value={timezoneInput}
-                      onChange={(e) => setTimezoneInput(e.target.value)}
-                      className="w-full text-xs font-semibold bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 shadow-xs cursor-pointer"
-                    >
-                      <option value="Asia/Kolkata">Asia/Kolkata (IST - UTC+05:30)</option>
-                      <option value="UTC">UTC (Coordinated Universal Time)</option>
-                      <option value="America/New_York">America/New_York (EST/EDT)</option>
-                      <option value="America/Chicago">America/Chicago (CST/CDT)</option>
-                      <option value="America/Denver">America/Denver (MST/MDT)</option>
-                      <option value="America/Los_Angeles">America/Los_Angeles (PST/PDT)</option>
-                      <option value="Europe/London">Europe/London (GMT/BST)</option>
-                      <option value="Europe/Paris">Europe/Paris (CET/CEST)</option>
-                      <option value="Europe/Berlin">Europe/Berlin (CET/CEST)</option>
-                      <option value="Asia/Dubai">Asia/Dubai (GST - UTC+04:00)</option>
-                      <option value="Asia/Singapore">Asia/Singapore (SGT - UTC+08:00)</option>
-                      <option value="Asia/Tokyo">Asia/Tokyo (JST - UTC+09:00)</option>
-                      <option value="Australia/Sydney">Australia/Sydney (AEST/AEDT)</option>
-                    </select>
-                  </div>
-
-                  {timezoneMsg && (
-                    <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs font-semibold text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
-                      <Check className="w-4 h-4 shrink-0" />
-                      <span>{timezoneMsg}</span>
-                    </div>
-                  )}
-
-                  <div className="flex justify-end pt-1">
-                    <button
-                      type="submit"
-                      className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-xs transition flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Check className="w-3.5 h-3.5" />
-                      <span>Save Timezone</span>
-                    </button>
-                  </div>
-                </form>
-              </div>
-
-              {/* Card 2: Regional Currency & Timeline Day Hours */}
-              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 sm:p-6 shadow-xs space-y-4">
-                <div>
-                  <h4 className="text-sm font-bold text-slate-900 dark:text-white">
-                    Currency &amp; Timeline Day Window
-                  </h4>
-                  <p className="text-xs text-slate-400">
-                    Configure default currency for Bills &amp; Subscriptions and default hours for Task Timeline
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 space-y-2">
-                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                      Default Currency (Bills &amp; Finance)
-                    </label>
-                    <div className="grid grid-cols-4 gap-1.5">
-                      {[
-                        { code: 'INR', label: '₹ INR' },
-                        { code: 'USD', label: '$ USD' },
-                        { code: 'EUR', label: '€ EUR' },
-                        { code: 'GBP', label: '£ GBP' },
-                      ].map((c) => (
-                        <button
-                          key={c.code}
-                          type="button"
-                          onClick={() => {
-                            setCurrency(c.code);
-                            soundEngine.playClick();
-                          }}
-                          className={`py-2 rounded-lg text-xs font-bold border transition cursor-pointer ${
-                            currency === c.code
-                              ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
-                              : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
-                          }`}
-                        >
-                          {c.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                        Timeline Day Grid Hours
-                      </label>
-                      <span className="text-[10px] font-mono font-bold text-indigo-600 dark:text-indigo-400">
-                        {scheduleStartHour}:00 – {scheduleEndHour}:00
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {[
-                        { id: 'standard' as const, label: 'Standard (6h–22h)' },
-                        { id: 'workday' as const, label: 'Workday (8h–18h)' },
-                        { id: 'early' as const, label: 'Early (5h–21h)' },
-                        { id: '24h' as const, label: 'Full 24 Hours' },
-                      ].map((preset) => (
-                        <button
-                          key={preset.id}
-                          type="button"
-                          onClick={() => {
-                            setScheduleTimingPreset(preset.id);
-                            soundEngine.playClick();
-                          }}
-                          className="py-1.5 px-2 rounded-lg text-[11px] font-bold bg-white dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 transition cursor-pointer truncate"
-                        >
-                          {preset.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Petal v4.4 Appearance, Themes Engine & Quote Cards Customization */}
           {activeSection === 'appearance' && (
-            <div className="space-y-4 w-full min-w-0 overflow-hidden">
-              {/* SECTION 1: PETAL THEME MODE, 4-QUADRANT MATERIAL YOU PALETTES & COLOR STYLES */}
-              <div className="space-y-[3px] w-full min-w-0">
-                {/* Card 1 (TOP): Theme Mode & AMOLED Pure Black */}
-                <div className="rounded-t-[20px] rounded-b-[6px] border border-slate-200/90 dark:border-zinc-800/90 bg-white dark:bg-zinc-900 p-3 sm:p-4 shadow-2xs space-y-3 w-full min-w-0 overflow-hidden">
-                  <div className="flex flex-wrap items-center justify-between gap-2 w-full min-w-0">
-                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                      <PetalShapeBadge
-                        shape={expressiveShapes ? 'cookie12' : 'squircle'}
-                        fillClass="text-indigo-100 dark:text-indigo-950/90"
-                        strokeClass="text-indigo-300 dark:text-indigo-800"
-                        sizeClass="w-9 h-9"
-                      >
-                        <Settings className="w-4.5 h-4.5 text-indigo-600 dark:text-indigo-400" />
-                      </PetalShapeBadge>
-                      <div className="min-w-0 flex-1">
-                        <h3 className="text-xs sm:text-sm font-extrabold text-slate-900 dark:text-white truncate">
-                          Theme Mode &amp; OLED Canvas
-                        </h3>
-                        <p className="text-[11px] text-slate-500 dark:text-zinc-400 truncate">
-                          Light, Dark, or 0-nit AMOLED Pure Black mode
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Light / Dark Segmented Switch */}
-                    <div className="flex items-center gap-1 p-1 rounded-xl bg-slate-100 dark:bg-zinc-800 border border-slate-200/80 dark:border-zinc-700 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (theme !== 'light') {
-                            setTheme('light');
-                            showAndroidToast('Light mode');
-                          }
-                        }}
-                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition cursor-pointer ${
-                          theme === 'light'
-                            ? 'bg-white text-slate-900 shadow-2xs'
-                            : 'text-slate-500 dark:text-zinc-400'
-                        }`}
-                      >
-                        <Sun className="w-3.5 h-3.5 text-amber-500" />
-                        <span>Light</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (theme !== 'dark') {
-                            setTheme('dark');
-                            showAndroidToast('Dark mode');
-                          }
-                        }}
-                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition cursor-pointer ${
-                          theme === 'dark'
-                            ? 'bg-indigo-600 text-white shadow-2xs'
-                            : 'text-slate-500 dark:text-zinc-400'
-                        }`}
-                      >
-                        <Moon className="w-3.5 h-3.5" />
-                        <span>Dark</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* AMOLED Black & Expressive Shapes Toggles */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-0.5">
-                    <div
-                      onClick={() => handleToggleAmoled(!amoledBlack)}
-                      className="p-2.5 rounded-xl bg-slate-50 dark:bg-zinc-800/60 border border-slate-200/80 dark:border-zinc-700/80 flex items-center justify-between gap-2.5 cursor-pointer min-w-0"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="text-xs font-bold text-slate-900 dark:text-white truncate">
-                          AMOLED Pure Black (#000000)
-                        </div>
-                        <div className="text-[10.5px] text-slate-500 dark:text-zinc-400 truncate">
-                          True pitch-black background in Dark Mode
-                        </div>
-                      </div>
-                      <M3Switch
-                        checked={amoledBlack}
-                        onChange={(val) => handleToggleAmoled(val)}
-                        size="sm"
-                      />
-                    </div>
-
-                    <div
-                      onClick={() => handleToggleExpressiveShapes(!expressiveShapes)}
-                      className="p-2.5 rounded-xl bg-slate-50 dark:bg-zinc-800/60 border border-slate-200/80 dark:border-zinc-700/80 flex items-center justify-between gap-2.5 cursor-pointer min-w-0"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="text-xs font-bold text-slate-900 dark:text-white truncate">
-                          Material Expressive Shapes
-                        </div>
-                        <div className="text-[10.5px] text-slate-500 dark:text-zinc-400 truncate">
-                          Cookie, Scallop, Clover &amp; Squircle badges
-                        </div>
-                      </div>
-                      <M3Switch
-                        checked={expressiveShapes}
-                        onChange={(val) => handleToggleExpressiveShapes(val)}
-                        size="sm"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Card 2 (MIDDLE): Material You 4-Quadrant Color Palettes */}
-                <div className="rounded-[6px] border border-slate-200/90 dark:border-zinc-800/90 bg-white dark:bg-zinc-900 p-3 sm:p-4 shadow-2xs space-y-2.5 w-full min-w-0 overflow-hidden">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <h4 className="text-xs sm:text-sm font-extrabold text-slate-900 dark:text-white truncate">
-                        Material You 4-Quadrant Color Palettes
-                      </h4>
-                      <p className="text-[10.5px] text-slate-500 dark:text-zinc-400 truncate">
-                        Vibrant Material 3 seed palette or Mono + Color
-                      </p>
-                    </div>
-                    <span className="px-2 py-0.5 rounded-full text-[9.5px] font-mono font-bold bg-indigo-50 dark:bg-indigo-950/80 text-indigo-600 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/60 uppercase shrink-0">
-                      {paletteMode === 'mono_accent' ? 'Mono+Color' : accentTone}
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-4 sm:grid-cols-7 gap-2 pt-0.5 justify-items-center">
-                    {PETAL_PALETTE_OPTIONS.map((opt) => {
-                      const isSelected =
-                        (opt.id === 'mono_accent' && paletteMode === 'mono_accent') ||
-                        (opt.accentTone && paletteMode === 'colorful' && accentTone === opt.accentTone);
-                      return (
-                        <PetalFourQuadrantSwatch
-                          key={opt.id}
-                          option={opt}
-                          selected={Boolean(isSelected)}
-                          onSelect={() => handleSelectPetalPalette(opt)}
-                          size="sm"
-                        />
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Card 3 (BOTTOM): Petal Color Style Variants */}
-                <div className="rounded-t-[6px] rounded-b-[20px] border border-slate-200/90 dark:border-zinc-800/90 bg-white dark:bg-zinc-900 p-3 sm:p-4 shadow-2xs space-y-2.5 w-full min-w-0 overflow-hidden">
-                  <div className="flex items-center justify-between">
-                    <div className="min-w-0 flex-1">
-                      <h4 className="text-xs sm:text-sm font-extrabold text-slate-900 dark:text-white truncate">
-                        Petal Color Style Variant
-                      </h4>
-                      <p className="text-[10.5px] text-slate-500 dark:text-zinc-400 truncate">
-                        Fine-tune chroma saturation and tonal contrast across the app
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                    {PETAL_COLOR_STYLES.map((st) => {
-                      const isActive = colorStyle === st.id;
-                      return (
-                        <button
-                          key={st.id}
-                          type="button"
-                          onClick={() => handleSelectColorStyle(st.id)}
-                          className={`p-2 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between gap-0.5 ${
-                            isActive
-                              ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
-                              : 'bg-slate-50 dark:bg-zinc-800/80 text-slate-800 dark:text-zinc-200 border-slate-200/80 dark:border-zinc-700/80 hover:bg-slate-100 dark:hover:bg-zinc-800'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between gap-1">
-                            <span className="text-[11px] font-extrabold truncate">{st.label}</span>
-                            {isActive && <Check className="w-3 h-3 shrink-0" />}
-                          </div>
-                          <span
-                            className={`text-[9.5px] leading-snug line-clamp-2 ${
-                              isActive ? 'text-white/85' : 'text-slate-500 dark:text-zinc-400'
-                            }`}
-                          >
-                            {st.desc}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-
-              {/* SECTION 2: QUOTE CARDS & TYPOGRAPHY APPEARANCE */}
-              <div className="rounded-[20px] border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3.5 sm:p-5 shadow-2xs w-full min-w-0 overflow-hidden">
-        <div className="flex items-center justify-between pb-2.5 border-b border-slate-100 dark:border-zinc-800">
-          <div className="flex items-center gap-2.5 min-w-0 flex-1">
-            <div className="w-8 h-8 rounded-xl bg-violet-100 dark:bg-violet-950 text-violet-600 dark:text-violet-400 flex items-center justify-center shrink-0">
-              <Palette className="w-4 h-4" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <h3 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white truncate">
-                Wisdom Quote Cards &amp; Typography
-              </h3>
-              <p className="text-[11px] text-slate-400 truncate">
-                Customize typography scaling, typeface, and transition effects
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-4 grid grid-cols-1 lg:grid-cols-12 gap-4">
-          {/* Left Column: Controls (Font Size, Font Style, Card Colors, Transition Effects) */}
-          <div className="lg:col-span-7 space-y-4 text-xs">
-            {/* Font Size Scaling Selector */}
-            <div className="space-y-1.5 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
-              <div className="flex justify-between items-center text-xs">
-                <span className="font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                  <Sliders className="w-3.5 h-3.5 text-indigo-500" />
-                  <span>Font Size Scale</span>
-                </span>
-                <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/80 px-2 py-0.5 rounded border border-indigo-200 dark:border-indigo-800">
-                  {Math.round(draftFontScale * 100)}%
-                </span>
-              </div>
-              <input
-                type="range"
-                min="0.8"
-                max="1.4"
-                step="0.05"
-                value={draftFontScale}
-                className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer dark:bg-slate-700 accent-indigo-600 transition-all duration-200"
-                onChange={(e) => setDraftFontScale(Number(e.target.value))}
-              />
-              <div className="flex justify-between text-[10px] text-slate-400 font-mono">
-                <span>80% (Compact)</span>
-                <span>100% (Default)</span>
-                <span>140% (Large)</span>
-              </div>
-            </div>
-
-            {/* Font Style Selector (Sans, Serif, Mono) */}
-            <div className="space-y-1.5 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
-              <label className="font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                <Type className="w-3.5 h-3.5 text-indigo-500" />
-                <span>Font Style</span>
-              </label>
-              <div className="grid grid-cols-3 gap-2 pt-1">
-                {[
-                  { id: 'sans', label: 'Sans', family: 'sans-serif' },
-                  { id: 'serif', label: 'Serif', family: 'serif' },
-                  { id: 'mono', label: 'Mono', family: 'monospace' }
-                ].map((font) => (
-                  <button
-                    key={font.id}
-                    type="button"
-                    onClick={() => setDraftFontFamily(font.family)}
-                    className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-all duration-200 active:scale-95 cursor-pointer ${
-                      draftFontFamily === font.family
-                        ? 'bg-indigo-600 border-indigo-600 text-white shadow-xs'
-                        : 'bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
-                    }`}
-                  >
-                    <span style={{ fontFamily: font.family }}>{font.label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Transition Effect Settings */}
-            <div className="space-y-1.5 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
-              <label className="font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
-                <span>Transition Effect</span>
-              </label>
-              <div className="grid grid-cols-3 gap-2 pt-1">
-                {(['fade', 'slide', 'scale'] as const).map((style) => (
-                  <button
-                    key={style}
-                    type="button"
-                    onClick={() => {
-                      setDraftTransitionStyle(style);
-                      setAnimTrigger(prev => prev + 1);
-                    }}
-                    className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-all active:scale-95 cursor-pointer flex items-center justify-center gap-1.5 ${
-                      draftTransitionStyle === style
-                        ? 'bg-indigo-600 border-indigo-600 text-white shadow-xs'
-                        : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
-                    }`}
-                  >
-                    <span>{style.charAt(0).toUpperCase() + style.slice(1)}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Right Column: Clear Bottom-Right Live Preview Card Layout */}
-          <div className="lg:col-span-5 flex flex-col justify-end space-y-3">
-            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/80 flex flex-col gap-3">
-              <div className="flex items-center justify-between pb-2 border-b border-slate-200/80 dark:border-slate-700/60">
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-lg bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
-                    <Eye className="w-3.5 h-3.5" />
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-900 dark:text-white">
-                      Live Preview Card
-                    </h4>
-                    <p className="text-[10px] text-slate-400">
-                      Modifying Quote Card Style
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setAnimTrigger(prev => prev + 1)}
-                    className="text-[10px] font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 flex items-center gap-1 cursor-pointer bg-white dark:bg-slate-800 px-2 py-0.5 rounded border border-indigo-200/80 dark:border-indigo-800/80 transition active:scale-95 shadow-2xs"
-                    title="Click to replay transition effect on preview card"
-                  >
-                    <Sparkles className="w-2.5 h-2.5 text-indigo-500" />
-                    <span>Replay Effect</span>
-                  </button>
-                  <span className="text-[10px] font-mono font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/80 px-2 py-0.5 rounded border border-indigo-200/60 dark:border-indigo-800/60 uppercase">
-                    {draftTransitionStyle}
-                  </span>
-                </div>
-              </div>
-
-              {/* Informative helper text for state isolation */}
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-snug">
-                Clicking color or transition options above updates <strong>only this local preview card</strong>. Changes will apply to all cards in the app when you click <strong>Done</strong>.
-              </p>
-
-              {/* Visual Preview Card below Transition Effect with animated preview */}
-              {(() => {
-                const resolvedBg = ColorThemeService.resolveColor(draftCardBg, isDark);
-                const resolvedBorder = ColorThemeService.resolveBorderColor(draftCardBg, isDark);
-                const currentPreset = ColorThemeService.getPreset(draftCardBg);
-                return (
-                  <div
-                    key={`settings-preview-${draftTransitionStyle}-${draftFontScale}-${draftFontFamily}-${draftCardBg}-${animTrigger}`}
-                    id="quote-preview-card"
-                    data-quote-card="true"
-                    data-custom-bg="true"
-                    className={`p-4 rounded-2xl border shadow-md text-left transition-all ${
-                      draftTransitionStyle === 'slide'
-                        ? 'quote-transition-slide'
-                        : draftTransitionStyle === 'scale'
-                          ? 'quote-transition-scale'
-                          : 'quote-transition-fade'
-                    }`}
-                    style={{
-                      backgroundColor: resolvedBg,
-                      borderColor: resolvedBorder,
-                      '--preview-card-bg': resolvedBg,
-                      '--preview-card-border': resolvedBorder,
-                    } as React.CSSProperties}
-                  >
-                    <div className="flex items-center justify-between text-[10px] text-slate-400 mb-2">
-                      <span className="font-medium">1/1 • Bhagavad Gita</span>
-                      <span className="font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider text-[9px] bg-indigo-50/90 dark:bg-indigo-950/80 px-1.5 py-0.5 rounded border border-indigo-200/50 dark:border-indigo-800/50">
-                        Wisdom
-                      </span>
-                    </div>
-                    <p
-                      id="quote-preview-text"
-                      className="font-bold leading-snug transition-all duration-150"
-                      style={{
-                        fontSize: `${draftFontScale * 0.85}rem`,
-                        fontFamily: draftFontFamily,
-                        color: isDark ? '#f8fafc' : '#0f172a'
-                      }}
-                    >
-                      "You have a right to perform your prescribed duty, but never to the fruits of action."
-                    </p>
-                    <div className="mt-3 pt-2 border-t border-slate-200/60 dark:border-slate-800/70 flex items-center justify-between text-[10px]">
-                      <span className="italic font-serif text-slate-500 dark:text-slate-400">Chapter 2, Verse 47</span>
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-mono text-[9px] text-indigo-500 font-semibold">
-                          Scale: {Math.round(draftFontScale * 100)}%
-                        </span>
-                        <span className="text-[9px] px-1.5 py-0.5 rounded font-medium bg-slate-200/60 dark:bg-slate-700/60 text-slate-600 dark:text-slate-300">
-                          {currentPreset?.name || 'Pure White'}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {cardSettingsMsg && (
-                <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-xs font-semibold text-emerald-700 dark:text-emerald-300 flex items-center gap-1.5">
-                  <Check className="w-3.5 h-3.5 shrink-0" />
-                  <span>{cardSettingsMsg}</span>
-                </div>
-              )}
-
-              {/* Done / Apply Global State Button */}
-              <div className="flex justify-end pt-1">
-                <button
-                  type="button"
-                  id="btn-apply-card-theme"
-                  onClick={() => handleApplyCardSettings()}
-                  className="w-full sm:w-auto px-6 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition active:scale-95 cursor-pointer shadow-xs flex items-center justify-center gap-1.5"
-                >
-                  <Check className="w-3.5 h-3.5" />
-                  <span>Done</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-              </div>
-            </div>
+            <AppearanceSettingsSection onExpressiveShapesChange={setExpressiveShapes} />
           )}
 
-          {/* Profile, Health Metrics & Optional Login Card */}
-          {activeSection === 'profile' && (
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-6 shadow-xs space-y-5">
-              <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
-                <div className="flex items-center gap-3 min-w-0 flex-1">
-                  <div className="w-9 h-9 rounded-xl bg-purple-100 dark:bg-purple-950 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0">
-                    <User className="w-4.5 h-4.5" />
-                  </div>
-                  <div className="min-w-0">
-                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                      Personal Profile &amp; Local-First Identity
-                    </h3>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">
-                      Stored on your device first and synced to any connected drive
-                    </p>
-                  </div>
-                </div>
-
-                {firebaseUser ? (
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400 truncate max-w-[180px]">
-                      {firebaseUser.email || 'Google Connected'}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => logout()}
-                      className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <LogOut className="w-3.5 h-3.5" />
-                      <span>Sign Out</span>
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={handleGoogleSignInInline}
-                    disabled={isLoggingIn}
-                    className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-xs font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-2 transition cursor-pointer disabled:opacity-50 whitespace-nowrap"
-                  >
-                    <Cloud className="w-3.5 h-3.5 text-indigo-500" />
-                    <span>{isLoggingIn ? 'Signing In...' : 'Optional Google Sign-In'}</span>
-                  </button>
-                )}
-              </div>
-
-              {(authError || profileAuthError) && (
-                <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-xs text-rose-700 dark:text-rose-300 flex items-start justify-between gap-2">
-                  <div className="flex items-start gap-2">
-                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                    <span>{profileAuthError || authError}</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setProfileAuthError('');
-                      clearAuthError();
-                    }}
-                    className="text-rose-500 hover:text-rose-700 font-bold shrink-0 cursor-pointer"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              )}
-
-              <form onSubmit={handleProfileSave} className="space-y-4 text-xs">
-                {/* Profile Photo Upload Row */}
-                <div className="flex items-center gap-4 p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
-                  <div className="relative shrink-0">
-                    {avatarPhoto ? (
-                      <img
-                        src={avatarPhoto}
-                        alt="Profile"
-                        className="w-16 h-16 rounded-2xl object-cover border border-slate-200 dark:border-slate-700 shadow-xs"
-                      />
-                    ) : (
-                      <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white font-black text-xl flex items-center justify-center shadow-xs">
-                        {(nicknameInput || nameInput || 'J').charAt(0).toUpperCase()}
-                      </div>
-                    )}
-                    <label
-                      htmlFor="settings-photo-upload"
-                      className="absolute -bottom-1 -right-1 w-6 h-6 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center shadow-xs cursor-pointer transition"
-                      title="Upload Photo"
-                    >
-                      <Camera className="w-3 h-3" />
-                      <input
-                        id="settings-photo-upload"
-                        type="file"
-                        accept="image/*"
-                        onChange={handlePhotoUpload}
-                        className="hidden"
-                      />
-                    </label>
-                  </div>
-
-                  <div className="flex-1 min-w-0">
-                    <div className="font-bold text-slate-900 dark:text-white text-xs">
-                      Profile Photo · Auto-compressed WebP
-                    </div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                      Cropped to 256×256 WebP so your avatar syncs cleanly across drives without bloating snapshots.
-                    </p>
-                    {photoError && (
-                      <p className="text-[11px] text-rose-500 font-semibold mt-1">{photoError}</p>
-                    )}
-                  </div>
-
-                  {avatarPhoto && (
-                    <button
-                      type="button"
-                      onClick={() => setAvatarPhoto('')}
-                      className="p-2 rounded-xl text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition shrink-0 cursor-pointer"
-                      title="Remove photo"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
-
-                {/* Identity Fields */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">
-                      Full Name
-                    </label>
-                    <input
-                      type="text"
-                      value={nameInput}
-                      onChange={e => setNameInput(e.target.value)}
-                      placeholder="Your full name"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">
-                      Nickname / Display Name
-                    </label>
-                    <input
-                      type="text"
-                      value={nicknameInput}
-                      onChange={e => setNicknameInput(e.target.value)}
-                      placeholder="Display name"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">
-                      Contact Email (Optional)
-                    </label>
-                    <input
-                      type="email"
-                      value={emailInput}
-                      onChange={e => setEmailInput(e.target.value)}
-                      placeholder="Optional email"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                    />
-                  </div>
-                </div>
-
-                {/* DOB, Gender, Health Metrics & Currency */}
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-                  <div>
-                    <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">
-                      Date of Birth
-                    </label>
-                    <input
-                      type="date"
-                      value={dobInput}
-                      onChange={e => setDobInput(e.target.value)}
-                      className="w-full px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white tabular-nums"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">
-                      Gender
-                    </label>
-                    <select
-                      value={genderInput}
-                      onChange={e => setGenderInput(e.target.value as any)}
-                      className="w-full px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white cursor-pointer"
-                    >
-                      <option value="unspecified">Prefer not to say</option>
-                      <option value="male">Male</option>
-                      <option value="female">Female</option>
-                      <option value="other">Other</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">
-                      Height (cm)
-                    </label>
-                    <input
-                      type="number"
-                      min={50}
-                      max={260}
-                      value={heightInput}
-                      onChange={e => setHeightInput(e.target.value)}
-                      placeholder="170"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white tabular-nums"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">
-                      Weight (kg)
-                    </label>
-                    <input
-                      type="number"
-                      min={15}
-                      max={300}
-                      step="0.1"
-                      value={weightInput}
-                      onChange={e => setWeightInput(e.target.value)}
-                      placeholder="68"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white tabular-nums"
-                    />
-                  </div>
-                  <div className="col-span-2 sm:col-span-1">
-                    <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">
-                      Currency
-                    </label>
-                    <select
-                      value={currencyInput}
-                      onChange={e => setCurrencyInput(e.target.value as SupportedCurrency)}
-                      className="w-full px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white cursor-pointer"
-                    >
-                      <option value="INR">INR (₹)</option>
-                      <option value="USD">USD ($)</option>
-                      <option value="EUR">EUR (€)</option>
-                      <option value="GBP">GBP (£)</option>
-                      <option value="AED">AED</option>
-                      <option value="JPY">JPY (¥)</option>
-                      <option value="CAD">CAD ($)</option>
-                      <option value="AUD">AUD ($)</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">
-                    Personal Bio / Philosophy
-                  </label>
-                  <input
-                    type="text"
-                    value={bioInput}
-                    onChange={e => setBioInput(e.target.value)}
-                    placeholder="Focusing on health, mindfulness, and productive consistency."
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                  />
-                </div>
-
-                {/* Sync Profile & 2FA Toggles */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <FolderSync className="w-4 h-4 text-indigo-500 shrink-0" />
-                      <div className="min-w-0">
-                        <span className="font-semibold text-slate-900 dark:text-white block truncate">
-                          Sync Personal Details
-                        </span>
-                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                          Include photo, DOB &amp; metrics in Multi-Drive Sync
-                        </p>
-                      </div>
-                    </div>
-                    <M3Switch
-                      checked={joplinSyncSettings.syncPersonalDetails}
-                      onChange={(val) => updateJoplinSyncSettings({ syncPersonalDetails: val })}
-                    />
-                  </div>
-
-                  <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <Smartphone className="w-4 h-4 text-emerald-500 shrink-0" />
-                      <div className="min-w-0">
-                        <span className="font-semibold text-slate-900 dark:text-white block truncate">
-                          Two-Factor Auth (2FA)
-                        </span>
-                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                          Require verification code on new devices
-                        </p>
-                      </div>
-                    </div>
-                    <M3Switch
-                      checked={twoFactorActive}
-                      onChange={setTwoFactorActive}
-                    />
-                  </div>
-                </div>
-
-                {profileSavedMsg && (
-                  <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
-                    <Check className="w-4 h-4 shrink-0" />
-                    <span>{profileSavedMsg}</span>
-                  </div>
-                )}
-
-                <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setIsBackupModalOpen(true)}
-                    className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 font-semibold transition cursor-pointer flex items-center gap-1.5"
-                  >
-                    <Activity className="w-3.5 h-3.5 text-indigo-500" />
-                    <span>Open Multi-Drive Hub</span>
-                  </button>
-
-                  <button
-                    type="submit"
-                    disabled={isCompressingPhoto}
-                    className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold transition shadow-xs disabled:opacity-50 cursor-pointer"
-                  >
-                    Save Profile
-                  </button>
-                </div>
-              </form>
-            </div>
+          {activeSection === 'notifications' && (
+            <NotificationsSettingsSection
+              onOpenAlarmStudio={() => setIsNotifSettingsOpen(true)}
+            />
           )}
 
-          {/* Security, App Lock & Vault */}
-          {activeSection === 'security' && (
-            <div className="space-y-4 w-full min-w-0 overflow-hidden">
-              {/* App-wide Passcode & Fingerprint Lock Card */}
-              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3.5 sm:p-5 shadow-xs w-full min-w-0 overflow-hidden">
-                <div className="flex flex-wrap items-center justify-between gap-2.5 pb-3 border-b border-slate-100 dark:border-slate-800">
-                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                    <div className="w-8 h-8 rounded-xl bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
-                      <Fingerprint className="w-4 h-4" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <h3 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white truncate">
-                        App Lock, Passcode &amp; Fingerprint
-                      </h3>
-                      <p className="text-[11px] text-slate-400 truncate">
-                        Lock whole app with biometrics or custom PIN passcode
-                      </p>
-                    </div>
-                  </div>
+          {activeSection === 'sound' && <SoundHapticsSettingsSection />}
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      playLockSound();
-                      lockApp();
-                    }}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/60 text-[11px] font-semibold hover:bg-rose-100 transition shadow-2xs cursor-pointer shrink-0"
-                  >
-                    <Lock className="w-3.5 h-3.5" />
-                    <span>Lock App Now</span>
-                  </button>
-                </div>
+          {activeSection === 'security' && <SecuritySettingsSection />}
 
-                <form onSubmit={handleSaveAppLock} className="mt-4 space-y-4 text-xs">
-                  <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
-                    <div>
-                      <span className="font-semibold text-slate-900 dark:text-white block">
-                        Enable App Security Lock
-                      </span>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Require biometric fingerprint or PIN whenever opening or returning to Jivan
-                      </p>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={appLockEnabled}
-                      onChange={e => setAppLockEnabled(e.target.checked)}
-                      className="w-4 h-4 accent-indigo-600 rounded"
-                    />
-                  </div>
-
-                  {appLockEnabled && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 animate-in fade-in duration-150">
-                      <div>
-                        <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">
-                          Authentication Method
-                        </label>
-                        <select
-                          value={lockType}
-                          onChange={e => setLockType(e.target.value as any)}
-                          className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                        >
-                          <option value="both">Fingerprint &amp; Passcode (Recommended)</option>
-                          <option value="biometric">Fingerprint / Face ID Only</option>
-                          <option value="passcode">PIN Passcode Only</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">
-                          PIN Passcode (4-8 digits)
-                        </label>
-                        <input
-                          type="password"
-                          maxLength={8}
-                          placeholder="e.g. 1234"
-                          value={lockPasscode}
-                          onChange={e => setLockPasscode(e.target.value)}
-                          className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono tracking-widest"
-                        />
-                      </div>
-
-                      <div className="col-span-full flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
-                        <div>
-                          <span className="font-semibold text-slate-900 dark:text-white block">
-                            Auto-Lock On App Resume / Tab Switch
-                          </span>
-                          <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                            Immediately require authentication when switching back from other apps
-                          </p>
-                        </div>
-                        <input
-                          type="checkbox"
-                          checked={requireOnResume}
-                          onChange={e => setRequireOnResume(e.target.checked)}
-                          className="w-4 h-4 accent-indigo-600 rounded"
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  {saveLockMsg && (
-                    <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 text-xs flex items-center gap-2">
-                      <Check className="w-4 h-4" />
-                      <span>{saveLockMsg}</span>
-                    </div>
-                  )}
-
-                  <div className="flex justify-end gap-2 pt-2">
-                    <button
-                      type="submit"
-                      className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold transition shadow-xs cursor-pointer"
-                    >
-                      Save Lock Settings
-                    </button>
-                  </div>
-                </form>
-              </div>
-
-              {/* End-to-End Encryption */}
-              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
-                    <div className="w-7 h-7 rounded-lg bg-amber-100 dark:bg-amber-950 text-amber-600 flex items-center justify-center">
-                      <Lock className="w-4 h-4" />
-                    </div>
-                    <h4 className="text-xs font-bold text-slate-900 dark:text-white">
-                      Client-Side Encryption Vault
-                    </h4>
-                  </div>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
-                    Sensitive medical notes and private data are encrypted using 256-bit AES-GCM
-                    derived via PBKDF2 with 100,000 iterations.
-                  </p>
-                </div>
-
-                <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                  <span className="text-xs text-slate-500">
-                    Status:{' '}
-                    <strong className="text-emerald-500">
-                      Protected
-                    </strong>
-                  </span>
-                  <button
-                    onClick={() => setShowPassModal(true)}
-                    className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
-                  >
-                    Change Key
-                  </button>
-                </div>
-              </div>
-            </div>
+          {activeSection === 'ai' && (
+            <AiSettingsSection
+              aiProviderInput={aiProviderInput}
+              selectedAiModelInput={selectedAiModelInput}
+              onAiSummaryChange={(nextProvider, nextModel) => {
+                setAiProviderInput(nextProvider);
+                setSelectedAiModelInput(nextModel);
+              }}
+            />
           )}
 
-          {/* Sound Synthesizer, Chime Tones & Haptics */}
-          {activeSection === 'sound' && (
-            <div className="space-y-4 w-full min-w-0 overflow-hidden">
-              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs space-y-4">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-xl bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
-                      <Volume2 className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">
-                        Web Audio Synthesizer &amp; Tactile Haptics
-                      </h4>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Zero-latency offline sound synthesis and 10ms tactile micro-vibrations
-                      </p>
-                    </div>
-                  </div>
-                  <span className="text-xs font-mono font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950 px-2.5 py-1 rounded-lg border border-indigo-200/60 dark:border-indigo-800/60">
-                    {Math.round(masterVolume * 100)}%
-                  </span>
-                </div>
-
-                {/* Master Volume Slider */}
-                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 space-y-2">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-bold text-slate-700 dark:text-slate-200">
-                      Master Synthesizer Volume
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const next = masterVolume > 0 ? 0 : 0.8;
-                        setMasterVolume(next);
-                        soundEngine.setVolume(next);
-                        if (next > 0) soundEngine.playClick();
-                      }}
-                      className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
-                    >
-                      {masterVolume === 0 ? 'Unmute (80%)' : 'Mute All'}
-                    </button>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.05"
-                    value={masterVolume}
-                    onChange={(e) => {
-                      const val = parseFloat(e.target.value);
-                      setMasterVolume(val);
-                      soundEngine.setVolume(val);
-                    }}
-                    onMouseUp={() => soundEngine.playClick()}
-                    onTouchEnd={() => soundEngine.playClick()}
-                    className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-                  />
-                </div>
-
-                {/* Tactile Haptics Toggle */}
-                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-xs font-bold text-slate-900 dark:text-white">
-                      Tactile Haptic Feedback (10ms Pulse)
-                    </div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Subtle device vibration when completing tasks, habits, or switching tabs
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2.5 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        haptics.setEnabled(true);
-                        setHapticsEnabled(true);
-                        haptics.trigger(20);
-                        soundEngine.playClick();
-                      }}
-                      className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[10.5px] font-bold text-slate-700 dark:text-slate-300 cursor-pointer"
-                    >
-                      Test Pulse
-                    </button>
-                    <input
-                      type="checkbox"
-                      checked={hapticsEnabled}
-                      onChange={(e) => {
-                        const enabled = e.target.checked;
-                        setHapticsEnabled(enabled);
-                        haptics.setEnabled(enabled);
-                        if (enabled) haptics.trigger(15);
-                      }}
-                      className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
-                    />
-                  </div>
-                </div>
-
-                {/* 0. Per-Action & Event Tone Assignment (Notification, Alarm, Win Streak, etc.) */}
-                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-800 dark:text-slate-100">
-                        Custom Tone per Feature (Notification, Alarm, Win Streak, Habit, etc.)
-                      </label>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Assign any sound or ringtone to each specific action in JivanOS
-                      </p>
-                    </div>
-                    <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300">
-                      Per-Action Matrix
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                    {EVENT_SOUND_ITEMS.map((item) => {
-                      const currentVal = eventSounds[item.id] || item.defaultTone;
-                      const options = item.pool === 'alarm' ? ALARM_TONE_OPTIONS : NOTIFICATION_SOUND_OPTIONS;
-                      return (
-                        <div
-                          key={item.id}
-                          className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80"
-                        >
-                          <div className="flex items-center gap-2 min-w-0 flex-1">
-                            <span className="text-base shrink-0">{item.icon}</span>
-                            <div className="min-w-0">
-                              <div className="text-xs font-bold text-slate-900 dark:text-white truncate">
-                                {item.label}
-                              </div>
-                              <div className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
-                                {item.desc}
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <select
-                              value={currentVal}
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                soundEngine.setEventSound(item.id, val);
-                                setEventSounds(soundEngine.getAllEventSounds());
-                                setSelectedTone(soundEngine.getTone());
-                                setSelectedNotificationSound(soundEngine.getNotificationSound());
-                                soundEngine.playEventSound(item.id);
-                              }}
-                              className="max-w-[155px] px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-[11px] font-semibold text-slate-800 dark:text-slate-200 cursor-pointer"
-                            >
-                              {options.map((opt) => (
-                                <option key={opt.id} value={opt.id}>
-                                  {opt.icon} {opt.name}
-                                </option>
-                              ))}
-                            </select>
-                            <button
-                              type="button"
-                              onClick={() => soundEngine.playEventSound(item.id)}
-                              className="px-2 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 text-[10px] font-bold border border-indigo-200/60 dark:border-indigo-800/60 cursor-pointer"
-                              title={`Preview ${item.label}`}
-                            >
-                              Play
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* 1. Check-Off & Notification Sound Picker */}
-                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-800 dark:text-slate-100">
-                        Check-Off, Notification &amp; Win Sound Library ({NOTIFICATION_SOUND_OPTIONS.length})
-                      </label>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Plays instantly on task completion, habit logging, wins, or quick actions
-                      </p>
-                    </div>
-                    <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300">
-                      TickTick &bull; Tickit
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    {NOTIFICATION_SOUND_OPTIONS.map((opt) => {
-                      const isSelected = selectedNotificationSound === opt.id;
-                      return (
-                        <button
-                          key={opt.id}
-                          type="button"
-                          onClick={() => {
-                            setSelectedNotificationSound(opt.id);
-                            soundEngine.setNotificationSound(opt.id);
-                            setEventSounds(soundEngine.getAllEventSounds());
-                            soundEngine.playNotificationSound(opt.id);
-                          }}
-                          className={`p-2 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between gap-1 ${
-                            isSelected
-                              ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
-                              : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700/60'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="text-base">{opt.icon}</span>
-                            <span
-                              className={`text-[9px] font-bold uppercase px-1 rounded ${
-                                isSelected
-                                  ? 'bg-white/20 text-white'
-                                  : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
-                              }`}
-                            >
-                              {opt.source}
-                            </span>
-                          </div>
-                          <div>
-                            <div className="text-xs font-bold truncate flex items-center justify-between">
-                              <span>{opt.name}</span>
-                              {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
-                            </div>
-                            <span
-                              className={`text-[9.5px] line-clamp-1 leading-tight ${
-                                isSelected ? 'text-white/80' : 'text-slate-400 dark:text-slate-400'
-                              }`}
-                            >
-                              {opt.desc}
-                            </span>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* 2. Default Alarm & Reminder Ringtone Selector */}
-                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 space-y-2.5">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-800 dark:text-slate-100">
-                        Alarm &amp; Reminder Ringtone Library ({ALARM_TONE_OPTIONS.length})
-                      </label>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Includes Classic Phone Ring, Twin Bell, Rooster, TickTick &amp; Tickit tones (no vibration)
-                      </p>
-                    </div>
-
-                    {/* Filter Tabs */}
-                    <div className="flex items-center gap-1 bg-slate-200/80 dark:bg-slate-900 p-0.5 rounded-lg text-[10px] font-semibold">
-                      <button
-                        type="button"
-                        onClick={() => setAlarmCategoryFilter('all')}
-                        className={`px-2 py-0.5 rounded-md transition cursor-pointer ${
-                          alarmCategoryFilter === 'all'
-                            ? 'bg-white dark:bg-indigo-600 text-slate-900 dark:text-white shadow-2xs'
-                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-                        }`}
-                      >
-                        All ({ALARM_TONE_OPTIONS.length})
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setAlarmCategoryFilter('ticktick')}
-                        className={`px-2 py-0.5 rounded-md transition cursor-pointer ${
-                          alarmCategoryFilter === 'ticktick'
-                            ? 'bg-white dark:bg-indigo-600 text-slate-900 dark:text-white shadow-2xs'
-                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-                        }`}
-                      >
-                        TickTick
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setAlarmCategoryFilter('tickit')}
-                        className={`px-2 py-0.5 rounded-md transition cursor-pointer ${
-                          alarmCategoryFilter === 'tickit'
-                            ? 'bg-white dark:bg-indigo-600 text-slate-900 dark:text-white shadow-2xs'
-                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-                        }`}
-                      >
-                        Tickit
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 max-h-64 overflow-y-auto pr-1">
-                    {ALARM_TONE_OPTIONS.filter((t) => {
-                      if (alarmCategoryFilter === 'ticktick') return t.source === 'TickTick';
-                      if (alarmCategoryFilter === 'tickit') return t.source === 'Tickit';
-                      return true;
-                    }).map((t) => {
-                      const isSelected = selectedTone === t.id;
-                      return (
-                        <button
-                          key={t.id}
-                          type="button"
-                          onClick={() => {
-                            setSelectedTone(t.id);
-                            soundEngine.setTone(t.id);
-                            setEventSounds(soundEngine.getAllEventSounds());
-                            soundEngine.playAlarmChime(t.id);
-                          }}
-                          className={`p-2 rounded-xl text-left border transition cursor-pointer truncate flex flex-col justify-between gap-1 ${
-                            isSelected
-                              ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
-                              : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700/60'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="text-base">{t.icon}</span>
-                            <span
-                              className={`text-[9px] font-bold px-1 rounded ${
-                                isSelected
-                                  ? 'bg-white/20 text-white'
-                                  : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
-                              }`}
-                            >
-                              {t.source}
-                            </span>
-                          </div>
-                          <div>
-                            <div className="text-xs font-bold truncate flex items-center justify-between">
-                              <span className="truncate">{t.name}</span>
-                              {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-white ml-1 shrink-0" />}
-                            </div>
-                            <span
-                              className={`text-[9.5px] line-clamp-1 leading-tight ${
-                                isSelected ? 'text-white/80' : 'text-slate-400 dark:text-slate-400'
-                              }`}
-                            >
-                              {t.desc}
-                            </span>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Per-Category Sound Toggles */}
-                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 space-y-2.5">
-                  <div className="text-xs font-bold text-slate-700 dark:text-slate-200">
-                    Category Sound Channels
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                    {[
-                      { key: 'task', label: 'Tasks & Subtasks' },
-                      { key: 'habit', label: 'Habit Streaks' },
-                      { key: 'schedule', label: 'Timeline Tasks' },
-                      { key: 'medication', label: 'Medication Doses' },
-                      { key: 'water', label: 'Water & Hydration' },
-                      { key: 'bill', label: 'Bills & Finance' },
-                    ].map((cat) => {
-                      const isOn = soundToggles[cat.key] !== false;
-                      return (
-                        <label
-                          key={cat.key}
-                          className="flex items-center justify-between gap-2 p-2 rounded-lg bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 text-[11px] font-semibold text-slate-700 dark:text-slate-200 cursor-pointer"
-                        >
-                          <span className="truncate">{cat.label}</span>
-                          <input
-                            type="checkbox"
-                            checked={isOn}
-                            onChange={(e) => {
-                              const next = e.target.checked;
-                              soundEngine.setSoundEnabled(cat.key, next);
-                              setSoundToggles(soundEngine.getAllSoundToggles());
-                              if (next) soundEngine.playClick();
-                            }}
-                            className="w-3.5 h-3.5 accent-indigo-600 rounded shrink-0"
-                          />
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Synthesizer Quick Test Row */}
-                <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      soundEngine.playNotificationSound('tick');
-                      haptics.tick();
-                    }}
-                    className="flex-1 py-2 px-3 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950 text-[11px] font-bold text-indigo-600 dark:text-indigo-400 transition cursor-pointer"
-                  >
-                    Test TickTick Tick
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      soundEngine.playNotificationSound('bubble_pop');
-                      haptics.pop();
-                    }}
-                    className="flex-1 py-2 px-3 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-emerald-50 dark:hover:bg-emerald-950 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 transition cursor-pointer"
-                  >
-                    Test Habit Bubble Pop
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      soundEngine.playNotificationSound('streak_fanfare');
-                      haptics.celebration();
-                    }}
-                    className="flex-1 py-2 px-3 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-amber-50 dark:hover:bg-amber-950 text-[11px] font-bold text-amber-600 dark:text-amber-400 transition cursor-pointer"
-                  >
-                    Test Streak Fanfare
-                  </button>
-                </div>
-              </div>
-            </div>
+          {activeSection === 'system' && (
+            <RegionalScheduleSection
+              timezoneInput={timezoneInput}
+              onTimezoneChange={setTimezoneInput}
+            />
           )}
-        </div>
-      )}
-
-      {/* Change Passphrase Modal */}
-      {showPassModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-          <div className="w-full max-w-sm rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl p-5">
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-2">
-              Update Master Passphrase
-            </h3>
-            <p className="text-xs text-slate-400 mb-3">
-              This secret phrase never leaves your browser device.
-            </p>
-            <form onSubmit={handleSavePassphrase} className="space-y-3">
-              <input
-                type="password"
-                required
-                placeholder="New secret passphrase"
-                value={newPassphrase}
-                onChange={e => setNewPassphrase(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-mono"
-              />
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowPassModal(false)}
-                  className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold"
-                >
-                  Save Passphrase
-                </button>
-              </div>
-            </form>
-          </div>
         </div>
       )}
 
@@ -3274,3 +571,5 @@ export const SettingsManager: React.FC = () => {
     </div>
   );
 };
+
+export { SettingsManager as SettingsScreen };

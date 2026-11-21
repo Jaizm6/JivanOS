@@ -9,3 +9,15 @@ coverage/
 public/assets/aistudio/
 android/
 
+# Keystore files - NEVER commit these
+*.jks
+*.keystore
+jivanos-release.jks
+
+# Google OAuth credentials
+client_secret_*.json
+google-services.json
+
+# Local signing config
+keystore.properties
+signing.properties

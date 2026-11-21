@@ -57,8 +57,6 @@ export const QuoteBanner: React.FC<QuoteBannerProps> = ({ className = '' }) => {
     }
   });
 
-  const [fontScale, setFontScale] = useState(1);
-  const [fontFamily, setFontFamily] = useState('sans-serif');
   const [copied, setCopied] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -73,18 +71,6 @@ export const QuoteBanner: React.FC<QuoteBannerProps> = ({ className = '' }) => {
   const [editFormAuthor, setEditFormAuthor] = useState('');
   const [editFormCategory, setEditFormCategory] = useState<QuoteItem['category']>('wisdom');
   const [editFormSource, setEditFormSource] = useState('');
-
-  useEffect(() => {
-    const loadSettings = () => {
-      try {
-        setFontScale(Number(localStorage.getItem('omni_quote_font_scale')) || 1);
-        setFontFamily(localStorage.getItem('omni_quote_font_family') || 'sans-serif');
-      } catch {}
-    };
-    loadSettings();
-    window.addEventListener('omni_quote_theme_changed', loadSettings);
-    return () => window.removeEventListener('omni_quote_theme_changed', loadSettings);
-  }, []);
 
   // Auto-minimize expanded quote or dropdown menu when interacting with anything outside
   useEffect(() => {
@@ -269,13 +255,6 @@ export const QuoteBanner: React.FC<QuoteBannerProps> = ({ className = '' }) => {
             className={`text-slate-700 dark:text-zinc-200 font-medium leading-snug text-[11.5px] sm:text-xs transition-all ${
               isExpanded ? 'break-words whitespace-normal' : 'truncate'
             }`}
-            style={{
-              fontSize:
-                fontScale !== 1
-                  ? `${Math.min(1.05, Math.max(0.7, fontScale * 0.75))}rem`
-                  : undefined,
-              fontFamily,
-            }}
           >
             <span>“{toSentenceCase(currentQuote.text)}”</span>
             <span className="text-indigo-600/85 dark:text-indigo-400/90 font-semibold ml-1.5">

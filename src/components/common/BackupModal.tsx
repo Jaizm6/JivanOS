@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   X,
   Database,
@@ -26,7 +27,15 @@ import { useApp } from '../../context/AppContext';
 import { SyncDriveId } from '../../types';
 import { ProviderLogo } from './ProviderLogo';
 import { SnapshotInspectorModal } from './SnapshotInspectorModal';
+import { LocalBackupRestoreSection } from '../settings/LocalBackupRestoreSection';
 import { isRunningInIframe, isCapacitorNative } from '../../lib/firebase';
+import {
+  DROPBOX_SYNC_STATE_EVENT,
+  DropboxAccount,
+  disconnectDropbox,
+  getConnectedDropboxAccount,
+  silentReAuthDropbox,
+} from '../../utils/dropboxSync';
 
 interface BackupSnapshot {
   version: number;
@@ -67,11 +76,6 @@ const PRIMARY_DRIVES: DriveMeta[] = [
 ];
 
 const EXTRA_DRIVES: DriveMeta[] = [
-  {
-    id: 'onedrive',
-    name: 'Microsoft OneDrive',
-    subtitle: 'AppRoot cloud folder',
-  },
   {
     id: 'dropbox',
     name: 'Dropbox',
@@ -147,7 +151,7 @@ export const BackupModal: React.FC = () => {
   const inIframe = isRunningInIframe();
   const inNativeApk = isCapacitorNative();
 
-  const [activeTab, setActiveTab] = useState<'drives' | 'local' | 'history' | 'mobile_apk'>('drives');
+  const [activeTab, setActiveTab] = useState<'backup' | 'drives' | 'history' | 'mobile_apk'>('backup');
   const [selectedDriveId, setSelectedDriveId] = useState<SyncDriveId>(
     joplinSyncSettings.primaryTarget === 'none' ? 'gdrive' : joplinSyncSettings.primaryTarget
   );
@@ -165,6 +169,9 @@ export const BackupModal: React.FC = () => {
   const [isSyncingDrive, setIsSyncingDrive] = useState(false);
   const [isCheckingConfig, setIsCheckingConfig] = useState(false);
   const [isConnectingOAuth, setIsConnectingOAuth] = useState(false);
+  const [dropboxAccount, setDropboxAccount] = useState<DropboxAccount | null>(() =>
+    getConnectedDropboxAccount()
+  );
   const [copiedCallback, setCopiedCallback] = useState(false);
 
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -183,6 +190,7 @@ export const BackupModal: React.FC = () => {
   } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const selectedDrivePanelRef = useRef<HTMLDivElement>(null);
 
   const fetchSnapshots = async () => {
     try {
@@ -207,8 +215,27 @@ export const BackupModal: React.FC = () => {
       setPendingConfirm(null);
       setShowAdvancedOAuth(false);
       setManualGDriveTokenInput('');
+      setDropboxAccount(getConnectedDropboxAccount());
+      silentReAuthDropbox()
+        .then((acc) => setDropboxAccount(acc))
+        .catch(() => {});
     }
   }, [isBackupModalOpen, activeAccountIdentifier]);
+
+  useEffect(() => {
+    if (!isBackupModalOpen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [isBackupModalOpen]);
+
+  useEffect(() => {
+    const syncDropboxState = () => setDropboxAccount(getConnectedDropboxAccount());
+    window.addEventListener(DROPBOX_SYNC_STATE_EVENT, syncDropboxState);
+    return () => window.removeEventListener(DROPBOX_SYNC_STATE_EVENT, syncDropboxState);
+  }, []);
 
   if (!isBackupModalOpen) return null;
 
@@ -227,9 +254,8 @@ export const BackupModal: React.FC = () => {
         return Boolean(cfg?.vaultId && cfg.vaultId.trim().length >= 4);
       case 'local_folder':
         return Boolean(cfg?.folderName);
-      case 'onedrive':
       case 'dropbox':
-        return Boolean(cfg?.accessToken?.trim());
+        return Boolean(dropboxAccount?.connected);
       case 'nextcloud':
       case 'webdav':
         return Boolean(cfg?.serverUrl?.trim());
@@ -391,18 +417,24 @@ export const BackupModal: React.FC = () => {
     }
   };
 
-  const handleConnectDriveOAuth = async (driveId: 'onedrive' | 'gdrive' | 'dropbox', customClientId?: string) => {
+  const handleConnectDriveOAuth = async (driveId: 'gdrive' | 'dropbox', customClientId?: string) => {
     setIsConnectingOAuth(true);
     setErrorMessage(null);
     setSuccessMessage(null);
     try {
       const res = await connectDriveOAuth(driveId, customClientId);
       if (res.success) {
-        setSuccessMessage(
-          driveId === 'gdrive'
-            ? 'Google Drive connected for this session.'
-            : `${selectedDriveMeta.name} connected cleanly.`
-        );
+        if (driveId === 'dropbox') {
+          const connected = getConnectedDropboxAccount();
+          setDropboxAccount(connected);
+          setSuccessMessage(
+            connected?.email
+              ? `Connected as ${connected.email}`
+              : 'Dropbox connected cleanly.'
+          );
+        } else {
+          setSuccessMessage('Google Drive connected for this session.');
+        }
       } else if (res.error) {
         setErrorMessage(res.error);
       }
@@ -410,6 +442,24 @@ export const BackupModal: React.FC = () => {
       setErrorMessage(e?.message || 'Could not connect drive.');
     } finally {
       setIsConnectingOAuth(false);
+    }
+  };
+
+  const handleDisconnectDropbox = async () => {
+    try {
+      await disconnectDropbox();
+      setDropboxAccount(null);
+      updateDriveConfig('dropbox', {
+        enabled: false,
+        clientId: '',
+        accessToken: '',
+        accountEmail: undefined,
+        lastStatus: 'idle',
+        lastError: undefined,
+      });
+      setSuccessMessage('Dropbox disconnected.');
+    } catch (e: any) {
+      setErrorMessage(e?.message || 'Could not disconnect Dropbox.');
     }
   };
 
@@ -502,6 +552,9 @@ export const BackupModal: React.FC = () => {
           setErrorMessage(null);
           setSuccessMessage(null);
           setPendingConfirm(null);
+          window.requestAnimationFrame(() => {
+            selectedDrivePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          });
         }}
         className={`p-3 rounded-xl border text-left transition flex flex-col justify-between gap-2 cursor-pointer ${
           isSelected
@@ -542,11 +595,20 @@ export const BackupModal: React.FC = () => {
     );
   };
 
-  return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs p-3 sm:p-4 md:p-6 flex min-h-full items-center justify-center animate-in fade-in duration-150">
-      <div className="w-full max-w-3xl rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl flex flex-col max-h-[92vh] overflow-hidden">
+  return createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Sync and Backups"
+      className="fixed inset-0 z-[99990] bg-black/60 backdrop-blur-xs sm:p-4 md:p-6 flex items-stretch sm:items-center justify-center animate-in fade-in duration-150"
+      onClick={() => setIsBackupModalOpen(false)}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full h-[100dvh] sm:h-auto sm:max-h-[88dvh] sm:max-w-3xl rounded-none sm:rounded-2xl bg-white dark:bg-slate-900 sm:border border-slate-200 dark:border-slate-800 shadow-2xl flex flex-col overflow-hidden"
+      >
         {/* Clean Header */}
-        <div className="px-5 py-4 border-b border-slate-200/80 dark:border-slate-800 flex items-center justify-between gap-4 shrink-0">
+        <div className="px-4 sm:px-5 pt-[max(0.875rem,env(safe-area-inset-top))] pb-3 sm:py-4 border-b border-slate-200/80 dark:border-slate-800 flex items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0">
               <FolderSync className="w-4.5 h-4.5" />
@@ -556,7 +618,7 @@ export const BackupModal: React.FC = () => {
                 Sync &amp; Backups
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                Keep your tasks, habits, health &amp; profile synced across devices
+                Cloud, Drive, Dropbox, Telegram &amp; local backups
               </p>
             </div>
           </div>
@@ -565,38 +627,38 @@ export const BackupModal: React.FC = () => {
             type="button"
             onClick={() => setIsBackupModalOpen(false)}
             aria-label="Close Sync and Backups"
-            className="p-2 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer shrink-0"
+            className="p-2 rounded-xl text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer shrink-0"
           >
-            <X className="w-4.5 h-4.5" />
+            <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Navigation Tabs */}
-        <div className="px-5 pt-2 flex items-center gap-2 border-b border-slate-200/80 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900 shrink-0 overflow-x-auto no-scrollbar">
+        {/* Responsive Navigation Tabs (4 equal columns on mobile, zero horizontal clipping) */}
+        <div className="px-2 sm:px-5 pt-1.5 grid grid-cols-4 sm:flex sm:items-center sm:gap-2 border-b border-slate-200/80 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900 shrink-0">
+          <button
+            type="button"
+            onClick={() => setActiveTab('backup')}
+            className={`pb-2.5 pt-1 px-1 sm:px-3 text-[11px] sm:text-xs font-semibold transition border-b-2 flex items-center justify-center gap-1 sm:gap-1.5 whitespace-nowrap cursor-pointer ${
+              activeTab === 'backup'
+                ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
+                : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+            }`}
+          >
+            <HardDrive className="w-3.5 h-3.5 shrink-0 hidden xs:inline-block sm:inline-block" />
+            <span>Backup</span>
+          </button>
+
           <button
             type="button"
             onClick={() => setActiveTab('drives')}
-            className={`pb-2.5 px-3 text-xs font-semibold transition border-b-2 flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer ${
+            className={`pb-2.5 pt-1 px-1 sm:px-3 text-[11px] sm:text-xs font-semibold transition border-b-2 flex items-center justify-center gap-1 sm:gap-1.5 whitespace-nowrap cursor-pointer ${
               activeTab === 'drives'
                 ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
                 : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
             }`}
           >
-            <FolderSync className="w-3.5 h-3.5" />
-            <span>Sync Drives ({activeDriveCount})</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('local')}
-            className={`pb-2.5 px-3 text-xs font-semibold transition border-b-2 flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer ${
-              activeTab === 'local'
-                ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
-                : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-            }`}
-          >
-            <HardDrive className="w-3.5 h-3.5" />
-            <span>Export &amp; Import</span>
+            <FolderSync className="w-3.5 h-3.5 shrink-0 hidden xs:inline-block sm:inline-block" />
+            <span>Drives{activeDriveCount > 0 ? ` (${activeDriveCount})` : ''}</span>
           </button>
 
           <button
@@ -605,27 +667,27 @@ export const BackupModal: React.FC = () => {
               setActiveTab('history');
               fetchSnapshots();
             }}
-            className={`pb-2.5 px-3 text-xs font-semibold transition border-b-2 flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer tabular-nums ${
+            className={`pb-2.5 pt-1 px-1 sm:px-3 text-[11px] sm:text-xs font-semibold transition border-b-2 flex items-center justify-center gap-1 sm:gap-1.5 whitespace-nowrap cursor-pointer tabular-nums ${
               activeTab === 'history'
                 ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
                 : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
             }`}
           >
-            <Clock className="w-3.5 h-3.5" />
-            <span>Snapshots ({snapshots.length})</span>
+            <Clock className="w-3.5 h-3.5 shrink-0 hidden xs:inline-block sm:inline-block" />
+            <span>History{snapshots.length > 0 ? ` (${snapshots.length})` : ''}</span>
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('mobile_apk')}
-            className={`pb-2.5 px-3 text-xs font-semibold transition border-b-2 flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer ${
+            className={`pb-2.5 pt-1 px-1 sm:px-3 text-[11px] sm:text-xs font-semibold transition border-b-2 flex items-center justify-center gap-1 sm:gap-1.5 whitespace-nowrap cursor-pointer ${
               activeTab === 'mobile_apk'
                 ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
                 : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
             }`}
           >
-            <Smartphone className="w-3.5 h-3.5" />
-            <span>Android APK</span>
+            <Smartphone className="w-3.5 h-3.5 shrink-0 hidden xs:inline-block sm:inline-block" />
+            <span>APK</span>
           </button>
         </div>
 
@@ -693,10 +755,64 @@ export const BackupModal: React.FC = () => {
         )}
 
         {/* Scrollable Content */}
-        <div className="p-5 overflow-y-auto flex-1 space-y-5">
-          {/* TAB 1: CLEAN MULTI-DRIVE SYNC */}
+        <div className="px-3.5 py-4 sm:p-5 overflow-y-auto overflow-x-hidden overscroll-contain flex-1 min-h-0 space-y-4 sm:space-y-5 bg-slate-50/40 dark:bg-slate-950/30">
+          {/* TAB 1 (DEFAULT): UNIFIED 5-PROVIDER BACKUP & SYNC (Cloud, Drive, Dropbox, Telegram, Local) */}
+          {activeTab === 'backup' && (
+            <div className="space-y-4 sm:space-y-5 pb-2">
+              <LocalBackupRestoreSection />
+
+              <div className="p-4 sm:p-5 rounded-2xl sm:rounded-[28px] border border-slate-200/90 dark:border-zinc-800 bg-white dark:bg-zinc-900/95 space-y-3 shadow-xs">
+                <div className="space-y-1">
+                  <h4 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-indigo-500" />
+                    <span>CSV &amp; Bundle Exports</span>
+                  </h4>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Export habits, tasks, or schedule logs as spreadsheets.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={exportHabitsCSV}
+                    className="min-h-[40px] py-2 px-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold text-xs transition cursor-pointer"
+                  >
+                    Habits CSV
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={exportTasksCSV}
+                    className="min-h-[40px] py-2 px-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold text-xs transition cursor-pointer"
+                  >
+                    Tasks CSV
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={exportScheduleCSV}
+                    className="min-h-[40px] py-2 px-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold text-xs transition cursor-pointer"
+                  >
+                    Schedule CSV
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={exportCombinedBundle}
+                  className="w-full min-h-[44px] py-2.5 px-4 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Download Combined JSON Archive</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 2: ADVANCED MULTI-DRIVE SYNC (Vault, Syncthing, Nextcloud, WebDAV, S3) */}
           {activeTab === 'drives' && (
-            <div className="space-y-5">
+            <div className="space-y-4 sm:space-y-5 pb-2">
               {/* Step 1: Compact Sync Overview & Quick Preferences */}
               <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap items-center gap-4 text-xs text-slate-700 dark:text-slate-300">
@@ -789,12 +905,12 @@ export const BackupModal: React.FC = () => {
                     <span>
                       {showMoreDrives
                         ? 'Hide extra drives'
-                        : 'More drives (OneDrive, Dropbox, Nextcloud, WebDAV, S3)'}
+                        : 'More drives (Dropbox, Nextcloud, WebDAV, S3)'}
                     </span>
                   </button>
 
                   {showMoreDrives && (
-                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 mt-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mt-2">
                       {EXTRA_DRIVES.map((drive) => renderDriveCard(drive))}
                     </div>
                   )}
@@ -802,7 +918,10 @@ export const BackupModal: React.FC = () => {
               </div>
 
               {/* Step 3: Clean Selected Drive Setup */}
-              <div className="pt-4 border-t border-slate-200/80 dark:border-slate-800 space-y-4">
+              <div
+                ref={selectedDrivePanelRef}
+                className="pt-4 border-t border-slate-200/80 dark:border-slate-800 space-y-4 scroll-mt-3"
+              >
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center shrink-0">
@@ -1129,68 +1248,50 @@ export const BackupModal: React.FC = () => {
                   </div>
                 )}
 
-                {/* OneDrive & Dropbox */}
-                {(selectedDriveId === 'onedrive' || selectedDriveId === 'dropbox') && (
+                {/* Dropbox — OAuth2 PKCE (zero manual keys or tokens) */}
+                {selectedDriveId === 'dropbox' && (
                   <div className="space-y-3">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <label className="text-xs font-medium text-slate-600 dark:text-slate-300 block">
-                          {selectedDriveId === 'onedrive' ? 'Azure App (Client) ID' : 'Dropbox App Key'}
-                        </label>
-                        <input
-                          type="text"
-                          value={selectedDriveConfig?.clientId || ''}
-                          onChange={(e) =>
-                            updateDriveConfig(selectedDriveId, { clientId: e.target.value })
-                          }
-                          placeholder={selectedDriveId === 'onedrive' ? 'Azure Client ID' : 'Dropbox App Key'}
-                          className="w-full text-xs px-3 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-mono"
-                        />
+                    {dropboxAccount?.connected ? (
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span className="w-8 h-8 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center shrink-0">
+                            {dropboxAccount.initials}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate">
+                              Connected as {dropboxAccount.email || dropboxAccount.name}
+                            </p>
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                              App folder: /Apps/JivanOS/backup.json
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleDisconnectDropbox}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer shrink-0 whitespace-nowrap"
+                        >
+                          <LogOut className="w-3.5 h-3.5" />
+                          <span>Disconnect</span>
+                        </button>
                       </div>
-
-                      <div className="space-y-1">
-                        <label className="text-xs font-medium text-slate-600 dark:text-slate-300 block">
-                          Access Token
-                        </label>
-                        <input
-                          type="password"
-                          value={selectedDriveConfig?.accessToken || ''}
-                          onChange={(e) =>
-                            updateDriveConfig(selectedDriveId, {
-                              accessToken: e.target.value,
-                              enabled: Boolean(e.target.value.trim()),
-                            })
-                          }
-                          placeholder="Bearer token"
-                          className="w-full text-xs px-3 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-mono"
-                        />
+                    ) : (
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <p className="text-xs text-slate-600 dark:text-slate-300">
+                          Sign in to your Dropbox account to back up privately inside your sandboxed{' '}
+                          <span className="font-mono text-[11px]">/Apps/JivanOS/</span> folder.
+                        </p>
+                        <button
+                          type="button"
+                          disabled={isConnectingOAuth}
+                          onClick={() => handleConnectDriveOAuth('dropbox')}
+                          className="px-4 py-2 rounded-lg bg-[#0061FF] hover:bg-[#0051D5] text-white text-xs font-semibold transition flex items-center gap-2 cursor-pointer disabled:opacity-50 shrink-0 whitespace-nowrap"
+                        >
+                          <ProviderLogo provider="dropbox" className="w-4 h-4 text-white" />
+                          <span>{isConnectingOAuth ? 'Connecting…' : 'Connect Dropbox'}</span>
+                        </button>
                       </div>
-                    </div>
-
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <button
-                        type="button"
-                        disabled={isConnectingOAuth}
-                        onClick={() => handleConnectDriveOAuth(selectedDriveId)}
-                        className="px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50 whitespace-nowrap"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                        <span>Connect {selectedDriveMeta.name}</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={handleCopyCallbackUrl}
-                        className="text-xs font-mono text-slate-500 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-400 flex items-center gap-1 cursor-pointer"
-                      >
-                        {copiedCallback ? (
-                          <Check className="w-3.5 h-3.5 text-emerald-500" />
-                        ) : (
-                          <Copy className="w-3.5 h-3.5" />
-                        )}
-                        <span>{copiedCallback ? 'Copied URI' : 'Copy Redirect URI'}</span>
-                      </button>
-                    </div>
+                    )}
                   </div>
                 )}
 
@@ -1398,109 +1499,6 @@ export const BackupModal: React.FC = () => {
             </div>
           )}
 
-          {/* TAB 2: EXPORT & IMPORT */}
-          {activeTab === 'local' && (
-            <div className="space-y-5">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/30 space-y-3 flex flex-col justify-between">
-                  <div className="space-y-1">
-                    <h4 className="text-sm font-semibold text-slate-900 dark:text-white">
-                      Export Local JSON
-                    </h4>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                      Download a complete offline backup of tasks, habits, medications, bills, and profile.
-                    </p>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={downloadLocalBackupFile}
-                    className="w-full py-2 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition flex items-center justify-center gap-2 cursor-pointer"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Download JSON Backup</span>
-                  </button>
-                </div>
-
-                <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/30 space-y-3 flex flex-col justify-between">
-                  <div className="space-y-1">
-                    <h4 className="text-sm font-semibold text-slate-900 dark:text-white">
-                      Import &amp; Restore JSON
-                    </h4>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                      Select a previously exported JivanOS JSON backup file to restore your data.
-                    </p>
-                  </div>
-
-                  <div>
-                    <input
-                      type="file"
-                      ref={fileInputRef}
-                      accept=".json,application/json"
-                      onChange={handleFileUpload}
-                      className="hidden"
-                      id="input-restore-backup"
-                    />
-                    <label
-                      htmlFor="input-restore-backup"
-                      className="w-full py-2 px-4 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition flex items-center justify-center gap-2 cursor-pointer text-center"
-                    >
-                      <Upload className="w-3.5 h-3.5" />
-                      <span>Select Backup File</span>
-                    </label>
-                  </div>
-                </div>
-              </div>
-
-              <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/30 space-y-3">
-                <div className="space-y-1">
-                  <h4 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
-                    <FileText className="w-4 h-4 text-indigo-500" />
-                    <span>CSV &amp; Bundle Exports</span>
-                  </h4>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Export habits, tasks, or schedule logs as spreadsheets.
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={exportHabitsCSV}
-                    className="py-2 px-3 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold text-xs transition cursor-pointer"
-                  >
-                    Habits CSV
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={exportTasksCSV}
-                    className="py-2 px-3 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold text-xs transition cursor-pointer"
-                  >
-                    Tasks CSV
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={exportScheduleCSV}
-                    className="py-2 px-3 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold text-xs transition cursor-pointer"
-                  >
-                    Schedule CSV
-                  </button>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={exportCombinedBundle}
-                  className="w-full py-2 px-4 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <Download className="w-4 h-4" />
-                  <span>Download Combined JSON Archive</span>
-                </button>
-              </div>
-            </div>
-          )}
-
           {/* TAB 3: SNAPSHOT HISTORY */}
           {activeTab === 'history' && (
             <div className="space-y-3">
@@ -1588,7 +1586,7 @@ export const BackupModal: React.FC = () => {
                   </h4>
                 </div>
                 <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                  v3.0.x builds share a consistent signing certificate (<code className="font-mono">com.jivanos.lifesystem</code>) for smooth in-place updates. Pair Android and desktop devices using <strong>JivanOS Private Vault</strong> or <strong>Local / Syncthing Folder</strong>.
+                  v3.0.x builds share a consistent signing certificate (<code className="font-mono">com.jaiz.jivanos</code>) for smooth in-place updates. Pair Android and desktop devices using <strong>JivanOS Private Vault</strong> or <strong>Local / Syncthing Folder</strong>.
                 </p>
                 <p className="text-xs text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">
                   Upgrading from an older v2.1.x APK? Export a JSON backup first, uninstall the old v2.1.x APK once if Android shows a package conflict, then install v3.0.x — all future updates install cleanly in-place.
@@ -1601,7 +1599,7 @@ export const BackupModal: React.FC = () => {
                 </div>
                 <pre className="p-2.5 rounded-lg bg-black/50 border border-slate-800 text-emerald-300 select-all overflow-x-auto">
 {`npm install @capacitor/core @capacitor/cli @capacitor/android
-npx cap init "JivanOS" "com.jivanos.lifesystem" --web-dir "dist"
+npx cap init "JivanOS" "com.jaiz.jivanos" --web-dir "dist"
 npm run build && npx cap add android && npx cap sync
 cd android && ./gradlew assembleRelease`}
                 </pre>
@@ -1611,7 +1609,7 @@ cd android && ./gradlew assembleRelease`}
         </div>
 
         {/* Minimal Footer */}
-        <div className="px-5 py-3.5 border-t border-slate-200/80 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900 flex items-center justify-between gap-3 shrink-0 text-xs">
+        <div className="px-4 sm:px-5 pt-3 pb-[max(0.875rem,env(safe-area-inset-bottom))] sm:py-3.5 border-t border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-between gap-3 shrink-0 text-xs">
           <div className="text-slate-500 dark:text-slate-400 truncate tabular-nums">
             <span>Storage: </span>
             <strong className="text-slate-800 dark:text-slate-200 font-semibold">
@@ -1621,7 +1619,7 @@ cd android && ./gradlew assembleRelease`}
           <button
             type="button"
             onClick={() => setIsBackupModalOpen(false)}
-            className="px-4 py-1.5 rounded-lg bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-semibold hover:bg-slate-300 dark:hover:bg-slate-700 transition cursor-pointer shrink-0"
+            className="min-h-[38px] px-5 py-1.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-semibold hover:bg-slate-300 dark:hover:bg-slate-700 transition cursor-pointer shrink-0"
           >
             Done
           </button>
@@ -1636,6 +1634,7 @@ cd android && ./gradlew assembleRelease`}
         accountEmail={activeAccountIdentifier}
         onRestore={(version) => handleRestoreSnapshot(version)}
       />
-    </div>
+    </div>,
+    document.body
   );
 };

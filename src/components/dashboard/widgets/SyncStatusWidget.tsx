@@ -333,22 +333,22 @@ export const SyncStatusWidget: React.FC = () => {
                   {firebaseUser?.email ||
                     userProfile?.email ||
                     userProfile?.identifier ||
-                    'Local-First • Multi-Drive Ready'}
+                    'Local only'}
                 </p>
               </div>
             </div>
 
             <div className="space-y-1 pt-1 text-xs text-slate-600 dark:text-slate-300">
               <div className="flex items-center justify-between text-[11px]">
-                <span className="text-slate-500 dark:text-slate-400">Profile Synced:</span>
-                <span className="font-semibold text-slate-800 dark:text-slate-200" title={formatExactTime(userProfile?.lastSyncedAt || lastSyncTime)}>
-                  {formatRelativeTime(userProfile?.lastSyncedAt || lastSyncTime)}
+                <span className="text-slate-500 dark:text-slate-400">Last Sync:</span>
+                <span className="font-semibold text-slate-800 dark:text-slate-200" title={formatExactTime(lastSyncTime)}>
+                  {lastSyncTime ? formatRelativeTime(lastSyncTime) : 'Never synced'}
                 </span>
               </div>
               <div className="flex items-center justify-between text-[11px]">
-                <span className="text-slate-500 dark:text-slate-400">Personal Details:</span>
-                <span className="font-semibold text-emerald-600 dark:text-emerald-400">
-                  {userProfile?.avatarPhoto ? 'Photo + DOB Synced' : 'Auto-Sync Enabled'}
+                <span className="text-slate-500 dark:text-slate-400">Sync Status:</span>
+                <span className={`font-semibold ${lastSyncTime ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400'}`}>
+                  {lastSyncTime ? 'Synced' : 'Not connected'}
                 </span>
               </div>
             </div>
@@ -473,7 +473,7 @@ export const SyncStatusWidget: React.FC = () => {
               </div>
               <ol className="text-[11.5px] list-decimal list-inside space-y-1 text-slate-600 dark:text-slate-300 leading-relaxed">
                 <li>Open <strong>Backup &amp; Multi-Drive Sync</strong> from the sidebar.</li>
-                <li>Connect the same <strong>OneDrive, Google Drive, Dropbox, Nextcloud, WebDAV, S3, or Syncthing folder</strong> on both devices.</li>
+                <li>Connect the same <strong>Google Drive, Dropbox, Nextcloud, WebDAV, S3, or Syncthing folder</strong> on both devices.</li>
                 <li>Your tasks, habits, meds, bills, and personal details (photo, DOB, name) merge automatically on interval and on edit!</li>
               </ol>
             </div>

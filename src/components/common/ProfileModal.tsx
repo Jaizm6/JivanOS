@@ -20,15 +20,19 @@ import { useApp } from '../../context/AppContext';
 import { compressProfilePhoto, formatFileSize } from '../../utils/imageCompressor';
 import { SupportedCurrency } from '../../types';
 import { DEFAULT_AVATAR_PHOTO } from '../../utils/initialData';
+import {
+  getRealSyncOverview,
+  requestOpenBackupSyncScreen,
+} from '../../sync/syncConnectionState';
 
 export const ProfileModal: React.FC = () => {
   const {
     isAuthModalOpen,
     setIsAuthModalOpen,
+    setActiveTab,
     userProfile,
     updateUserProfile,
     pushNotification,
-    setIsBackupModalOpen,
     currency,
     setCurrency,
     firebaseUser,
@@ -52,12 +56,6 @@ export const ProfileModal: React.FC = () => {
   const [email, setEmail] = useState(userProfile.identifier || userProfile.email || '');
   const [bio, setBio] = useState(userProfile.bio || '');
   const [dob, setDob] = useState(userProfile.dateOfBirth || '');
-  const [heightCm, setHeightCm] = useState<string>(
-    userProfile.heightCm ? String(userProfile.heightCm) : ''
-  );
-  const [weightKg, setWeightKg] = useState<string>(
-    userProfile.weightKg ? String(userProfile.weightKg) : ''
-  );
   const [gender, setGender] = useState<'male' | 'female' | 'other' | 'unspecified'>(
     userProfile.gender || 'unspecified'
   );
@@ -75,8 +73,6 @@ export const ProfileModal: React.FC = () => {
       setEmail(userProfile.identifier || userProfile.email || '');
       setBio(userProfile.bio || '');
       setDob(userProfile.dateOfBirth || '');
-      setHeightCm(userProfile.heightCm ? String(userProfile.heightCm) : '');
-      setWeightKg(userProfile.weightKg ? String(userProfile.weightKg) : '');
       setGender(userProfile.gender || 'unspecified');
       setAvatarPhoto(userProfile.avatarPhoto || '');
       setTwoFactor(Boolean(userProfile.twoFactorEnabled));
@@ -143,7 +139,7 @@ export const ProfileModal: React.FC = () => {
     } catch (err: any) {
       setErrorMsg(
         err?.message ||
-          'Google sign-in could not complete in this browser context. You can continue using Local-First mode or connect JivanOS Private Vault, OneDrive, Google Drive, Dropbox, WebDAV, S3, or a Local Folder in Multi-Drive Sync.'
+          'Google sign-in could not complete in this browser context. You can continue using Local-First mode or connect JivanOS Private Vault, Google Drive, Dropbox, WebDAV, S3, or a Local Folder in Multi-Drive Sync.'
       );
     } finally {
       setIsLoggingIn(false);
@@ -162,13 +158,10 @@ export const ProfileModal: React.FC = () => {
       avatarPhoto,
       bio: bio.trim(),
       dateOfBirth: dob,
-      heightCm: heightCm ? Number(heightCm) : undefined,
-      weightKg: weightKg ? Number(weightKg) : undefined,
       gender,
       twoFactorEnabled: twoFactor,
       preferredCurrency: selectedCurrency,
       updatedAt: nowIso,
-      lastSyncedAt: nowIso,
     });
 
     if (setCurrency && selectedCurrency) {
@@ -177,8 +170,8 @@ export const ProfileModal: React.FC = () => {
 
     setSaveSuccess(true);
     pushNotification(
-      'Profile Saved & Queued for Sync',
-      `Updated profile for ${nickname.trim() || fullName.trim() || 'Local Vault'}.`,
+      'Profile Saved',
+      `Updated profile for ${nickname.trim() || fullName.trim() || 'your account'}.`,
       'system'
     );
 
@@ -189,9 +182,12 @@ export const ProfileModal: React.FC = () => {
   };
 
   const displayName = nickname.trim() || fullName.trim().split(' ')[0] || 'User';
-  const enabledDrivesCount = Object.values(joplinSyncSettings.drives).filter(
-    (d) => d.enabled || d.autoBackupEnabled
-  ).length;
+  const realSyncOverview = getRealSyncOverview(firebaseUser, joplinSyncSettings);
+  const openManageSync = () => {
+    setIsAuthModalOpen(false);
+    setActiveTab('settings');
+    requestOpenBackupSyncScreen();
+  };
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs p-3 sm:p-4 md:p-6 flex min-h-full items-center justify-center animate-in fade-in duration-150">
@@ -231,22 +227,22 @@ export const ProfileModal: React.FC = () => {
               <div className="space-y-0.5">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-xs font-bold text-slate-900 dark:text-white">
-                    Local-First Vault + Multi-Drive Profile Sync
+                    Local-First Profile &amp; Sync
                   </span>
-                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300">
-                    {enabledDrivesCount > 0
-                      ? `${enabledDrivesCount} Drive${enabledDrivesCount > 1 ? 's' : ''} Active`
-                      : '100% On-Device'}
+                  <span className="px-2 py-0.5 rounded-lg text-[11px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                    {realSyncOverview.connectedCount > 0
+                      ? `${realSyncOverview.connectedCount} Connected`
+                      : 'Not connected'}
                   </span>
                 </div>
-                <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-snug">
-                  No account is required to use JivanOS. Any photo, name, DOB, or health details you enter below stay private on your device and sync automatically to your chosen drives (OneDrive, Google Drive, Dropbox, Nextcloud, WebDAV, S3, or Local Folder).
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-snug">
+                  Stored locally on your device. Connect a sync provider in Backup &amp; Sync to keep your profile synced across devices.
                 </p>
               </div>
             </div>
 
             <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
-              <label className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer">
+              <label className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={joplinSyncSettings.syncPersonalDetails}
@@ -260,13 +256,10 @@ export const ProfileModal: React.FC = () => {
 
               <button
                 type="button"
-                onClick={() => {
-                  setIsAuthModalOpen(false);
-                  setIsBackupModalOpen(true);
-                }}
-                className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-xs transition cursor-pointer"
+                onClick={openManageSync}
+                className="px-3 py-1.5 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-white dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 text-xs font-bold transition cursor-pointer"
               >
-                Configure Drives
+                Manage Sync
               </button>
             </div>
           </div>
@@ -430,78 +423,51 @@ export const ProfileModal: React.FC = () => {
             <div className="space-y-1">
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-slate-400" />
-                <span>Personal Bio / Focus Mantra</span>
+                <span>Bio</span>
               </label>
               <input
                 type="text"
                 value={bio}
                 onChange={(e) => setBio(e.target.value)}
-                placeholder="e.g. Focus, execute, stay mindful"
                 className="w-full text-xs px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
               />
             </div>
           </div>
 
-          {/* Physical Stats & Currency Section */}
+          {/* Personal Details & Currency Section */}
           <div className="p-4 rounded-2xl border border-slate-200 dark:border-slate-700/70 bg-slate-50/60 dark:bg-slate-800/30 space-y-3">
             <h4 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
               <Activity className="w-4 h-4 text-emerald-500" />
-              <span>Personal Details, DOB &amp; Currency (Synced Across Drives)</span>
+              <span>Personal Details &amp; Currency</span>
             </h4>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
               <div>
-                <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 block mb-1">
+                <label className="text-xs font-semibold text-slate-600 dark:text-slate-300 block mb-1">
                   Date of Birth
                 </label>
                 <input
                   type="date"
                   value={dob}
                   onChange={(e) => setDob(e.target.value)}
-                  className="w-full text-xs px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200"
+                  className="w-full text-xs px-2.5 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200"
                 />
               </div>
 
               <div>
-                <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 block mb-1">
+                <label className="text-xs font-semibold text-slate-600 dark:text-slate-300 block mb-1">
                   Gender
                 </label>
                 <select
                   value={gender}
                   onChange={(e) => setGender(e.target.value as any)}
-                  className="w-full text-xs px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 cursor-pointer"
+                  className="w-full text-xs px-2.5 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 cursor-pointer"
                 >
                   <option value="unspecified">Unspecified</option>
                   <option value="male">Male</option>
                   <option value="female">Female</option>
                   <option value="other">Other</option>
                 </select>
-              </div>
-
-              <div>
-                <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 block mb-1">
-                  Height (cm)
-                </label>
-                <input
-                  type="number"
-                  value={heightCm}
-                  placeholder="Optional"
-                  onChange={(e) => setHeightCm(e.target.value)}
-                  className="w-full text-xs px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 block mb-1">
-                  Weight (kg)
-                </label>
-                <input
-                  type="number"
-                  value={weightKg}
-                  placeholder="Optional"
-                  onChange={(e) => setWeightKg(e.target.value)}
-                  className="w-full text-xs px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-mono"
-                />
               </div>
             </div>
 
@@ -552,7 +518,7 @@ export const ProfileModal: React.FC = () => {
                 <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
                   {firebaseUser
                     ? `Signed in as ${firebaseUser.email || firebaseUser.displayName}`
-                    : 'Optional: Sign in with Google, or use Joplin-style OneDrive/Drive/Dropbox/WebDAV sync instead'}
+                    : 'Optional: Sign in with Google, or use Google Drive / Dropbox / WebDAV sync instead'}
                 </p>
               </div>
             </div>
@@ -605,14 +571,11 @@ export const ProfileModal: React.FC = () => {
           <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2.5">
             <button
               type="button"
-              onClick={() => {
-                setIsAuthModalOpen(false);
-                setIsBackupModalOpen(true);
-              }}
+              onClick={openManageSync}
               className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
             >
               <Cloud className="w-3.5 h-3.5" />
-              <span>Open Multi-Drive Sync &amp; Backup &rarr;</span>
+              <span>Manage Sync</span>
             </button>
 
             <div className="flex items-center gap-2">

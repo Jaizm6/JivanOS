@@ -1,8 +1,7 @@
 /**
  * Joplin-Style Multi-Drive Synchronization & Auto-Backup Engine
  * Supports:
- * 1. Local / OS Synced Folder (File System Access API + IndexedDB handle persistence — works with Syncthing, iCloud Drive, OneDrive/Drive Desktop, Nextcloud Folder)
- * 2. Microsoft OneDrive (OAuth 2.0 PKCE / Graph API /me/drive/special/approot:/jivanos-sync.json:/content)
+ * 1. Local / OS Synced Folder (File System Access API + IndexedDB handle persistence — works with Syncthing, iCloud Drive, Drive Desktop, Nextcloud Folder)
  * 3. Google Drive (OAuth 2.0 Token / Drive REST v3 appDataFolder or /JivanOS)
  * 4. Dropbox (OAuth 2.0 PKCE / Dropbox API v2 /jivanos-sync.json)
  * 5. Nextcloud & Generic WebDAV (PROPFIND / GET / PUT / MKCOL with automatic server proxy fallback for CORS)
@@ -21,6 +20,11 @@ import {
   getInMemoryGDriveToken,
   isRunningInIframe,
 } from '../lib/firebase';
+import {
+  getConnectedDropboxAccount,
+  getValidDropboxAccessToken,
+  isNativeAndroidDropboxAvailable,
+} from './dropboxSync';
 
 export const DEFAULT_JOPLIN_SYNC_SETTINGS: JoplinSyncSettings = {
   primaryTarget: 'none',
@@ -46,15 +50,6 @@ export const DEFAULT_JOPLIN_SYNC_SETTINGS: JoplinSyncSettings = {
       autoBackupEnabled: false,
       label: 'Local / OS Folder',
       folderName: '',
-      lastStatus: 'idle',
-    },
-    onedrive: {
-      id: 'onedrive',
-      enabled: false,
-      autoBackupEnabled: false,
-      label: 'Microsoft OneDrive',
-      clientId: '',
-      accessToken: '',
       lastStatus: 'idle',
     },
     gdrive: {
@@ -103,8 +98,8 @@ export const DEFAULT_JOPLIN_SYNC_SETTINGS: JoplinSyncSettings = {
       autoBackupEnabled: false,
       label: 'S3 / R2 / MinIO / B2',
       s3Endpoint: '',
-      s3Bucket: 'jivanos-sync',
-      s3Region: 'auto',
+      s3Bucket: '',
+      s3Region: '',
       s3AccessKey: '',
       s3SecretKey: '',
       lastStatus: 'idle',
@@ -495,7 +490,7 @@ export async function decodeSyncEnvelope(
 }
 
 // ============================================================================
-// 4. Drive Adapters: WebDAV/Nextcloud, S3/R2/MinIO, OneDrive, Google Drive, Dropbox
+// 4. Drive Adapters: WebDAV/Nextcloud, S3/R2/MinIO, Google Drive, Dropbox
 // ============================================================================
 
 async function webdavRequest(
@@ -579,43 +574,6 @@ async function s3Request(
   return { status: data.status || 200, text: data.body || '' };
 }
 
-async function oneDrivePull(cfg: SyncDriveConfig): Promise<string | null> {
-  if (!cfg.accessToken) throw new Error('OneDrive access token not connected.');
-  const res = await fetch(
-    'https://graph.microsoft.com/v1.0/me/drive/special/approot:/jivanos-sync.json:/content',
-    {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${cfg.accessToken.trim()}`,
-      },
-    }
-  );
-  if (res.status === 404) return null;
-  if (!res.ok) {
-    throw new Error(`OneDrive HTTP ${res.status}: Please reconnect or refresh your OneDrive token.`);
-  }
-  return await res.text();
-}
-
-async function oneDrivePush(cfg: SyncDriveConfig, content: string, fileName = 'jivanos-sync.json'): Promise<boolean> {
-  if (!cfg.accessToken) throw new Error('OneDrive access token not connected.');
-  const res = await fetch(
-    `https://graph.microsoft.com/v1.0/me/drive/special/approot:/${fileName}:/content`,
-    {
-      method: 'PUT',
-      headers: {
-        Authorization: `Bearer ${cfg.accessToken.trim()}`,
-        'Content-Type': 'application/json',
-      },
-      body: content,
-    }
-  );
-  if (!res.ok) {
-    throw new Error(`OneDrive upload failed (HTTP ${res.status}).`);
-  }
-  return true;
-}
-
 function resolveGoogleDriveToken(cfg: SyncDriveConfig): string {
   return (cfg.accessToken || getInMemoryGDriveToken() || '').trim();
 }
@@ -623,7 +581,7 @@ function resolveGoogleDriveToken(cfg: SyncDriveConfig): string {
 async function googleDriveFindSyncFile(token: string, fileName = 'jivanos-sync.json'): Promise<string | null> {
   const q = encodeURIComponent(`name = '${fileName}' and trashed = false`);
   const res = await fetch(
-    `https://www.googleapis.com/drive/v3/files?q=${q}&spaces=drive&fields=files(id,name,modifiedTime)&pageSize=5`,
+    `https://www.googleapis.com/drive/v3/files?q=${q}&spaces=appDataFolder&fields=files(id,name,modifiedTime)&pageSize=5`,
     {
       headers: { Authorization: `Bearer ${token.trim()}` },
     }
@@ -670,7 +628,7 @@ async function googleDrivePush(cfg: SyncDriveConfig, content: string, fileName =
     if (!res.ok) throw new Error(`Google Drive update failed (HTTP ${res.status}).`);
     return true;
   } else {
-    const metadata = { name: fileName, mimeType: 'application/json' };
+    const metadata = { name: fileName, parents: ['appDataFolder'], mimeType: 'application/json' };
     const boundary = 'jivanos_gdrive_boundary_' + Date.now();
     const multipartBody =
       `--${boundary}\r\n` +
@@ -697,28 +655,28 @@ async function googleDrivePush(cfg: SyncDriveConfig, content: string, fileName =
   }
 }
 
-async function dropboxPull(cfg: SyncDriveConfig): Promise<string | null> {
-  if (!cfg.accessToken) throw new Error('Dropbox access token not connected.');
+async function dropboxPull(_cfg: SyncDriveConfig): Promise<string | null> {
+  const token = await getValidDropboxAccessToken();
   const res = await fetch('https://content.dropboxapi.com/2/files/download', {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${cfg.accessToken.trim()}`,
-      'Dropbox-API-Arg': JSON.stringify({ path: '/jivanos-sync.json' }),
+      Authorization: `Bearer ${token}`,
+      'Dropbox-API-Arg': JSON.stringify({ path: '/backup.json' }),
     },
   });
   if (res.status === 409) return null; // path/not_found
   if (!res.ok) {
-    throw new Error(`Dropbox HTTP ${res.status}: Please check your Dropbox access token.`);
+    throw new Error(`Dropbox sync failed (HTTP ${res.status}). Please reconnect Dropbox.`);
   }
   return await res.text();
 }
 
-async function dropboxPush(cfg: SyncDriveConfig, content: string, fileName = 'jivanos-sync.json'): Promise<boolean> {
-  if (!cfg.accessToken) throw new Error('Dropbox access token not connected.');
+async function dropboxPush(_cfg: SyncDriveConfig, content: string, fileName = 'backup.json'): Promise<boolean> {
+  const token = await getValidDropboxAccessToken();
   const res = await fetch('https://content.dropboxapi.com/2/files/upload', {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${cfg.accessToken.trim()}`,
+      Authorization: `Bearer ${token}`,
       'Content-Type': 'application/octet-stream',
       'Dropbox-API-Arg': JSON.stringify({
         path: `/${fileName}`,
@@ -730,7 +688,7 @@ async function dropboxPush(cfg: SyncDriveConfig, content: string, fileName = 'ji
     body: content,
   });
   if (!res.ok) {
-    throw new Error(`Dropbox upload failed (HTTP ${res.status}).`);
+    throw new Error(`Dropbox upload failed (HTTP ${res.status}). Please reconnect Dropbox.`);
   }
   return true;
 }
@@ -777,7 +735,6 @@ async function jivanosVaultPush(cfg: SyncDriveConfig, content: string): Promise<
 
 export async function fetchServerOAuthDefaults(): Promise<{
   gdriveClientId: string;
-  onedriveClientId: string;
   dropboxClientId: string;
 }> {
   try {
@@ -786,14 +743,12 @@ export async function fetchServerOAuthDefaults(): Promise<{
       const data = await res.json();
       return {
         gdriveClientId: data.gdriveClientId || '',
-        onedriveClientId: data.onedriveClientId || '',
         dropboxClientId: data.dropboxClientId || '',
       };
     }
   } catch {}
   return {
     gdriveClientId: '',
-    onedriveClientId: '',
     dropboxClientId: '',
   };
 }
@@ -823,8 +778,6 @@ export async function pullFromDrive(
       }
       return null;
     }
-    case 'onedrive':
-      return await oneDrivePull(cfg);
     case 'gdrive':
       return await googleDrivePull(cfg);
     case 'dropbox':
@@ -875,15 +828,6 @@ export async function pushToDrive(
       }
       return true;
     }
-    case 'onedrive': {
-      await oneDrivePush(cfg, encodedContent, 'jivanos-sync.json');
-      if (options?.isBackupSnapshot) {
-        try {
-          await oneDrivePush(cfg, encodedContent, `backups/${snapshotName}`);
-        } catch {}
-      }
-      return true;
-    }
     case 'gdrive': {
       await googleDrivePush(cfg, encodedContent, 'jivanos-sync.json');
       if (options?.isBackupSnapshot) {
@@ -894,7 +838,7 @@ export async function pushToDrive(
       return true;
     }
     case 'dropbox': {
-      await dropboxPush(cfg, encodedContent, 'jivanos-sync.json');
+      await dropboxPush(cfg, encodedContent, 'backup.json');
       if (options?.isBackupSnapshot) {
         try {
           await dropboxPush(cfg, encodedContent, `backups/${snapshotName}`);
@@ -919,57 +863,36 @@ export async function pushToDrive(
 }
 
 /**
- * OAuth Popup Helper for OneDrive, Google Drive, and Dropbox
+ * OAuth Popup Helper for Google Drive and Dropbox
  * Opens the provider's OAuth 2.0 URL directly in a popup and receives the access token via postMessage from /auth/oauth-callback
  */
 export function launchDriveOAuthPopup(
-  driveId: 'onedrive' | 'gdrive' | 'dropbox',
+  driveId: 'gdrive',
   clientId: string
 ): Promise<{ accessToken: string }> {
   return new Promise((resolve, reject) => {
     const cleanClientId = (clientId || '').trim();
     if (!cleanClientId) {
-      reject(new Error(`Please enter an OAuth Client ID / App Key or paste an Access Token for ${driveId}.`));
+      reject(new Error(`OAuth Client ID is required for ${driveId}.`));
       return;
     }
 
     const redirectUri = `${window.location.origin}/auth/oauth-callback`;
     const state = `${driveId}_${Math.random().toString(36).slice(2, 10)}`;
-    let authUrl = '';
-
-    if (driveId === 'gdrive') {
-      const params = new URLSearchParams({
-        client_id: cleanClientId,
-        redirect_uri: redirectUri,
-        response_type: 'token',
-        scope: 'https://www.googleapis.com/auth/drive.file',
-        include_granted_scopes: 'true',
-        prompt: 'select_account',
-        state,
-      });
-      authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
-    } else if (driveId === 'onedrive') {
-      const params = new URLSearchParams({
-        client_id: cleanClientId,
-        redirect_uri: redirectUri,
-        response_type: 'token',
-        scope: 'Files.ReadWrite.AppFolder User.Read',
-        state,
-      });
-      authUrl = `https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize?${params.toString()}`;
-    } else if (driveId === 'dropbox') {
-      const params = new URLSearchParams({
-        client_id: cleanClientId,
-        redirect_uri: redirectUri,
-        response_type: 'token',
-        state,
-      });
-      authUrl = `https://www.dropbox.com/oauth2/authorize?${params.toString()}`;
-    }
+    const params = new URLSearchParams({
+      client_id: cleanClientId,
+      redirect_uri: redirectUri,
+      response_type: 'token',
+      scope: 'https://www.googleapis.com/auth/drive.appdata',
+      include_granted_scopes: 'true',
+      prompt: 'select_account',
+      state,
+    });
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
 
     const popup = window.open(authUrl, `jivanos_oauth_${driveId}`, 'width=560,height=680');
     if (!popup) {
-      reject(new Error('Popup was blocked by the browser. Please allow popups for this site or paste an Access Token directly.'));
+      reject(new Error('Popup was blocked by the browser. Please allow popups for this site and try again.'));
       return;
     }
 
@@ -1038,22 +961,6 @@ export async function testDriveConnection(
           message: `Success! Folder "${handle.name || cfg.folderName || 'Sync Folder'}" has read & write access.`,
         };
       }
-      case 'onedrive': {
-        if (!cfg.accessToken?.trim()) {
-          return { success: false, message: 'OneDrive is not connected yet. Connect via OAuth Popup or paste an Access Token.' };
-        }
-        const res = await fetch('https://graph.microsoft.com/v1.0/me/drive', {
-          headers: { Authorization: `Bearer ${cfg.accessToken.trim()}` },
-        });
-        if (!res.ok) {
-          return { success: false, message: `OneDrive rejected token (HTTP ${res.status}). Reconnect OAuth or paste a fresh token.` };
-        }
-        const data = await res.json();
-        return {
-          success: true,
-          message: `Success! Connected to OneDrive (${data.owner?.user?.displayName || data.driveType || 'AppRoot'}).`,
-        };
-      }
       case 'gdrive': {
         const token = resolveGoogleDriveToken(cfg);
         if (!token) {
@@ -1072,21 +979,30 @@ export async function testDriveConnection(
         };
       }
       case 'dropbox': {
-        if (!cfg.accessToken?.trim()) {
-          return { success: false, message: 'Dropbox is not connected yet. Connect via OAuth Popup or paste an Access Token.' };
+        const account = getConnectedDropboxAccount();
+        if (isNativeAndroidDropboxAvailable() && account?.connected) {
+          return {
+            success: true,
+            message: `Connected as ${account.email || account.name}.`,
+          };
         }
-        const res = await fetch('https://api.dropboxapi.com/2/users/get_current_account', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${cfg.accessToken.trim()}` },
-        });
-        if (!res.ok) {
-          return { success: false, message: `Dropbox rejected token (HTTP ${res.status}). Reconnect OAuth or paste a fresh token.` };
+        try {
+          const token = await getValidDropboxAccessToken();
+          const res = await fetch('https://api.dropboxapi.com/2/users/get_current_account', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (!res.ok) {
+            return { success: false, message: `Dropbox session expired (HTTP ${res.status}). Click Connect Dropbox to sign in again.` };
+          }
+          const data = await res.json();
+          return {
+            success: true,
+            message: `Connected as ${data.email || data.name?.display_name || 'Dropbox'}.`,
+          };
+        } catch {
+          return { success: false, message: 'Dropbox is not connected yet. Click Connect Dropbox to sign in.' };
         }
-        const data = await res.json();
-        return {
-          success: true,
-          message: `Success! Dropbox connected (${data.email || data.name?.display_name || 'App Folder'}).`,
-        };
       }
       case 'nextcloud':
       case 'webdav': {

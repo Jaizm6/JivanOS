@@ -741,7 +741,6 @@ export interface AlarmHistoryItem {
 export type CloudBackupProvider =
   | 'firebase'
   | 'gdrive'
-  | 'onedrive'
   | 'dropbox'
   | 'mega'
   | 'proton'
@@ -757,7 +756,6 @@ export type CloudBackupProvider =
 export type SyncDriveId =
   | 'jivanos_vault'
   | 'local_folder'
-  | 'onedrive'
   | 'gdrive'
   | 'dropbox'
   | 'webdav'
@@ -784,7 +782,7 @@ export interface SyncDriveConfig {
   s3Region?: string;
   s3AccessKey?: string;
   s3SecretKey?: string;
-  // OAuth / Token drives (OneDrive, Google Drive, Dropbox)
+  // OAuth / Token drives (Google Drive, Dropbox)
   clientId?: string;
   accessToken?: string;
   refreshToken?: string;

@@ -5,6 +5,7 @@ import { Navbar } from './components/layout/Navbar';
 import { Sidebar } from './components/layout/Sidebar';
 import { BottomNav } from './components/layout/BottomNav';
 import { TaskManager } from './components/tasks/TaskManager';
+import { SettingsManager } from './components/settings/SettingsManager';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { ActiveAlarmBanner } from './components/notifications/ActiveAlarmBanner';
 import { UndoSnackbar } from './components/common/UndoSnackbar';
@@ -26,6 +27,33 @@ import {
 import { getVisualPaletteMode } from './utils/activityStyles';
 import { getInitialLiquidGlassConfig, getInitialMotionConfig, applyLiquidGlassAndMotionToCSS } from './utils/liquidGlass';
 import { lazyWithRetry } from './utils/lazyWithRetry';
+import {
+  getRealSyncOverview,
+  requestOpenBackupSyncScreen,
+} from './sync/syncConnectionState';
+import { isDesktop } from './desktop/KeychainService';
+import { TrayService } from './desktop/TrayService';
+import { exportLocalBackup } from './utils/localBackupEngine';
+import { showAndroidToast } from './components/common/AndroidToast';
+import {
+  DRIVE_SYNC_STATE_EVENT,
+  formatRelativeSyncTime,
+} from './utils/googleDriveSync';
+import { DROPBOX_SYNC_STATE_EVENT } from './utils/dropboxSync';
+import {
+  TELEGRAM_SYNC_STATE_EVENT,
+  telegramSyncProvider,
+} from './sync/providers/TelegramSyncProvider';
+import {
+  MEGA_SYNC_STATE_EVENT,
+  megaSyncProvider,
+} from './sync/providers/MEGASyncProvider';
+import {
+  JIVANOS_CLOUD_STATE_EVENT,
+  firestoreSyncProvider,
+} from './sync/providers/FirestoreSyncProvider';
+import { googleDriveSyncProvider } from './sync/providers/GoogleDriveProvider';
+import { dropboxSyncProvider } from './sync/providers/DropboxProvider';
 
 // Lazy-loaded secondary tabs and modals with automatic network retry
 const MedicationManager = lazyWithRetry(() => import('./components/medications/MedicationManager').then(m => ({ default: m.MedicationManager })));
@@ -33,12 +61,10 @@ const HabitTracker = lazyWithRetry(() => import('./components/habits/HabitTracke
 const GoalsManager = lazyWithRetry(() => import('./components/goals/GoalsManager').then(m => ({ default: m.GoalsManager })));
 const BillsManager = lazyWithRetry(() => import('./components/bills/BillsManager').then(m => ({ default: m.BillsManager })));
 const AnalyticsView = lazyWithRetry(() => import('./components/analytics/AnalyticsView').then(m => ({ default: m.AnalyticsView })));
-const SettingsManager = lazyWithRetry(() => import('./components/settings/SettingsManager').then(m => ({ default: m.SettingsManager })));
 const QuotesManager = lazyWithRetry(() => import('./components/quotes/QuotesManager').then(m => ({ default: m.QuotesManager })));
 
 const WidgetCustomizerModal = lazyWithRetry(() => import('./components/dashboard/WidgetCustomizerModal').then(m => ({ default: m.WidgetCustomizerModal })));
 const AppLockScreen = lazyWithRetry(() => import('./components/security/AppLockScreen').then(m => ({ default: m.AppLockScreen })));
-const BackupModal = lazyWithRetry(() => import('./components/common/BackupModal').then(m => ({ default: m.BackupModal })));
 const ProfileModal = lazyWithRetry(() => import('./components/common/ProfileModal').then(m => ({ default: m.ProfileModal })));
 const AIChatDrawer = lazyWithRetry(() => import('./components/ai/AIChatDrawer').then(m => ({ default: m.AIChatDrawer })));
 const TagsManager = lazyWithRetry(() => import('./components/tags/TagsManager').then(m => ({ default: m.TagsManager })));
@@ -1039,12 +1065,17 @@ const AppContent: React.FC = () => {
     setIsInstallModalOpen,
     isWidgetModalOpen,
     isBackupModalOpen,
+    setIsBackupModalOpen,
     isAuthModalOpen,
     isSidebarCollapsed,
     setIsSidebarCollapsed,
     appLock,
     soundEngine,
     undoSnackbar,
+    exportEncryptedJSON,
+    firebaseUser,
+    joplinSyncSettings,
+    syncDriveNow,
   } = useApp();
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
   const [notifPopupStyle, setNotifPopupStyle] = useState<NotificationPopupStyle>(() =>
@@ -1575,6 +1606,138 @@ const AppContent: React.FC = () => {
     }
   }, [activeTab, setActiveTab, setIsAIChatOpen]);
 
+  // Unified Backup & Sync flow: redirect any legacy BackupModal trigger straight to Settings -> Backup & Sync
+  React.useEffect(() => {
+    if (isBackupModalOpen) {
+      setIsBackupModalOpen(false);
+      setActiveTab('settings');
+      requestOpenBackupSyncScreen();
+    }
+  }, [isBackupModalOpen, setIsBackupModalOpen, setActiveTab]);
+
+  // Phase 9 Desktop Shell: hydrate OS keychain tokens, register Tray menu & global shortcuts (Ctrl+S, Ctrl+E, Ctrl+,)
+  const desktopContextRef = useRef({
+    firebaseUser,
+    joplinSyncSettings,
+    exportEncryptedJSON,
+    syncDriveNow,
+    setActiveTab,
+  });
+  desktopContextRef.current = {
+    firebaseUser,
+    joplinSyncSettings,
+    exportEncryptedJSON,
+    syncDriveNow,
+    setActiveTab,
+  };
+
+  React.useEffect(() => {
+    if (!isDesktop()) return;
+
+    const refreshTrayTooltip = () => {
+      const ctx = desktopContextRef.current;
+      const overview = getRealSyncOverview(ctx.firebaseUser, ctx.joplinSyncSettings);
+      if (overview.latestSyncedAt) {
+        void TrayService.updateTraySyncTooltip(
+          `Synced ${formatRelativeSyncTime(overview.latestSyncedAt)}`
+        );
+      } else if (overview.hasAnyConnected) {
+        void TrayService.updateTraySyncTooltip(
+          `JivanOS — ${overview.connectedCount} sync target${overview.connectedCount === 1 ? '' : 's'} ready`
+        );
+      } else {
+        void TrayService.updateTraySyncTooltip('JivanOS — Local only');
+      }
+    };
+
+    // Hydrate OS keychain cache silently on desktop startup
+    void Promise.allSettled([
+      googleDriveSyncProvider.silentReAuth(),
+      dropboxSyncProvider.silentReAuth(),
+      telegramSyncProvider.silentReAuth(),
+    ]).then(() => refreshTrayTooltip());
+
+    const handleDesktopSyncNow = async () => {
+      const ctx = desktopContextRef.current;
+      const overview = getRealSyncOverview(ctx.firebaseUser, ctx.joplinSyncSettings);
+      if (!overview.hasAnyConnected) {
+        showAndroidToast('Connect a sync provider in Settings → Backup & Sync', 2800, 'default');
+        ctx.setActiveTab('settings');
+        requestOpenBackupSyncScreen();
+        return;
+      }
+
+      const preferredId = ctx.joplinSyncSettings.primaryTarget;
+      const normalized = preferredId === 'nextcloud' ? 'webdav' : preferredId;
+      const target =
+        overview.connectedProviders.find((p) => p.id === normalized) ||
+        overview.connectedProviders[0];
+
+      if (!target) return;
+      await TrayService.updateTraySyncTooltip(`Syncing ${target.label}…`);
+
+      try {
+        const localPayload = JSON.parse(ctx.exportEncryptedJSON()) as Record<string, unknown>;
+        if (target.id === 'gdrive') {
+          await googleDriveSyncProvider.backup(localPayload);
+        } else if (target.id === 'dropbox') {
+          await dropboxSyncProvider.backup(localPayload);
+        } else if (target.id === 'telegram') {
+          await telegramSyncProvider.backup(localPayload);
+        } else if (target.id === 'mega') {
+          await megaSyncProvider.backup(localPayload);
+        } else if (target.id === 'firebase') {
+          await firestoreSyncProvider.backup(localPayload);
+          await TrayService.sendDesktopSyncNotification(true);
+        } else {
+          await ctx.syncDriveNow(target.id);
+          await TrayService.sendDesktopSyncNotification(true);
+        }
+        await TrayService.updateTraySyncTooltip('Synced just now');
+        showAndroidToast(`Synced to ${target.label}`, 2400, 'success');
+      } catch (err: any) {
+        const message = err?.message || 'Desktop sync failed';
+        await TrayService.updateTraySyncTooltip('JivanOS — Sync failed');
+        await TrayService.sendDesktopSyncNotification(false);
+        showAndroidToast(message, 3200, 'error');
+      }
+    };
+
+    const handleDesktopExport = async () => {
+      try {
+        const ctx = desktopContextRef.current;
+        await exportLocalBackup(ctx.exportEncryptedJSON());
+        showAndroidToast('Exported JivanOS local backup', 2400, 'success');
+      } catch (err: any) {
+        showAndroidToast(err?.message || 'Backup export failed', 3000, 'error');
+      }
+    };
+
+    const cleanupTray = TrayService.initDesktopTrayAndShortcuts({
+      onSyncNow: handleDesktopSyncNow,
+      onExportBackup: handleDesktopExport,
+      onOpenSettings: () => {
+        desktopContextRef.current.setActiveTab('settings');
+      },
+    });
+
+    const syncEvents = [
+      DRIVE_SYNC_STATE_EVENT,
+      DROPBOX_SYNC_STATE_EVENT,
+      TELEGRAM_SYNC_STATE_EVENT,
+      MEGA_SYNC_STATE_EVENT,
+      JIVANOS_CLOUD_STATE_EVENT,
+    ];
+    syncEvents.forEach((ev) => window.addEventListener(ev, refreshTrayTooltip));
+    const tooltipTimer = window.setInterval(refreshTrayTooltip, 60000);
+
+    return () => {
+      cleanupTray();
+      window.clearInterval(tooltipTimer);
+      syncEvents.forEach((ev) => window.removeEventListener(ev, refreshTrayTooltip));
+    };
+  }, []);
+
   const isDrawerOpen = !isSidebarCollapsed;
 
   // Prevent background page scrolling when Left Panel drawer is open
@@ -1654,7 +1817,6 @@ const AppContent: React.FC = () => {
       {/* Lazy-Loaded Modals & Drawers */}
       <Suspense fallback={null}>
         {isWidgetModalOpen && <WidgetCustomizerModal />}
-        {isBackupModalOpen && <BackupModal />}
         {isAuthModalOpen && <ProfileModal />}
         <AIChatDrawer isOpen={isAIChatOpen} onClose={() => setIsAIChatOpen(false)} />
         {appLock?.isLocked && <AppLockScreen />}

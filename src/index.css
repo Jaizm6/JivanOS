@@ -453,18 +453,18 @@ nav.fixed {
    Guarantees that cards never submerge into the background canvas
    ========================================================================== */
 /* Light Mode: Crisp Pure White (#ffffff) cards with clear border over distinct tonal canvas */
-html:not(.dark) main .bg-white:not(button):not(input):not(span):not(#quote-preview-card):not([data-custom-bg]):not([data-dark-card]):not([data-dark-modal]):not([data-quote-card]):not([data-habit-card]):not([data-m3-tonal-card]),
-html:not(.dark) main div[class*="rounded-2xl"]:not(#quote-preview-card):not([data-custom-bg]):not([data-dark-card]):not([data-dark-modal]):not([data-quote-card]):not([data-habit-card]):not([data-m3-tonal-card]),
-html:not(.dark) main div[class*="rounded-3xl"]:not(#quote-preview-card):not([data-custom-bg]):not([data-dark-card]):not([data-dark-modal]):not([data-quote-card]):not([data-habit-card]):not([data-m3-tonal-card]),
-html:not(.dark) main div[class*="rounded-[2"]:not(#quote-preview-card):not([data-custom-bg]):not([data-dark-card]):not([data-dark-modal]):not([data-quote-card]):not([data-habit-card]):not([data-m3-tonal-card]) {
+html:not(.dark) main .bg-white:not(button):not(input):not(span):not([data-dark-card]):not([data-dark-modal]):not([data-habit-card]):not([data-m3-tonal-card]),
+html:not(.dark) main div[class*="rounded-2xl"]:not([data-dark-card]):not([data-dark-modal]):not([data-habit-card]):not([data-m3-tonal-card]),
+html:not(.dark) main div[class*="rounded-3xl"]:not([data-dark-card]):not([data-dark-modal]):not([data-habit-card]):not([data-m3-tonal-card]),
+html:not(.dark) main div[class*="rounded-[2"]:not([data-dark-card]):not([data-dark-modal]):not([data-habit-card]):not([data-m3-tonal-card]) {
   background-color: #ffffff !important;
   border: 1px solid var(--m3-card-border, #cbd5e1) !important;
   box-shadow: 0 2px 8px -2px rgba(15, 23, 42, 0.07), 0 1px 2px rgba(15, 23, 42, 0.04) !important;
 }
 
 /* Light Mode Sub-surfaces & Nested items */
-html:not(.dark) main .bg-slate-50:not(button):not(input):not(#quote-preview-card):not([data-custom-bg]):not([data-dark-card]):not([data-dark-modal]):not([data-quote-card]):not([data-habit-card]):not([data-m3-tonal-card]),
-html:not(.dark) main .bg-slate-100:not(button):not(input):not(#quote-preview-card):not([data-custom-bg]):not([data-dark-card]):not([data-dark-modal]):not([data-quote-card]):not([data-habit-card]):not([data-m3-tonal-card]) {
+html:not(.dark) main .bg-slate-50:not(button):not(input):not([data-dark-card]):not([data-dark-modal]):not([data-habit-card]):not([data-m3-tonal-card]),
+html:not(.dark) main .bg-slate-100:not(button):not(input):not([data-dark-card]):not([data-dark-modal]):not([data-habit-card]):not([data-m3-tonal-card]) {
   background-color: #f1f5fa !important;
   border: 1px solid #d5deea !important;
 }
@@ -497,10 +497,10 @@ html:not(.dark) main .bg-slate-100:not(button):not(input):not(#quote-preview-car
 }
 
 /* Dark Mode: Elevated Surfaces over Pure AMOLED Black (#000000) Canvas */
-html.dark main .dark\:bg-slate-900:not(button):not(input):not(span):not(#quote-preview-card):not([data-custom-bg]):not([data-quote-card]):not([data-m3-tonal-card]),
-html.dark main div[class*="rounded-2xl"]:not(button):not(input):not(span):not([role="menu"]):not(#quote-preview-card):not([data-custom-bg]):not([data-quote-card]):not([data-m3-tonal-card]),
-html.dark main div[class*="rounded-3xl"]:not(button):not(input):not(span):not(#quote-preview-card):not([data-custom-bg]):not([data-quote-card]):not([data-m3-tonal-card]),
-html.dark main div[class*="rounded-[2"]:not(button):not(input):not(span):not([role="menu"]):not(#quote-preview-card):not([data-custom-bg]):not([data-quote-card]):not([data-m3-tonal-card]),
+html.dark main .dark\:bg-slate-900:not(button):not(input):not(span):not([data-m3-tonal-card]),
+html.dark main div[class*="rounded-2xl"]:not(button):not(input):not(span):not([role="menu"]):not([data-m3-tonal-card]),
+html.dark main div[class*="rounded-3xl"]:not(button):not(input):not(span):not([data-m3-tonal-card]),
+html.dark main div[class*="rounded-[2"]:not(button):not(input):not(span):not([role="menu"]):not([data-m3-tonal-card]),
 html.dark [data-card="elevated"] {
   background-color: #101116 !important;
   border: 1px solid #2d2f3b !important;
@@ -632,72 +632,6 @@ html.dark[data-amoled="false"] [data-m3-tonal-card="true"][data-tonal-tone="arch
 html.dark[data-amoled="false"] [data-m3-tonal-card="true"][data-tonal-tone="muted"] {
   background-color: #171f2f;
   border: 1px solid #34405c;
-}
-
-/* Real Quote Card & Preview Card Styling (Defaults cleanly to crisp Pure White / Elevated Dark — NEVER inherit!) */
-:root {
-  --quote-card-bg: #ffffff;
-  --quote-card-border: #cbd5e1;
-}
-
-html.dark {
-  --quote-card-bg: #121319;
-  --quote-card-border: #2e313f;
-}
-
-html.dark[data-amoled="false"] {
-  --quote-card-bg: #151c2c;
-  --quote-card-border: #313e5c;
-}
-
-#quote-preview-card,
-[data-custom-bg="true"],
-[data-quote-card="true"] {
-  background-color: var(--preview-card-bg, var(--quote-card-bg, #ffffff)) !important;
-  border-color: var(--preview-card-border, var(--quote-card-border, #cbd5e1)) !important;
-}
-
-@keyframes quoteFadeInAnim {
-  0% {
-    opacity: 0;
-  }
-  100% {
-    opacity: 1;
-  }
-}
-
-@keyframes quoteSlideInAnim {
-  0% {
-    opacity: 0;
-    transform: translateY(28px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes quoteScaleInAnim {
-  0% {
-    opacity: 0;
-    transform: scale(0.85);
-  }
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-.quote-transition-fade {
-  animation: quoteFadeInAnim 0.25s cubic-bezier(0.16, 1, 0.3, 1) both !important;
-}
-
-.quote-transition-slide {
-  animation: quoteSlideInAnim 0.25s cubic-bezier(0.16, 1, 0.3, 1) both !important;
-}
-
-.quote-transition-scale {
-  animation: quoteScaleInAnim 0.25s cubic-bezier(0.16, 1, 0.3, 1) both !important;
 }
 
 /* Dark Mode Sub-surfaces & Nested items */
@@ -1195,10 +1129,10 @@ html.dark[data-amoled="false"] .dark\:bg-black {
   border-color: #1f2937 !important;
 }
 
-html.dark[data-amoled="false"] main .dark\:bg-slate-900:not(button):not(input):not(span):not(#quote-preview-card):not([data-custom-bg]):not([data-quote-card]):not([data-m3-tonal-card]),
-html.dark[data-amoled="false"] main div[class*="rounded-2xl"]:not(button):not(input):not(span):not([role="menu"]):not(#quote-preview-card):not([data-custom-bg]):not([data-quote-card]):not([data-m3-tonal-card]),
-html.dark[data-amoled="false"] main div[class*="rounded-3xl"]:not(button):not(input):not(span):not(#quote-preview-card):not([data-custom-bg]):not([data-quote-card]):not([data-m3-tonal-card]),
-html.dark[data-amoled="false"] main div[class*="rounded-[2"]:not(button):not(input):not(span):not([role="menu"]):not(#quote-preview-card):not([data-custom-bg]):not([data-quote-card]):not([data-m3-tonal-card]),
+html.dark[data-amoled="false"] main .dark\:bg-slate-900:not(button):not(input):not(span):not([data-m3-tonal-card]),
+html.dark[data-amoled="false"] main div[class*="rounded-2xl"]:not(button):not(input):not(span):not([role="menu"]):not([data-m3-tonal-card]),
+html.dark[data-amoled="false"] main div[class*="rounded-3xl"]:not(button):not(input):not(span):not([data-m3-tonal-card]),
+html.dark[data-amoled="false"] main div[class*="rounded-[2"]:not(button):not(input):not(span):not([role="menu"]):not([data-m3-tonal-card]),
 html.dark[data-amoled="false"] [data-card="elevated"] {
   background-color: #151c2c !important;
   border-color: #303e5c !important;

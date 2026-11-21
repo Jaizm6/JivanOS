@@ -32,7 +32,7 @@ export const initialProfile: UserProfile = {
   type: 'email',
   twoFactorEnabled: false,
   isPasscodeProtected: false,
-  lastSyncedAt: new Date().toISOString(),
+  lastSyncedAt: '',
   updatedAt: '',
 };
 

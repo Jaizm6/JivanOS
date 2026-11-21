@@ -46,7 +46,7 @@ export const SidebarClockCard: React.FC = () => {
     const displayHours = hours24 % 12 || 12;
 
     return {
-      hours: String(displayHours).padStart(2, '0'),
+      hours: String(displayHours),
       minutes: String(rawMinutes).padStart(2, '0'),
       seconds: `:${String(rawSeconds).padStart(2, '0')}`,
       ampm: hours24 >= 12 ? 'PM' : 'AM',
@@ -68,13 +68,13 @@ export const SidebarClockCard: React.FC = () => {
       <div className="min-w-0" aria-label="Digital time and date">
         <div className="flex items-center min-w-0 tabular-nums">
           <div
-            className="inline-flex items-center shrink-0 whitespace-nowrap text-[35px] sm:text-[37px] font-black leading-[0.98] tracking-[-0.075em]"
+            className="inline-flex items-center shrink-0 whitespace-nowrap text-[28px] sm:text-[32px] font-black leading-[0.98] tracking-[-0.045em]"
             aria-label="Hours and minutes"
           >
             <span className="text-[#e11d48] dark:text-rose-500">{clock.hours}</span>
             <span
               aria-hidden="true"
-              className="inline-block ml-[0.11em] mr-[0.09em] text-[#0f172a] dark:text-white text-[0.78em] font-extrabold leading-none -translate-y-[0.025em]"
+              className="inline-block ml-[0.09em] mr-[0.08em] text-[#0f172a] dark:text-white text-[0.78em] font-extrabold leading-none -translate-y-[0.025em]"
             >
               :
             </span>
@@ -83,7 +83,7 @@ export const SidebarClockCard: React.FC = () => {
 
           {/* Connected Capsule: AM/PM on top, :SS on bottom */}
           <div
-            className="shrink-0 w-[34px] sm:w-[36px] h-[44px] sm:h-[47px] grid grid-rows-2 items-center justify-items-center ml-1.5 sm:ml-2 overflow-hidden rounded-[10px] border border-[#dcefe2] dark:border-emerald-800/60 bg-[#f0fdf4] dark:bg-emerald-950/45 tabular-nums leading-none"
+            className="shrink-0 w-[32px] sm:w-[35px] h-[40px] sm:h-[44px] grid grid-rows-2 items-center justify-items-center ml-1.5 sm:ml-2 overflow-hidden rounded-[10px] border border-[#dcefe2] dark:border-emerald-800/60 bg-[#f0fdf4] dark:bg-emerald-950/45 tabular-nums leading-none"
             aria-label="AM or PM and seconds"
           >
             <span className="w-full h-full flex items-center justify-center text-[#0f172a] dark:text-zinc-100 text-[8.5px] sm:text-[9px] font-black tracking-[0.045em]">

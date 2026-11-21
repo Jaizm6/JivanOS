@@ -58,6 +58,21 @@ import { notificationService } from '../utils/notifications';
 import { soundEngine } from '../utils/audio';
 import { haptics } from '../utils/haptics';
 import { isScheduleItemOnDate } from '../utils/scheduleRecurrence';
+import {
+  autoSync as scheduleGoogleDriveAutoSync,
+  backupToDrive,
+  cachePayloadForBackgroundSync,
+  getStoredDriveSyncMeta,
+  silentReAuthGoogleDrive,
+} from '../utils/googleDriveSync';
+import {
+  autoSync as scheduleDropboxAutoSync,
+  backupToDropbox,
+  cacheDropboxPayloadForBackgroundSync,
+  connectDropbox,
+  getStoredDropboxSyncMeta,
+  silentReAuthDropbox,
+} from '../utils/dropboxSync';
 import { calculateHabitStreak, formatLocalDate } from '../utils/date';
 import {
   auth,
@@ -89,6 +104,13 @@ import {
   testDriveConnection,
   fetchServerOAuthDefaults,
 } from '../utils/joplinSyncEngine';
+import {
+  exportLocalBackup,
+  listLocalSnapshots,
+  saveRotatingAutoSnapshot,
+  validateBackupPayload,
+} from '../utils/localBackupEngine';
+import { showAndroidToast } from '../components/common/AndroidToast';
 
 export interface GlobalTimerState {
   activeId: string | null;
@@ -366,7 +388,7 @@ interface AppContextType {
   syncDriveNow: (driveId?: SyncDriveId, options?: { isBackupSnapshot?: boolean }) => Promise<{ success: boolean; message: string }>;
   checkDriveConfiguration: (driveId: SyncDriveId) => Promise<{ success: boolean; message: string }>;
   pickLocalFolderForSync: () => Promise<{ success: boolean; folderName?: string; error?: string }>;
-  connectDriveOAuth: (driveId: 'onedrive' | 'gdrive' | 'dropbox', clientId?: string) => Promise<{ success: boolean; error?: string }>;
+  connectDriveOAuth: (driveId: 'gdrive' | 'dropbox', clientId?: string) => Promise<{ success: boolean; error?: string }>;
   isGDriveConnected: boolean;
   setGDriveManualToken: (token: string) => void;
   disconnectGDrive: () => void;
@@ -381,6 +403,7 @@ interface AppContextType {
   exportEncryptedJSON: () => string;
   downloadLocalBackupFile: () => void;
   importBackupJSON: (jsonStr: string) => boolean;
+  replaceAllAppDataFromBackup: (jsonStr: string) => boolean;
 
   // Modals UI
   isAuthModalOpen: boolean;
@@ -1308,15 +1331,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       username: '',
       authSecret: '',
       remotePath: '/JivanOS',
-      s3Bucket: 'jivanos-sync',
-      s3Region: 'us-east-1',
+      s3Bucket: '',
+      s3Region: '',
     };
   });
 
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'offline' | 'error'>(() =>
-    typeof navigator !== 'undefined' && !navigator.onLine ? 'offline' : 'synced'
+    typeof navigator !== 'undefined' && !navigator.onLine ? 'offline' : 'idle'
   );
-  const [lastSyncTime, setLastSyncTime] = useState<string | null>(new Date().toISOString());
+  const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
 
   // Firebase Auth State & Real-time Cloud Sync (Strictly Authenticated UID)
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
@@ -1337,12 +1360,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           nextDrives.gdrive = { ...nextDrives.gdrive, clientId: defaults.gdriveClientId };
           changed = true;
         }
-        if (defaults.onedriveClientId && !nextDrives.onedrive?.clientId) {
-          nextDrives.onedrive = { ...nextDrives.onedrive, clientId: defaults.onedriveClientId };
-          changed = true;
-        }
-        if (defaults.dropboxClientId && !nextDrives.dropbox?.clientId) {
-          nextDrives.dropbox = { ...nextDrives.dropbox, clientId: defaults.dropboxClientId };
+        // Scrub any legacy manual Dropbox keys/tokens from localStorage (Dropbox uses hardcoded PKCE)
+        if (nextDrives.dropbox?.clientId || nextDrives.dropbox?.accessToken) {
+          nextDrives.dropbox = { ...nextDrives.dropbox, clientId: '', accessToken: '' };
           changed = true;
         }
         return changed ? { ...prev, drives: nextDrives } : prev;
@@ -1353,8 +1373,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const importBackupJSONRef = useRef<(jsonStr: string) => boolean>(() => false);
   const compilePayloadRef = useRef<() => string>(() => '{}');
   const isApplyingRemoteSyncRef = useRef(false);
+  const isApplyingLocalRestoreRef = useRef(false);
   const isInitialMountRef = useRef(true);
+  const isAutoSnapshotMountRef = useRef(true);
   const lastSyncedPayloadHashRef = useRef<string>('');
+  const lastAutoSnapshotHashRef = useRef<string>('');
 
   useEffect(() => {
     let firestoreUnsub: (() => void) | null = null;
@@ -5492,8 +5515,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           s3Endpoint: next.serverUrl,
           s3AccessKey: next.username,
           s3SecretKey: next.authSecret,
-          s3Bucket: next.s3Bucket || 'jivanos-sync',
-          s3Region: next.s3Region || 'us-east-1',
+          s3Bucket: next.s3Bucket || '',
+          s3Region: next.s3Region || '',
         });
       }
       return next;
@@ -5572,7 +5595,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [updateDriveConfig]);
 
   const connectDriveOAuth = async (
-    driveId: 'onedrive' | 'gdrive' | 'dropbox',
+    driveId: 'gdrive' | 'dropbox',
     customClientId?: string
   ): Promise<{ success: boolean; error?: string }> => {
     try {
@@ -5607,17 +5630,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         return { success: true };
       }
 
-      const effectiveClientId = customClientId || joplinSyncSettings.drives[driveId]?.clientId || '';
-      const { accessToken } = await launchDriveOAuthPopup(driveId, effectiveClientId);
-      updateDriveConfig(driveId, {
+      // Dropbox uses hardcoded PKCE OAuth2 (zero user keys, tokens never persisted in plaintext)
+      const account = await connectDropbox();
+      updateDriveConfig('dropbox', {
         enabled: true,
-        clientId: effectiveClientId,
-        accessToken,
+        clientId: '',
+        accessToken: '',
+        accountEmail: account.email || account.name || undefined,
         lastStatus: 'synced',
         lastError: undefined,
       });
       if (joplinSyncSettings.primaryTarget === 'none') {
-        updateJoplinSyncSettings({ primaryTarget: driveId });
+        updateJoplinSyncSettings({ primaryTarget: 'dropbox' });
       }
       return { success: true };
     } catch (err: any) {
@@ -5807,7 +5831,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       // Map CloudBackupProvider to Joplin SyncDriveId if applicable
       const driveMap: Partial<Record<CloudBackupProvider, SyncDriveId>> = {
         local_folder: 'local_folder',
-        onedrive: 'onedrive',
         gdrive: 'gdrive',
         dropbox: 'dropbox',
         nextcloud: 'nextcloud',
@@ -5880,19 +5903,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const downloadLocalBackupFile = () => {
     try {
       const payload = compilePayload();
-      const dateStr = new Date().toISOString().split('T')[0];
-      const blob = new Blob([payload], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `JivanOS_Local_Backup_${dateStr}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      pushNotification('Backup Downloaded', 'Local JSON snapshot saved to your device.', 'system');
+      exportLocalBackup(payload)
+        .then(res => {
+          if (res.success) {
+            showAndroidToast('Backup saved to Downloads', 3000, 'success');
+            pushNotification('Backup Saved', `Saved ${res.filename} to Downloads.`, 'system');
+          } else {
+            showAndroidToast(res.error || 'Failed to save backup', 3000, 'error');
+          }
+        })
+        .catch(() => {
+          showAndroidToast('Failed to save backup', 3000, 'error');
+        });
     } catch (e) {
       console.error('Failed to download local backup', e);
+      showAndroidToast('Failed to save backup', 3000, 'error');
     }
   };
 
@@ -6081,6 +6106,183 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
+  /**
+   * Phase 1 Local Restore: Validates JSON and cleanly replaces ALL current app data
+   * without merging stale items from the previous state.
+   */
+  const replaceAllAppDataFromBackup = (jsonStr: string): boolean => {
+    const validation = validateBackupPayload(jsonStr);
+    if (!validation.valid) {
+      return false;
+    }
+
+    const data = validation.data as Record<string, any>;
+    isApplyingLocalRestoreRef.current = true;
+    isApplyingRemoteSyncRef.current = true;
+
+    try {
+      const nextProfile: UserProfile =
+        data.profile && typeof data.profile === 'object'
+          ? { ...initialProfile, ...data.profile }
+          : { ...initialProfile };
+      setProfile(nextProfile);
+      try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_profile`, JSON.stringify(nextProfile)); } catch {}
+
+      const nextDeletedIds: string[] = Array.isArray(data.deletedIds) ? data.deletedIds : [];
+      setDeletedIds(nextDeletedIds);
+      try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_deleted_ids`, JSON.stringify(nextDeletedIds)); } catch {}
+
+      const nextMeds: Medication[] = Array.isArray(data.medications) ? data.medications : [];
+      setMedications(nextMeds);
+      try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_meds`, JSON.stringify(nextMeds)); } catch {}
+
+      const nextDoseLogs: DoseLog[] = Array.isArray(data.doseLogs) ? data.doseLogs : [];
+      setDoseLogs(nextDoseLogs);
+      try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_doselogs`, JSON.stringify(nextDoseLogs)); } catch {}
+
+      const nextHydration: HydrationState =
+        data.hydration && typeof data.hydration === 'object'
+          ? { ...initialHydration, ...data.hydration }
+          : { ...initialHydration };
+      setHydration(nextHydration);
+      try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_hydration`, JSON.stringify(nextHydration)); } catch {}
+
+      const nextTasks: TaskItem[] = Array.isArray(data.tasks) ? data.tasks : [];
+      setTasks(nextTasks);
+      try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_tasks`, JSON.stringify(nextTasks)); } catch {}
+
+      const nextGoals: Goal[] = Array.isArray(data.goals) ? data.goals : [];
+      setGoals(nextGoals);
+      try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_goals`, JSON.stringify(nextGoals)); } catch {}
+
+      const nextBills: Bill[] = Array.isArray(data.bills) ? data.bills : [];
+      setBills(nextBills);
+      try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_bills`, JSON.stringify(nextBills)); } catch {}
+
+      const nextAppLock: AppLockConfig =
+        data.appLock && typeof data.appLock === 'object'
+          ? { ...initialAppLock, ...data.appLock, isLocked: false }
+          : { ...initialAppLock, isLocked: false };
+      setAppLock(nextAppLock);
+      try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_applock`, JSON.stringify(nextAppLock)); } catch {}
+
+      const nextHabits: Habit[] = Array.isArray(data.habits) ? data.habits : [];
+      setHabits(nextHabits);
+      try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_habits`, JSON.stringify(nextHabits)); } catch {}
+
+      const nextRoutines: Routine[] = Array.isArray(data.routines) ? data.routines : [];
+      setRoutines(nextRoutines);
+      try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_routines`, JSON.stringify(nextRoutines)); } catch {}
+
+      const nextWidgets: DashboardWidgetConfig[] = Array.isArray(data.widgets)
+        ? data.widgets
+        : defaultWidgets;
+      setWidgets(nextWidgets);
+      try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_widgets`, JSON.stringify(nextWidgets)); } catch {}
+
+      const nextTodoLists: TodoList[] = Array.isArray(data.todoLists)
+        ? data.todoLists
+        : initialTodoLists;
+      setTodoLists(nextTodoLists);
+      try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_todo_lists`, JSON.stringify(nextTodoLists)); } catch {}
+
+      const nextListGroups: ListGroup[] = Array.isArray(data.listGroups)
+        ? data.listGroups
+        : initialListGroups;
+      setListGroups(nextListGroups);
+      try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_list_groups`, JSON.stringify(nextListGroups)); } catch {}
+
+      const nextTags: AppTag[] = Array.isArray(data.tags) ? data.tags : [];
+      setTags(nextTags);
+      try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_tags`, JSON.stringify(nextTags)); } catch {}
+
+      const nextSchedule: ScheduleItem[] = Array.isArray(data.scheduleItems)
+        ? data.scheduleItems
+        : Array.isArray(data.schedule)
+        ? data.schedule
+        : [];
+      setScheduleItems(nextSchedule);
+      try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_schedule`, JSON.stringify(nextSchedule)); } catch {}
+
+      const nextStartHour = typeof data.scheduleStartHour === 'number' ? data.scheduleStartHour : 6;
+      setScheduleStartHourState(nextStartHour);
+      try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_schedule_start_hour`, String(nextStartHour)); } catch {}
+
+      const nextEndHour = typeof data.scheduleEndHour === 'number' ? data.scheduleEndHour : 22;
+      setScheduleEndHourState(nextEndHour);
+      try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_schedule_end_hour`, String(nextEndHour)); } catch {}
+
+      const nextPinned = typeof data.pinnedSidebarItemId === 'string' ? data.pinnedSidebarItemId : '';
+      setPinnedSidebarItemId(nextPinned);
+      try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_pinned_sidebar_item`, nextPinned); } catch {}
+
+      const nextInbox: InboxItem[] = Array.isArray(data.inboxItems) ? data.inboxItems : [];
+      setInboxItems(nextInbox);
+      try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_inbox`, JSON.stringify(nextInbox)); } catch {}
+
+      if (Array.isArray(data.workflowStages) && data.workflowStages.length > 0) {
+        setWorkflowStages(data.workflowStages);
+        try {
+          localStorage.setItem(`${LOCAL_STORAGE_KEY}_workflow_stages`, JSON.stringify(data.workflowStages));
+          localStorage.setItem('omnilife_task_workflow_stages', JSON.stringify(data.workflowStages));
+        } catch {}
+      }
+
+      if (typeof data.currency === 'string' && data.currency) {
+        setCurrencyState(data.currency);
+        try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_currency`, data.currency); } catch {}
+      }
+
+      if (data.theme === 'dark' || data.theme === 'light') {
+        setThemeState(data.theme);
+        try {
+          localStorage.setItem(`${LOCAL_STORAGE_KEY}_theme`, data.theme);
+          localStorage.setItem('omniplan_theme', data.theme);
+        } catch {}
+      }
+
+      if (data.themeStyle === 'bento') {
+        setThemeStyleState(data.themeStyle);
+        try {
+          localStorage.setItem(`${LOCAL_STORAGE_KEY}_theme_style`, data.themeStyle);
+          localStorage.setItem('omniplan_theme_style', data.themeStyle);
+        } catch {}
+      }
+
+      if (typeof data.accentTone === 'string' && data.accentTone) {
+        setAccentToneState(data.accentTone as AccentTone);
+        try {
+          localStorage.setItem(`${LOCAL_STORAGE_KEY}_accent_tone`, data.accentTone);
+          localStorage.setItem('omniplan_accent_tone', data.accentTone);
+        } catch {}
+      }
+
+      const nextFavQuotes: string[] = Array.isArray(data.favoriteQuoteIds)
+        ? data.favoriteQuoteIds
+        : [];
+      setFavoriteQuoteIds(nextFavQuotes);
+      try {
+        localStorage.setItem(`${LOCAL_STORAGE_KEY}_favorite_quotes`, JSON.stringify(nextFavQuotes));
+        localStorage.setItem('omnilife_favorite_quotes', JSON.stringify(nextFavQuotes));
+      } catch {}
+
+      setTimeout(() => {
+        const refreshedHash = getDataHash();
+        lastSyncedPayloadHashRef.current = refreshedHash;
+        lastAutoSnapshotHashRef.current = refreshedHash;
+        isApplyingLocalRestoreRef.current = false;
+        isApplyingRemoteSyncRef.current = false;
+      }, 250);
+
+      return true;
+    } catch (e) {
+      console.error('Error replacing app data from backup:', e);
+      isApplyingLocalRestoreRef.current = false;
+      isApplyingRemoteSyncRef.current = false;
+      return false;
+    }
+  };
+
   // Keep ref updated for immediate invocation from realtime listeners
   useEffect(() => {
     importBackupJSONRef.current = importBackupJSON;
@@ -6142,6 +6344,132 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     currency,
     deletedIds,
     joplinSyncSettings.syncOnChange,
+  ]);
+
+  // Phase 2 Google Drive Silent Re-Auth on Launch & Auto-Sync Resume
+  useEffect(() => {
+    let active = true;
+    silentReAuthGoogleDrive()
+      .then(account => {
+        if (!active || !account?.connected) return;
+        try {
+          const parsed = JSON.parse(compilePayloadRef.current());
+          cachePayloadForBackgroundSync(parsed).catch(() => {});
+        } catch {}
+        const driveMeta = getStoredDriveSyncMeta();
+        if (driveMeta.autoSyncEnabled && driveMeta.autoSyncIntervalMinutes > 0) {
+          scheduleGoogleDriveAutoSync(driveMeta.autoSyncIntervalMinutes, async () => {
+            try {
+              const latest = JSON.parse(compilePayloadRef.current());
+              await backupToDrive(latest);
+            } catch {}
+          }).catch(() => {});
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Phase 4 Dropbox Silent Re-Auth on Launch & Auto-Sync Resume
+  useEffect(() => {
+    let active = true;
+    silentReAuthDropbox()
+      .then(account => {
+        if (!active || !account?.connected) return;
+        try {
+          const parsed = JSON.parse(compilePayloadRef.current());
+          cacheDropboxPayloadForBackgroundSync(parsed).catch(() => {});
+        } catch {}
+        const dbxMeta = getStoredDropboxSyncMeta();
+        if (dbxMeta.autoSyncEnabled && dbxMeta.autoSyncIntervalMinutes > 0) {
+          scheduleDropboxAutoSync(dbxMeta.autoSyncIntervalMinutes, async () => {
+            try {
+              const latest = JSON.parse(compilePayloadRef.current());
+              await backupToDropbox(latest);
+            } catch {}
+          }).catch(() => {});
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Phase 1 Offline Silent Auto-Snapshot (rotates snapshot-1.json .. snapshot-3.json on every user change)
+  useEffect(() => {
+    if (isAutoSnapshotMountRef.current) {
+      isAutoSnapshotMountRef.current = false;
+      lastAutoSnapshotHashRef.current = getDataHash();
+      listLocalSnapshots()
+        .then(existing => {
+          if (existing.length === 0) {
+            saveRotatingAutoSnapshot(compilePayloadRef.current()).catch(() => {});
+          }
+        })
+        .catch(() => {});
+      return;
+    }
+    if (isApplyingLocalRestoreRef.current) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      try {
+        const currentHash = getDataHash();
+        if (!currentHash || currentHash === lastAutoSnapshotHashRef.current) {
+          return;
+        }
+        lastAutoSnapshotHashRef.current = currentHash;
+        const compiled = compilePayloadRef.current();
+        saveRotatingAutoSnapshot(compiled).catch(() => {});
+        // Keep Android WorkManager background Drive & Dropbox sync payloads fresh
+        try {
+          const parsedPayload = JSON.parse(compiled);
+          cachePayloadForBackgroundSync(parsedPayload).catch(() => {});
+          cacheDropboxPayloadForBackgroundSync(parsedPayload).catch(() => {});
+        } catch {}
+      } catch {}
+    }, 1800);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    tasks,
+    medications,
+    doseLogs,
+    habits,
+    routines,
+    goals,
+    bills,
+    hydration,
+    profile.name,
+    profile.nickname,
+    profile.avatarPhoto,
+    profile.email,
+    profile.identifier,
+    profile.bio,
+    profile.dateOfBirth,
+    profile.heightCm,
+    profile.weightKg,
+    profile.gender,
+    profile.preferredCurrency,
+    profile.updatedAt,
+    todoLists,
+    listGroups,
+    tags,
+    scheduleItems,
+    inboxItems,
+    workflowStages,
+    widgets,
+    favoriteQuoteIds,
+    appLock,
+    currency,
+    theme,
+    themeStyle,
+    accentTone,
+    deletedIds,
   ]);
 
   // Joplin-style Configurable Interval Auto-Sync & Focus Sync
@@ -6394,6 +6722,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         exportEncryptedJSON,
         downloadLocalBackupFile,
         importBackupJSON,
+        replaceAllAppDataFromBackup,
         isAuthModalOpen,
         setIsAuthModalOpen,
         isBackupModalOpen,

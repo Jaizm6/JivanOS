@@ -17,7 +17,7 @@ export default defineConfig(({mode}) => {
       dedupe: ['react', 'react-dom', 'react/jsx-runtime', 'react/jsx-dev-runtime'],
     },
     optimizeDeps: {
-      holdUntilCrawlEnd: true,
+      holdUntilCrawlEnd: false,
       include: [
         'react',
         'react-dom',
