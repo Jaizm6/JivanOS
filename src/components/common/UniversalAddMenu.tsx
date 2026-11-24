@@ -9,7 +9,7 @@ import {
   Target,
   X,
 } from 'lucide-react';
-import { FORM_EASE, FORM_EXIT_EASE, useModalScrollLock } from './FormPrimitives';
+import { FORM_EASE, FORM_EXIT_EASE, CRISP_TRANSFORM_TEMPLATE, useModalScrollLock } from './FormPrimitives';
 import { haptics } from '../../utils/haptics';
 
 interface UniversalAddMenuProps {
@@ -96,9 +96,8 @@ export const UniversalAddMenu: React.FC<UniversalAddMenuProps> = ({
           <motion.div
             data-unified-modal="true"
             initial={{ opacity: 0 }}
-            animate={{ opacity: 1, transition: { duration: 0.2, ease: FORM_EASE } }}
-            exit={{ opacity: 0, transition: { duration: 0.2, ease: FORM_EXIT_EASE } }}
-            style={{ willChange: 'opacity' }}
+            animate={{ opacity: 1, transition: { duration: 0.14, ease: FORM_EASE } }}
+            exit={{ opacity: 0, transition: { duration: 0.12, ease: FORM_EXIT_EASE } }}
             className="fixed inset-0 bg-slate-950/35 dark:bg-black/65 touch-none"
             onClick={() => {
               haptics.light();
@@ -119,29 +118,29 @@ export const UniversalAddMenu: React.FC<UniversalAddMenuProps> = ({
                       type="button"
                       data-no-press-scale="true"
                       data-motion-anim="true"
-                      initial={{ opacity: 0, y: 22, scale: 0.86 }}
+                      initial={{ opacity: 0, y: 14, scale: 0.94 }}
                       animate={{
                         opacity: 1,
                         y: 0,
                         scale: 1,
                         transition: {
-                          duration: 0.24,
+                          duration: 0.16,
                           ease: FORM_EASE,
-                          delay: reverseIdx * 0.022,
+                          delay: reverseIdx * 0.014,
                         },
                       }}
                       exit={{
                         opacity: 0,
-                        y: 16,
-                        scale: 0.86,
+                        y: 10,
+                        scale: 0.94,
                         transition: {
-                          duration: 0.15,
+                          duration: 0.11,
                           ease: FORM_EXIT_EASE,
-                          delay: idx * 0.016,
+                          delay: idx * 0.01,
                         },
                       }}
                       whileTap={{ scale: 0.96 }}
-                      style={{ willChange: 'transform, opacity' }}
+                      transformTemplate={CRISP_TRANSFORM_TEMPLATE}
                       onClick={() => {
                         haptics.light();
                         onSelectType(opt.id);
@@ -161,21 +160,21 @@ export const UniversalAddMenu: React.FC<UniversalAddMenuProps> = ({
                 type="button"
                 data-no-press-scale="true"
                 data-motion-anim="true"
-                initial={{ opacity: 0, scale: 0.78, rotate: -45 }}
+                initial={{ opacity: 0, scale: 0.86, rotate: -45 }}
                 animate={{
                   opacity: 1,
                   scale: 1,
                   rotate: 0,
-                  transition: { duration: 0.22, ease: FORM_EASE },
+                  transition: { duration: 0.15, ease: FORM_EASE },
                 }}
                 exit={{
                   opacity: 0,
-                  scale: 0.78,
+                  scale: 0.86,
                   rotate: -45,
-                  transition: { duration: 0.16, ease: FORM_EXIT_EASE, delay: 0.04 },
+                  transition: { duration: 0.11, ease: FORM_EXIT_EASE, delay: 0.02 },
                 }}
                 whileTap={{ scale: 0.92 }}
-                style={{ willChange: 'transform, opacity' }}
+                transformTemplate={CRISP_TRANSFORM_TEMPLATE}
                 onClick={() => {
                   haptics.light();
                   onClose();

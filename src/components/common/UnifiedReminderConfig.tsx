@@ -193,8 +193,8 @@ export const UnifiedReminderConfig: React.FC<UnifiedReminderConfigProps> = ({
               {reminderType === 'alarm'
                 ? '🚨 Urgent: plays persistent audio chime & full-screen action banner with Snooze/Done options.'
                 : reminderType === 'notification'
-                  ? '🔔 Standard: plays a light notification chime & shows standard toast card.'
-                  : '🔇 Disabled: silent. No sound, banner, or popups will trigger.'}
+                  ? '🔔 Standard: plays a light notification chime & sends a system notification.'
+                  : '🔇 Disabled: silent. No sound, banner, or alerts will trigger.'}
             </span>
           </div>
 

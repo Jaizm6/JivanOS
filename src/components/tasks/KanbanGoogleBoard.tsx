@@ -243,7 +243,8 @@ export const KanbanGoogleBoard: React.FC<KanbanGoogleBoardProps> = ({
       <div
         ref={carouselRef}
         onScroll={handleScroll}
-        className="flex lg:grid lg:grid-cols-4 gap-2 overflow-x-auto lg:overflow-x-visible snap-x snap-mandatory pb-2 pt-0.5 px-0.5 scroll-smooth no-scrollbar items-start w-full"
+        data-no-drawer-swipe="true"
+        className="flex lg:grid lg:grid-cols-4 gap-2 overflow-x-auto lg:overflow-x-visible overscroll-x-contain snap-x snap-proximity pb-2 pt-0.5 px-0.5 no-scrollbar items-start w-full [touch-action:pan-x_pan-y] [-webkit-overflow-scrolling:touch]"
       >
         {sortedStages.map(col => {
           const colTasks = getStageTasks(col.id);

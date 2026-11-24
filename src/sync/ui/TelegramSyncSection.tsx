@@ -1,17 +1,20 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  RefreshCw,
   Check,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   X,
   Eye,
   EyeOff,
   ExternalLink,
-  LogOut,
   AlertTriangle,
   CloudDownload,
   GitMerge,
   Smartphone,
   Loader2,
+  MessageCircle,
+  RefreshCw,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { showAndroidToast } from '../../components/common/AndroidToast';
@@ -25,22 +28,25 @@ import {
 } from '../../utils/googleDriveSync';
 import {
   StoredTelegramAuth,
+  TELEGRAM_NO_BACKUP_FOUND_MESSAGE,
+  TELEGRAM_NO_MESSAGES_PROMPT,
   TELEGRAM_SYNC_STATE_EVENT,
   getStoredTelegramAuth,
+  sanitizeTelegramError,
   telegramSyncProvider,
 } from '../providers/TelegramSyncProvider';
 
-const INTERVAL_OPTIONS: { label: string; value: AutoSyncIntervalMinutes }[] = [
-  { label: '15 min', value: 15 },
-  { label: '30 min', value: 30 },
-  { label: '1 hr', value: 60 },
-  { label: 'Manual', value: 0 },
-];
+import { SyncProviderRow } from '../../components/settings/SyncProviderRow';
 
 interface TelegramConflictState {
   remoteEnvelope: DriveBackupEnvelope;
   remoteLastModified: string;
   remoteSizeBytes: number;
+}
+
+export interface TelegramSyncSectionProps {
+  isFirst?: boolean;
+  isLast?: boolean;
 }
 
 const TelegramLogoSvg: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) => (
@@ -49,7 +55,10 @@ const TelegramLogoSvg: React.FC<{ className?: string }> = ({ className = 'w-5 h-
   </svg>
 );
 
-export const TelegramSyncSection: React.FC = () => {
+export const TelegramSyncSection: React.FC<TelegramSyncSectionProps> = ({
+  isFirst = false,
+  isLast = false,
+}) => {
   const { exportEncryptedJSON, replaceAllAppDataFromBackup } = useApp();
 
   const [storedAuth, setStoredAuth] = useState<StoredTelegramAuth | null>(() =>
@@ -69,6 +78,12 @@ export const TelegramSyncSection: React.FC = () => {
   const [isSetupSheetOpen, setIsSetupSheetOpen] = useState(false);
   const [tokenInput, setTokenInput] = useState('');
   const [showToken, setShowToken] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [verifiedBot, setVerifiedBot] = useState<{ botUsername: string; firstName: string } | null>(
+    null
+  );
+  const [showManualChatId, setShowManualChatId] = useState(false);
+  const [manualChatId, setManualChatId] = useState('');
   const [isConnecting, setIsConnecting] = useState(false);
   const [setupError, setSetupError] = useState<string | null>(null);
 
@@ -77,6 +92,14 @@ export const TelegramSyncSection: React.FC = () => {
   const [isResolvingConflict, setIsResolvingConflict] = useState(false);
   const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
   const [, setRelativeTick] = useState(0);
+
+  const resetSetupModal = useCallback(() => {
+    setSetupError(null);
+    setVerifiedBot(null);
+    setManualChatId('');
+    setShowManualChatId(false);
+    setIsVerifying(false);
+  }, []);
 
   const getLocalAppDataObject = useCallback((): Record<string, any> => {
     const raw = exportEncryptedJSON();
@@ -130,24 +153,56 @@ export const TelegramSyncSection: React.FC = () => {
     };
   }, [getLocalAppDataObject]);
 
-  const handleConnectSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (isConnecting) return;
+  const handleVerifyBot = async () => {
+    if (isVerifying || isConnecting) return;
+    setIsVerifying(true);
+    setSetupError(null);
+    try {
+      const info = await telegramSyncProvider.verifyBotToken(tokenInput);
+      setVerifiedBot(info);
+    } catch (err: any) {
+      setVerifiedBot(null);
+      setSetupError(sanitizeTelegramError(err?.message || 'Could not verify Telegram Bot Token.'));
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  const runConnectAndDetect = async () => {
+    if (isConnecting || isVerifying || !tokenInput.trim()) return;
     setIsConnecting(true);
     setSetupError(null);
     try {
-      const account = await telegramSyncProvider.connect(tokenInput);
+      const account = await telegramSyncProvider.connect(
+        tokenInput,
+        showManualChatId ? manualChatId : undefined
+      );
       setTokenInput('');
+      resetSetupModal();
       setIsSetupSheetOpen(false);
       setStoredAuth(getStoredTelegramAuth());
       setSyncStatus('idle');
       setErrorMessage(null);
       showAndroidToast(`Connected ${account.name}`, 2800, 'success');
     } catch (err: any) {
-      setSetupError(err?.message || 'Could not connect Telegram bot.');
+      const msg = sanitizeTelegramError(err?.message || 'Could not connect Telegram bot.');
+      setSetupError(msg);
+      if (err?.botUsername) {
+        setVerifiedBot({ botUsername: String(err.botUsername), firstName: String(err.botUsername) });
+      } else if (!verifiedBot) {
+        const match = /@([A-Za-z0-9_]+)/.exec(msg);
+        if (match?.[1]) {
+          setVerifiedBot({ botUsername: match[1], firstName: match[1] });
+        }
+      }
     } finally {
       setIsConnecting(false);
     }
+  };
+
+  const handleConnectSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await runConnectAndDetect();
   };
 
   const handleSyncNow = async () => {
@@ -192,7 +247,8 @@ export const TelegramSyncSection: React.FC = () => {
       const remote = await telegramSyncProvider.restore();
       if (!remote.found || !remote.envelope) {
         setSyncStatus(storedAuth?.lastSyncedAt ? 'synced' : 'idle');
-        showAndroidToast('No Telegram backup file found yet.', 2800, 'default');
+        setErrorMessage(TELEGRAM_NO_BACKUP_FOUND_MESSAGE);
+        showAndroidToast(TELEGRAM_NO_BACKUP_FOUND_MESSAGE, 3400, 'default');
         return;
       }
       setConflictState({
@@ -202,7 +258,7 @@ export const TelegramSyncSection: React.FC = () => {
       });
       setSyncStatus('idle');
     } catch (err: any) {
-      const msg = err?.message || 'Could not restore from Telegram.';
+      const msg = sanitizeTelegramError(err?.message || 'Could not restore from Telegram.');
       setSyncStatus('error');
       setErrorMessage(msg);
       showAndroidToast(msg, 3200, 'error');
@@ -241,21 +297,16 @@ export const TelegramSyncSection: React.FC = () => {
     }
   };
 
-  const handleToggleAutoSync = async () => {
-    if (!storedAuth) return;
-    const nextEnabled = !storedAuth.autoSyncEnabled;
-    const nextInterval: AutoSyncIntervalMinutes = nextEnabled
-      ? storedAuth.autoSyncIntervalMinutes > 0
-        ? storedAuth.autoSyncIntervalMinutes
-        : 30
-      : 0;
-    await telegramSyncProvider.setAutoSync(nextEnabled, nextInterval, getLocalAppDataObject);
-    setStoredAuth(getStoredTelegramAuth());
-  };
-
   const handleSelectInterval = async (interval: AutoSyncIntervalMinutes) => {
     await telegramSyncProvider.setAutoSync(interval > 0, interval, getLocalAppDataObject);
     setStoredAuth(getStoredTelegramAuth());
+    showAndroidToast(
+      interval === 0
+        ? 'Telegram sync set to Manual'
+        : `Telegram auto-sync every ${interval === 60 ? '1 hr' : `${interval} min`}`,
+      2200,
+      'default'
+    );
   };
 
   const handleConfirmDisconnect = async () => {
@@ -268,203 +319,57 @@ export const TelegramSyncSection: React.FC = () => {
   };
 
   const isConnected = Boolean(storedAuth?.botToken && storedAuth?.chatId);
+  const activeInterval: AutoSyncIntervalMinutes =
+    storedAuth?.autoSyncEnabled ? storedAuth.autoSyncIntervalMinutes : 0;
+
+  const rowStatus = !isConnected
+    ? 'disconnected'
+    : syncStatus === 'syncing'
+      ? 'syncing'
+      : syncStatus === 'error'
+        ? 'error'
+        : storedAuth?.lastSyncedAt
+          ? 'synced'
+          : 'connected';
+
+  const metaLine = storedAuth?.lastSyncedAt
+    ? `Last synced ${formatRelativeSyncTime(storedAuth.lastSyncedAt)}${
+        storedAuth.lastFileSizeBytes !== null
+          ? ` · ${formatDriveFileSize(storedAuth.lastFileSizeBytes)}`
+          : ''
+      }`
+    : 'Connected · Ready for first backup';
 
   return (
     <>
-      <section
-        aria-label="Telegram"
-        style={
-          isConnected
-            ? { borderLeftWidth: 3, borderLeftColor: '#229ED9' }
-            : undefined
-        }
-        className="rounded-2xl border border-[#E5E7EB] dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 space-y-4 w-full min-w-0"
-      >
-        {/* Header Row */}
-        <div className="flex items-start justify-between gap-3 flex-wrap">
-          <div className="flex items-start gap-3 min-w-0 flex-1">
-            <div className="w-11 h-11 rounded-2xl bg-sky-50 dark:bg-sky-950/60 text-[#229ED9] flex items-center justify-center shrink-0">
-              <TelegramLogoSvg className="w-5 h-5" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="text-base font-semibold tracking-tight text-slate-900 dark:text-zinc-100 leading-snug">
-                  Telegram
-                </h3>
-                {isConnected && storedAuth && (
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-semibold bg-sky-100 dark:bg-sky-950/70 text-sky-700 dark:text-sky-300">
-                    @{storedAuth.botUsername}
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-slate-600 dark:text-zinc-400 mt-0.5 leading-relaxed">
-                {isConnected
-                  ? 'Backups sent to your private bot chat'
-                  : 'Free private JSON backups sent to your own Telegram bot'}
-              </p>
-            </div>
-          </div>
-
-          <div className="shrink-0">
-            {!isConnected ? (
-              <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-200/80 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300">
-                Not connected
-              </span>
-            ) : syncStatus === 'syncing' ? (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-600 text-white animate-pulse">
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                <span>Syncing…</span>
-              </span>
-            ) : syncStatus === 'synced' && storedAuth?.lastSyncedAt ? (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-600 text-white">
-                <Check className="w-3.5 h-3.5" />
-                <span>Synced ✓</span>
-              </span>
-            ) : syncStatus === 'error' ? (
-              <button
-                type="button"
-                onClick={handleSyncNow}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white cursor-pointer"
-                title="Tap to retry"
-              >
-                <X className="w-3.5 h-3.5" />
-                <span>Error ✗</span>
-              </button>
-            ) : null}
-          </div>
-        </div>
-
-        {/* Disconnected State */}
-        {!isConnected && (
-          <div className="space-y-3">
-            <button
-              type="button"
-              id="btn-connect-telegram"
-              onClick={() => {
-                setSetupError(null);
-                setIsSetupSheetOpen(true);
-              }}
-              className="w-full sm:w-auto min-h-[48px] px-6 py-3 rounded-full bg-[#229ED9] hover:bg-[#1c8cc2] active:scale-[0.99] text-white text-sm font-semibold shadow-xs transition flex items-center justify-center gap-2.5 cursor-pointer whitespace-nowrap"
-            >
-              <TelegramLogoSvg className="w-4.5 h-4.5" />
-              <span>Connect Telegram</span>
-            </button>
-            <p className="text-[11.5px] text-slate-500 dark:text-zinc-400 leading-relaxed">
-              No server, no middleman. Create a free private bot via @BotFather and keep your
-              backups in your own Telegram chat.
-            </p>
-          </div>
-        )}
-
-        {/* Connected State */}
-        {isConnected && storedAuth && (
-          <div className="space-y-4">
-            <div className="rounded-2xl border border-slate-200/85 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-950/50 p-3.5 flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-xs font-semibold text-slate-800 dark:text-zinc-200 truncate">
-                  {storedAuth.lastSyncedAt
-                    ? `Last synced ${formatRelativeSyncTime(storedAuth.lastSyncedAt)}`
-                    : 'Connected — ready for your first backup'}
-                </div>
-                <div className="text-[11px] text-slate-500 dark:text-zinc-400 mt-0.5 flex items-center gap-1.5 tabular-nums">
-                  <span>@{storedAuth.botUsername}</span>
-                  {storedAuth.lastFileSizeBytes !== null && (
-                    <>
-                      <span aria-hidden="true">·</span>
-                      <span>{formatDriveFileSize(storedAuth.lastFileSizeBytes)}</span>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={handleCheckRestore}
-                  disabled={syncStatus === 'syncing'}
-                  className="min-h-[40px] px-3.5 py-2 rounded-full border border-slate-300 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-800 text-xs font-semibold text-slate-700 dark:text-zinc-200 transition cursor-pointer disabled:opacity-60 whitespace-nowrap"
-                >
-                  Restore
-                </button>
-                <button
-                  type="button"
-                  id="btn-telegram-sync-now"
-                  onClick={handleSyncNow}
-                  disabled={syncStatus === 'syncing'}
-                  title="Sync Now"
-                  aria-label="Sync Now"
-                  className="w-10 h-10 rounded-full bg-[#229ED9] hover:bg-[#1c8cc2] active:scale-95 disabled:opacity-60 text-white flex items-center justify-center shrink-0 shadow-xs transition cursor-pointer"
-                >
-                  <RefreshCw className={`w-4 h-4 ${syncStatus === 'syncing' ? 'animate-spin' : ''}`} />
-                </button>
-              </div>
-            </div>
-
-            {errorMessage && (
-              <div className="rounded-2xl border border-rose-200 dark:border-rose-900/70 bg-rose-50/70 dark:bg-rose-950/35 px-3.5 py-2.5 text-xs text-rose-700 dark:text-rose-300">
-                {errorMessage}
-              </div>
-            )}
-
-            {/* Auto-sync toggle + segmented interval */}
-            <div className="space-y-2.5">
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-xs font-semibold text-slate-800 dark:text-zinc-200">
-                  Auto-sync to Telegram
-                </span>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={storedAuth.autoSyncEnabled}
-                  onClick={handleToggleAutoSync}
-                  className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors cursor-pointer ${
-                    storedAuth.autoSyncEnabled ? 'bg-[#229ED9]' : 'bg-slate-300 dark:bg-zinc-700'
-                  }`}
-                >
-                  <span
-                    className={`inline-block h-4.5 w-4.5 transform rounded-full bg-white shadow-xs transition-transform ${
-                      storedAuth.autoSyncEnabled ? 'translate-x-5.5' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
-              </div>
-
-              <div className="grid grid-cols-4 rounded-full border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950/60 p-1 gap-1">
-                {INTERVAL_OPTIONS.map((opt) => {
-                  const selected =
-                    (storedAuth.autoSyncEnabled ? storedAuth.autoSyncIntervalMinutes : 0) ===
-                    opt.value;
-                  return (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() => handleSelectInterval(opt.value)}
-                      className={`min-h-[34px] rounded-full text-xs font-semibold transition cursor-pointer ${
-                        selected
-                          ? 'bg-[#229ED9] text-white shadow-2xs'
-                          : 'text-slate-600 dark:text-zinc-400 hover:bg-slate-200/60 dark:hover:bg-zinc-800'
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end">
-              <button
-                type="button"
-                onClick={() => setShowDisconnectConfirm(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                <span>Disconnect</span>
-              </button>
-            </div>
-          </div>
-        )}
-      </section>
+      <SyncProviderRow
+        name="Telegram"
+        description="Free backup to your bot chat"
+        logo={<TelegramLogoSvg className="w-4.5 h-4.5 text-[#229ED9]" />}
+        logoBgClass="bg-sky-50 dark:bg-sky-950/60"
+        brandColor="#229ED9"
+        isConnected={isConnected}
+        status={rowStatus}
+        accountLabel={isConnected && storedAuth ? `@${storedAuth.botUsername}` : undefined}
+        metaLine={isConnected ? metaLine : undefined}
+        connectLabel="Connect →"
+        connectButtonId="btn-connect-telegram"
+        onConnect={() => {
+          resetSetupModal();
+          setIsSetupSheetOpen(true);
+        }}
+        onSyncNow={isConnected ? handleSyncNow : undefined}
+        syncButtonId="btn-telegram-sync-now"
+        isSyncing={syncStatus === 'syncing'}
+        onRetry={handleSyncNow}
+        autoSyncInterval={activeInterval}
+        onSelectInterval={isConnected ? handleSelectInterval : undefined}
+        onRestore={isConnected ? handleCheckRestore : undefined}
+        onDisconnect={isConnected ? () => setShowDisconnectConfirm(true) : undefined}
+        errorMessage={errorMessage}
+        isFirst={isFirst}
+        isLast={isLast}
+      />
 
       {/* Step-by-Step Bottom Sheet: Connect Telegram Backup */}
       {isSetupSheetOpen && (
@@ -473,27 +378,42 @@ export const TelegramSyncSection: React.FC = () => {
           aria-modal="true"
           aria-labelledby="telegram-setup-sheet-title"
           className="fixed inset-0 z-[100001] bg-black/50 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4"
-          onClick={() => !isConnecting && setIsSetupSheetOpen(false)}
+          onClick={() => {
+            if (!isConnecting && !isVerifying) {
+              resetSetupModal();
+              setIsSetupSheetOpen(false);
+            }
+          }}
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="w-full sm:max-w-[420px] max-h-[90dvh] overflow-y-auto overscroll-contain rounded-t-[28px] sm:rounded-[28px] bg-white dark:bg-zinc-900 border border-slate-200/90 dark:border-zinc-800 px-5 pt-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:p-6 shadow-2xl space-y-5"
+            className="w-full sm:max-w-[440px] max-h-[90dvh] overflow-y-auto overscroll-contain rounded-t-[28px] sm:rounded-[28px] bg-white dark:bg-zinc-900 border border-slate-200/90 dark:border-zinc-800 px-5 pt-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:p-6 shadow-2xl space-y-4"
           >
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-xl bg-sky-50 dark:bg-sky-950/60 text-[#229ED9] flex items-center justify-center">
                   <TelegramLogoSvg className="w-5 h-5" />
                 </div>
-                <h3
-                  id="telegram-setup-sheet-title"
-                  className="text-base font-semibold text-slate-900 dark:text-zinc-100"
-                >
-                  Connect Telegram Backup
-                </h3>
+                <div>
+                  <h3
+                    id="telegram-setup-sheet-title"
+                    className="text-base font-semibold text-slate-900 dark:text-zinc-100"
+                  >
+                    Connect Telegram Backup
+                  </h3>
+                  <p className="text-[11px] text-slate-500 dark:text-zinc-400">
+                    Free private backup to your own Telegram bot chat
+                  </p>
+                </div>
               </div>
               <button
                 type="button"
-                onClick={() => !isConnecting && setIsSetupSheetOpen(false)}
+                onClick={() => {
+                  if (!isConnecting && !isVerifying) {
+                    resetSetupModal();
+                    setIsSetupSheetOpen(false);
+                  }
+                }}
                 className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-500 cursor-pointer"
                 aria-label="Close"
               >
@@ -501,16 +421,37 @@ export const TelegramSyncSection: React.FC = () => {
               </button>
             </div>
 
-            <form onSubmit={handleConnectSubmit} className="space-y-4">
-              {/* Step 1 */}
-              <div className="rounded-2xl bg-slate-50 dark:bg-zinc-950/60 border border-slate-200/80 dark:border-zinc-800 p-3.5 space-y-2">
+            <form onSubmit={handleConnectSubmit} className="space-y-3.5">
+              {/* Step 1: Create Bot in @BotFather */}
+              <div className="rounded-2xl bg-slate-50 dark:bg-zinc-950/60 border border-slate-200/80 dark:border-zinc-800 p-3.5 space-y-2.5">
                 <div className="text-[11px] font-bold uppercase tracking-wider text-sky-600 dark:text-sky-400">
-                  Step 1
+                  Step 1 · Create your private bot
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
+                <ol className="list-decimal list-inside space-y-1 text-xs text-slate-700 dark:text-zinc-300 leading-relaxed">
+                  <li>
+                    Open <strong>@BotFather</strong> and send{' '}
+                    <span className="font-mono px-1.5 py-0.5 rounded bg-slate-200/80 dark:bg-zinc-800 text-[11px]">
+                      /newbot
+                    </span>
+                  </li>
+                  <li>
+                    Pick any display name (e.g. <em>My JivanOS Backup</em>)
+                  </li>
+                  <li>
+                    Pick a username ending in{' '}
+                    <span className="font-mono px-1 py-0.5 rounded bg-slate-200/80 dark:bg-zinc-800 text-[11px]">
+                      bot
+                    </span>{' '}
+                    (e.g. <span className="font-mono text-[11px]">my_jivanos_bot</span>)
+                  </li>
+                  <li>
+                    Copy the <strong>HTTP API Token</strong> that @BotFather replies with
+                  </li>
+                </ol>
+                <div className="flex flex-wrap items-center gap-2 pt-0.5">
                   <a
                     href="tg://resolve?domain=BotFather"
-                    className="inline-flex items-center gap-1.5 min-h-[38px] px-4 py-2 rounded-full bg-[#229ED9] hover:bg-[#1c8cc2] text-white text-xs font-semibold transition"
+                    className="inline-flex items-center gap-1.5 min-h-[36px] px-3.5 py-1.5 rounded-full bg-[#229ED9] hover:bg-[#1c8cc2] text-white text-xs font-semibold transition"
                   >
                     <span>Open @BotFather</span>
                     <ExternalLink className="w-3.5 h-3.5" />
@@ -519,81 +460,199 @@ export const TelegramSyncSection: React.FC = () => {
                     href="https://t.me/BotFather"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-xs font-medium text-sky-600 dark:text-sky-400 hover:underline"
+                    className="text-xs font-medium text-sky-600 dark:text-sky-400 hover:underline px-1"
                   >
                     Open in browser
                   </a>
                 </div>
               </div>
 
-              {/* Step 2 */}
-              <div className="rounded-2xl bg-slate-50 dark:bg-zinc-950/60 border border-slate-200/80 dark:border-zinc-800 p-3.5 space-y-1">
+              {/* Step 2: Paste Token & Verify + Start your new bot */}
+              <div className="rounded-2xl bg-slate-50 dark:bg-zinc-950/60 border border-slate-200/80 dark:border-zinc-800 p-3.5 space-y-2.5">
                 <div className="text-[11px] font-bold uppercase tracking-wider text-sky-600 dark:text-sky-400">
-                  Step 2
-                </div>
-                <p className="text-xs font-medium text-slate-800 dark:text-zinc-200">
-                  Send <span className="font-mono px-1.5 py-0.5 rounded bg-slate-200/80 dark:bg-zinc-800">/newbot</span> and follow steps
-                </p>
-                <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-relaxed">
-                  Then open your new bot in Telegram and tap <strong>Start</strong> once so JivanOS
-                  can auto-detect your private Chat ID.
-                </p>
-              </div>
-
-              {/* Step 3 */}
-              <div className="space-y-1.5">
-                <div className="text-[11px] font-bold uppercase tracking-wider text-sky-600 dark:text-sky-400">
-                  Step 3
+                  Step 2 · Paste token &amp; message your new bot
                 </div>
                 <label
                   htmlFor="telegram-bot-token-input"
                   className="block text-xs font-semibold text-slate-800 dark:text-zinc-200"
                 >
-                  Paste your Bot Token:
+                  Bot HTTP API Token
                 </label>
-                <div className="relative">
-                  <input
-                    id="telegram-bot-token-input"
-                    type={showToken ? 'text' : 'password'}
-                    required
-                    autoComplete="off"
-                    spellCheck={false}
-                    value={tokenInput}
-                    onChange={(e) => setTokenInput(e.target.value)}
-                    placeholder="123456789:ABCdefGHIjklMNO..."
-                    className="w-full min-h-[46px] pl-3.5 pr-11 py-2.5 rounded-2xl bg-slate-50 dark:bg-zinc-950 border border-slate-300 dark:border-zinc-700 text-xs font-mono text-slate-900 dark:text-zinc-100 outline-none focus:border-[#229ED9]"
-                  />
+                <div className="flex items-stretch gap-2">
+                  <div className="relative flex-1 min-w-0">
+                    <input
+                      id="telegram-bot-token-input"
+                      type={showToken ? 'text' : 'password'}
+                      required
+                      autoComplete="off"
+                      spellCheck={false}
+                      value={tokenInput}
+                      onChange={(e) => {
+                        setTokenInput(e.target.value);
+                        setVerifiedBot(null);
+                        setSetupError(null);
+                      }}
+                      placeholder="123456789:ABCdefGHIjklMNO..."
+                      className="w-full min-h-[44px] pl-3 pr-10 py-2 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-300 dark:border-zinc-700 text-xs font-mono text-slate-900 dark:text-zinc-100 outline-none focus:border-[#229ED9]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowToken((v) => !v)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer p-1"
+                      aria-label={showToken ? 'Hide token' : 'Show token'}
+                    >
+                      {showToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                   <button
                     type="button"
-                    onClick={() => setShowToken((v) => !v)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
-                    aria-label={showToken ? 'Hide token' : 'Show token'}
+                    disabled={isVerifying || isConnecting || !tokenInput.trim()}
+                    onClick={handleVerifyBot}
+                    className="shrink-0 min-h-[44px] px-3.5 rounded-2xl border border-sky-300 dark:border-sky-800 bg-sky-50 dark:bg-sky-950/60 hover:bg-sky-100 dark:hover:bg-sky-900/60 disabled:opacity-50 text-sky-700 dark:text-sky-300 text-xs font-semibold transition flex items-center justify-center gap-1.5 cursor-pointer"
                   >
-                    {showToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    {isVerifying ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Check className="w-3.5 h-3.5" />
+                    )}
+                    <span>{isVerifying ? 'Checking…' : 'Verify Bot'}</span>
                   </button>
                 </div>
+
+                {verifiedBot ? (
+                  <div className="rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/60 p-3 space-y-2">
+                    <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-800 dark:text-emerald-300">
+                      <CheckCircle2 className="w-4 h-4 shrink-0" />
+                      <span>Found @{verifiedBot.botUsername || verifiedBot.firstName}</span>
+                    </div>
+                    <p className="text-[11px] text-emerald-900/80 dark:text-emerald-200/80 leading-relaxed">
+                      <strong>Required:</strong> Telegram blocks bots from starting a chat with you.
+                      Open your new bot below and tap <strong>Start</strong> (or send <strong>Hi</strong>), then come back and tap Connect.
+                    </p>
+                    {verifiedBot.botUsername && (
+                      <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                        <a
+                          href={`tg://resolve?domain=${verifiedBot.botUsername}`}
+                          className="inline-flex items-center gap-1.5 min-h-[34px] px-3.5 py-1.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition"
+                        >
+                          <MessageCircle className="w-3.5 h-3.5" />
+                          <span>Open @{verifiedBot.botUsername}</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                        <a
+                          href={`https://t.me/${verifiedBot.botUsername}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs font-medium text-emerald-700 dark:text-emerald-300 hover:underline px-1"
+                        >
+                          Open in browser
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-relaxed">
+                    Tap <strong>Verify Bot</strong> after pasting your token to get a 1-tap button
+                    to open your new bot and press <strong>Start</strong> (required so Telegram can
+                    detect your private Chat ID).
+                  </p>
+                )}
               </div>
 
-              {setupError && (
-                <div className="rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 px-3 py-2 text-xs text-rose-700 dark:text-rose-300 leading-relaxed">
-                  {setupError}
+              {/* Step 3: Detect Chat ID & Connect + Optional Manual Chat ID */}
+              <div className="space-y-2.5">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-sky-600 dark:text-sky-400">
+                  Step 3 · Detect Chat ID &amp; Connect
                 </div>
-              )}
 
-              <button
-                type="submit"
-                disabled={isConnecting || !tokenInput.trim()}
-                className="w-full min-h-[48px] px-5 py-3 rounded-full bg-[#229ED9] hover:bg-[#1c8cc2] disabled:opacity-60 text-white text-sm font-semibold shadow-xs transition flex items-center justify-center gap-2 cursor-pointer"
-              >
-                {isConnecting ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Detecting Chat ID…</span>
-                  </>
-                ) : (
-                  <span>Connect</span>
+                <button
+                  type="button"
+                  onClick={() => setShowManualChatId((v) => !v)}
+                  className="w-full flex items-center justify-between gap-2 text-left text-xs font-medium text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200 py-1 cursor-pointer"
+                >
+                  <span>Can&apos;t auto-detect? Enter Chat ID manually</span>
+                  {showManualChatId ? (
+                    <ChevronUp className="w-4 h-4 shrink-0" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4 shrink-0" />
+                  )}
+                </button>
+
+                {showManualChatId && (
+                  <div className="rounded-2xl bg-slate-50 dark:bg-zinc-950/60 border border-slate-200/80 dark:border-zinc-800 p-3 space-y-2">
+                    <label
+                      htmlFor="telegram-manual-chat-id"
+                      className="block text-xs font-semibold text-slate-800 dark:text-zinc-200"
+                    >
+                      Your numeric Telegram Chat ID (optional)
+                    </label>
+                    <input
+                      id="telegram-manual-chat-id"
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      value={manualChatId}
+                      onChange={(e) => {
+                        setManualChatId(e.target.value);
+                        setSetupError(null);
+                      }}
+                      placeholder="e.g. 123456789"
+                      className="w-full min-h-[42px] px-3 py-2 rounded-xl bg-white dark:bg-zinc-900 border border-slate-300 dark:border-zinc-700 text-xs font-mono text-slate-900 dark:text-zinc-100 outline-none focus:border-[#229ED9]"
+                    />
+                    <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-relaxed">
+                      Helpful if you tapped Start more than 24 hours ago. Message{' '}
+                      <a
+                        href="https://t.me/userinfobot"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-mono text-sky-600 dark:text-sky-400 underline"
+                      >
+                        @userinfobot
+                      </a>{' '}
+                      on Telegram to view your numeric ID (you still need to tap Start in your own
+                      bot once).
+                    </p>
+                  </div>
                 )}
-              </button>
+
+                {setupError && (
+                  <div className="rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 px-3 py-2.5 text-xs text-rose-700 dark:text-rose-300 leading-relaxed space-y-2">
+                    <div>{setupError}</div>
+                    {setupError === TELEGRAM_NO_MESSAGES_PROMPT && (
+                      <button
+                        type="button"
+                        disabled={isConnecting || isVerifying}
+                        onClick={runConnectAndDetect}
+                        className="inline-flex items-center gap-1.5 min-h-[34px] px-3.5 py-1.5 rounded-full bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white text-xs font-semibold transition cursor-pointer"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        <span>Detect Again</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={isConnecting || isVerifying || !tokenInput.trim()}
+                  className="w-full min-h-[48px] px-5 py-3 rounded-full bg-[#229ED9] hover:bg-[#1c8cc2] disabled:opacity-60 text-white text-sm font-semibold shadow-xs transition flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  {isConnecting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Detecting Chat ID…</span>
+                    </>
+                  ) : (
+                    <span>
+                      {showManualChatId && manualChatId.trim()
+                        ? 'Connect with Chat ID'
+                        : setupError === TELEGRAM_NO_MESSAGES_PROMPT
+                          ? 'Detect Again'
+                          : 'Connect & Detect Chat ID'}
+                    </span>
+                  )}
+                </button>
+              </div>
             </form>
           </div>
         </div>

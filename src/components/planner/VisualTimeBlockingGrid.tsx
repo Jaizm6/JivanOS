@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import {
   Clock,
   Plus,
+  Minus,
   Check,
   Play,
   Edit2,
@@ -111,6 +112,30 @@ const formatTimeDisplay = (timeStr?: string, useAMPM: boolean = true): string =>
   const period = normH >= 12 ? 'PM' : 'AM';
   const h12 = normH % 12 === 0 ? 12 : normH % 12;
   return `${h12}:${String(m).padStart(2, '0')} ${period}`;
+};
+
+const formatCompactRailTime = (timeStr?: string, useAMPM: boolean = true): string => {
+  if (!timeStr) return '';
+  const parts = timeStr.trim().split(':');
+  if (parts.length < 2) return timeStr;
+  const h = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10);
+  if (isNaN(h) || isNaN(m)) return timeStr;
+  const normH = ((h % 24) + 24) % 24;
+  if (!useAMPM) {
+    return `${String(normH).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  }
+  const period = normH >= 12 ? 'p' : 'a';
+  const h12 = normH % 12 === 0 ? 12 : normH % 12;
+  return m === 0 ? `${h12}${period}` : `${h12}:${String(m).padStart(2, '0')}${period}`;
+};
+
+const formatCompactRailHour = (hour: number, useAMPM: boolean = true): string => {
+  if (!useAMPM) return `${String(hour).padStart(2, '0')}:00`;
+  if (hour === 0 || hour === 24) return '12a';
+  if (hour < 12) return `${hour}a`;
+  if (hour === 12) return '12p';
+  return `${hour - 12}p`;
 };
 
 const formatDurationText = (minutes: number): string => {
@@ -613,6 +638,9 @@ export const VisualTimeBlockingGrid: React.FC<VisualTimeBlockingGridProps> = ({
     addScheduleItem,
     deleteScheduleItem,
     updateHabit,
+    updateHabitCounter,
+    hydration,
+    addWater,
     pushNotification,
     soundEngine,
     startPomodoro,
@@ -1192,18 +1220,120 @@ export const VisualTimeBlockingGrid: React.FC<VisualTimeBlockingGridProps> = ({
     pushNotification('Day Populated', 'Loaded a clean structured routine for this date.', 'calendar');
   };
 
+  // Live measurable habit metadata & stepper actions (for today's measurable / hydration-synced habits)
+  const getMeasurableHabitInfo = (item: any) => {
+    if (!isToday || item?.sourceType !== 'habit' || !item?.rawHabit) return null;
+    const h = item.rawHabit;
+    const isSyncedWater =
+      Boolean(h.syncHydration) ||
+      h.id === 'hab_1' ||
+      (h.name || '').toLowerCase().includes('water') ||
+      (h.name || '').toLowerCase().includes('hydration');
+    const isQuit = h.habitType === 'quit';
+    const isMeasurable =
+      isSyncedWater ||
+      h.habitType === 'counter' ||
+      h.habitType === 'measurement' ||
+      isQuit ||
+      (typeof h.targetCount === 'number' && h.targetCount > 0);
+    if (!isMeasurable) return null;
+
+    if (isSyncedWater) {
+      const totalMl = Math.max(
+        0,
+        (hydration?.todayLogs || []).reduce((acc, log) => acc + (log.amountMl || 0), 0)
+      );
+      const targetMl = hydration?.targetMl || 3000;
+      const rawUnit = (h.unit || hydration?.preferredUnit || 'ml').toLowerCase();
+      const isLitre = rawUnit === 'l' || rawUnit === 'litre' || rawUnit === 'litres';
+      const isGlasses = rawUnit === 'glasses' || rawUnit === 'glass' || rawUnit === 'gl';
+      const currentVal = isLitre
+        ? Math.round((totalMl / 1000) * 100) / 100
+        : isGlasses
+        ? Math.round(totalMl / 250)
+        : totalMl;
+      const targetVal = isLitre
+        ? Math.round((targetMl / 1000) * 100) / 100
+        : isGlasses
+        ? Math.max(1, Math.round(targetMl / 250))
+        : targetMl;
+      const unitLabel = isLitre ? 'L' : isGlasses ? 'gl' : 'ml';
+      const stepUnit = isLitre ? 'l' : isGlasses ? 'glass' : 'ml';
+      const stepVal =
+        h.incrementStep && h.incrementStep > 0
+          ? h.incrementStep
+          : isLitre
+          ? 0.25
+          : isGlasses
+          ? 1
+          : 250;
+      const progressPct = targetMl > 0 ? Math.min(100, Math.round((totalMl / targetMl) * 100)) : 0;
+      const isGoalMet = totalMl >= targetMl;
+
+      return {
+        isSyncedWater: true,
+        currentVal,
+        targetVal,
+        unitLabel,
+        stepVal,
+        stepLabel: `+${stepVal}`,
+        progressPct,
+        isGoalMet,
+        canDecrement: totalMl > 0,
+        onIncrement: () => {
+          addWater(stepVal, stepUnit);
+          try {
+            soundEngine?.playWaterDrop?.();
+          } catch {}
+        },
+        onDecrement: () => {
+          if (totalMl <= 0) return;
+          addWater(-stepVal, stepUnit);
+        },
+      };
+    }
+
+    const currentVal = h.counterValue || 0;
+    const targetVal = h.targetCount && h.targetCount > 0 ? h.targetCount : 1;
+    const unitLabel = h.unit || '';
+    const stepVal = h.incrementStep && h.incrementStep > 0 ? h.incrementStep : 1;
+    const progressPct = targetVal > 0 ? Math.min(100, Math.round((currentVal / targetVal) * 100)) : 0;
+    const isGoalMet = isQuit ? currentVal <= targetVal : currentVal >= targetVal;
+
+    return {
+      isSyncedWater: false,
+      currentVal,
+      targetVal,
+      unitLabel,
+      stepVal,
+      stepLabel: stepVal > 1 ? `+${stepVal}` : '+',
+      progressPct,
+      isGoalMet,
+      canDecrement: currentVal > 0,
+      onIncrement: () => updateHabitCounter(h.id, stepVal),
+      onDecrement: () => {
+        if (currentVal <= 0) return;
+        updateHabitCounter(h.id, -stepVal);
+      },
+    };
+  };
+
   // Summary metrics (only count genuinely time-bounded blocks toward scheduled planned minutes)
   const totalPlannedMinutes = scheduledBlocks.reduce(
     (acc, curr) => acc + (curr.hasExplicitTimeRange ? curr.duration : 0),
     0
   );
-  const completedCount = scheduledBlocks.filter(b => b.completed).length;
+  const completedCount = scheduledBlocks.filter(b => {
+    const mInfo = getMeasurableHabitInfo(b);
+    return mInfo ? mInfo.isGoalMet : Boolean(b.completed);
+  }).length;
   const totalItemsCount = scheduledBlocks.length;
 
   // Reusable Detail Inspector Renderer (Shared between Desktop Right Pane & Mobile/Tablet Sheet)
   const renderInspectorBody = (item: any, onClose: () => void, backLabel?: string) => {
     const { color, IconComponent } = item.visualMeta;
-    const isChecked = Boolean(item.completed);
+    const measurableInfo = getMeasurableHabitInfo(item);
+    const isChecked = measurableInfo ? measurableInfo.isGoalMet : Boolean(item.completed);
     const isTimed = typeof item.startMin === 'number';
     const itemSubtasks =
       Array.isArray(item.subtasks) && item.subtasks.length > 0
@@ -1446,19 +1576,67 @@ export const VisualTimeBlockingGrid: React.FC<VisualTimeBlockingGridProps> = ({
         {/* Clean Action Footer */}
         <div className="p-3.5 sm:px-5 border-t border-slate-100 dark:border-zinc-800/80 flex items-center justify-between gap-2 flex-wrap shrink-0 bg-slate-50/50 dark:bg-zinc-950">
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => handleToggleItem(item)}
-              style={isChecked ? undefined : { backgroundColor: item.tickColor || color }}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-2xs ${
-                isChecked
-                  ? 'bg-slate-200 dark:bg-zinc-800 text-slate-700 dark:text-zinc-200'
-                  : 'text-white hover:opacity-95'
-              }`}
-            >
-              <Check className="w-3.5 h-3.5 stroke-[2.6]" />
-              <span>{isChecked ? 'Completed' : 'Mark Done'}</span>
-            </button>
+            {measurableInfo ? (
+              <div
+                className={`inline-flex items-center gap-1.5 p-1 rounded-full border shadow-2xs ${
+                  measurableInfo.isGoalMet
+                    ? 'bg-emerald-50/90 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700'
+                    : 'bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-700'
+                }`}
+              >
+                <button
+                  type="button"
+                  disabled={!measurableInfo.canDecrement}
+                  onClick={() => measurableInfo.onDecrement()}
+                  className={`w-8 h-8 rounded-full flex items-center justify-center transition ${
+                    measurableInfo.canDecrement
+                      ? 'bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-200 cursor-pointer active:scale-90'
+                      : 'bg-slate-50 dark:bg-zinc-900 text-slate-300 dark:text-zinc-700 cursor-not-allowed'
+                  }`}
+                  title={`Subtract ${measurableInfo.stepVal}${measurableInfo.unitLabel ? ` ${measurableInfo.unitLabel}` : ''}`}
+                >
+                  <Minus className="w-3.5 h-3.5 stroke-[2.5]" />
+                </button>
+                <div className="px-1.5 text-center leading-tight">
+                  <div className="flex items-center justify-center gap-1 text-xs font-extrabold text-slate-900 dark:text-white tabular-nums">
+                    {measurableInfo.isGoalMet && (
+                      <Check className="w-3 h-3 text-emerald-600 dark:text-emerald-400 stroke-[3]" />
+                    )}
+                    <span>
+                      {measurableInfo.currentVal}/{measurableInfo.targetVal}
+                    </span>
+                  </div>
+                  {measurableInfo.unitLabel && (
+                    <div className="text-[9.5px] font-semibold text-slate-500 dark:text-zinc-400">
+                      {measurableInfo.unitLabel}
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => measurableInfo.onIncrement()}
+                  style={{ backgroundColor: measurableInfo.isGoalMet ? '#10b981' : color }}
+                  className="h-8 min-w-[36px] px-2.5 rounded-full text-white text-xs font-extrabold flex items-center justify-center transition hover:opacity-95 active:scale-95 cursor-pointer shadow-2xs tabular-nums"
+                  title={`Add ${measurableInfo.stepVal}${measurableInfo.unitLabel ? ` ${measurableInfo.unitLabel}` : ''}`}
+                >
+                  {measurableInfo.stepLabel}
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => handleToggleItem(item)}
+                style={isChecked ? undefined : { backgroundColor: item.tickColor || color }}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-2xs ${
+                  isChecked
+                    ? 'bg-slate-200 dark:bg-zinc-800 text-slate-700 dark:text-zinc-200'
+                    : 'text-white hover:opacity-95'
+                }`}
+              >
+                <Check className="w-3.5 h-3.5 stroke-[2.6]" />
+                <span>{isChecked ? 'Completed' : 'Mark Done'}</span>
+              </button>
+            )}
 
             {linkedTaskId && (
               <button
@@ -1952,7 +2130,7 @@ export const VisualTimeBlockingGrid: React.FC<VisualTimeBlockingGridProps> = ({
               : ''
           }`}
         >
-          <div className="bg-white dark:bg-zinc-950 rounded-[24px] sm:rounded-[28px] border border-slate-200/80 dark:border-zinc-800/90 px-2.5 sm:px-5 pt-3 pb-6 space-y-2 shadow-2xs">
+          <div className="bg-white dark:bg-zinc-950 rounded-[24px] sm:rounded-[28px] border border-slate-200/80 dark:border-zinc-800/90 pl-1.5 pr-2 sm:px-3.5 pt-2.5 pb-6 space-y-2 shadow-2xs">
             {/* Subtle Sheet Pull Handle on Mobile */}
             <div className="w-9 h-1 rounded-full bg-slate-200/90 dark:bg-zinc-800 mx-auto sm:hidden" />
 
@@ -1996,7 +2174,7 @@ export const VisualTimeBlockingGrid: React.FC<VisualTimeBlockingGridProps> = ({
             ) : (
               <div className="relative pt-1 pb-1 select-none">
                 {(() => {
-                  const formattedNowTime = formatTimeDisplay(
+                  const formattedNowTime = formatCompactRailTime(
                     formatMinutesToTime(currentTotalMinutes),
                     useAMPM
                   );
@@ -2013,17 +2191,17 @@ export const VisualTimeBlockingGrid: React.FC<VisualTimeBlockingGridProps> = ({
                       aria-label={`Current time ${formattedNowTime}`}
                     >
                       {/* Left Margin Live Timestamp */}
-                      <div className="w-[52px] sm:w-[66px] shrink-0 pr-2 text-right flex flex-col items-end leading-none">
-                        <span className="text-[10.5px] sm:text-[11px] font-black text-[#d87268] dark:text-[#f29b94] tabular-nums whitespace-nowrap">
+                      <div className="w-[38px] sm:w-[46px] shrink-0 pr-1 sm:pr-1.5 text-right flex flex-col items-end leading-none">
+                        <span className="text-[9.5px] sm:text-[10.5px] font-black text-[#d87268] dark:text-[#f29b94] tabular-nums whitespace-nowrap tracking-tight">
                           {formattedNowTime}
                         </span>
-                        <span className="text-[8.5px] font-extrabold uppercase tracking-wider text-[#e88d84] mt-0.5">
+                        <span className="text-[8px] font-extrabold uppercase tracking-wider text-[#e88d84] mt-0.5">
                           Now
                         </span>
                       </div>
 
                       {/* Center Spine Live Beacon */}
-                      <div className="w-[36px] sm:w-[44px] shrink-0 relative flex items-center justify-center self-stretch">
+                      <div className="w-[30px] sm:w-[36px] shrink-0 relative flex items-center justify-center self-stretch">
                         {hasTopElapsedRail && (
                           <div className="w-[2px] bg-[#e88d84]/65 dark:bg-[#e88d84]/55 absolute top-0 bottom-1/2 left-1/2 -translate-x-1/2" />
                         )}
@@ -2034,7 +2212,7 @@ export const VisualTimeBlockingGrid: React.FC<VisualTimeBlockingGridProps> = ({
                       </div>
 
                       {/* Horizontal Time Horizon Hairline */}
-                      <div className="flex-1 min-w-0 pl-2 sm:pl-3 pr-1 flex items-center gap-2">
+                      <div className="flex-1 min-w-0 pl-1.5 sm:pl-2 pr-1 flex items-center gap-2">
                         <div className="flex-1 h-[2px] rounded-full bg-gradient-to-r from-[#e88d84] via-[#e88d84]/40 to-transparent" />
                         {captionText && (
                           <span className="text-[10.5px] font-bold text-[#d87268] dark:text-[#f29b94] tabular-nums whitespace-nowrap shrink-0">
@@ -2177,19 +2355,19 @@ export const VisualTimeBlockingGrid: React.FC<VisualTimeBlockingGridProps> = ({
                                       onClick={() => onAddAtTime(hrStr, hrEndStr)}
                                       className="w-full flex items-center group/hr text-left rounded-xl hover:bg-[#fbf4f2]/70 dark:hover:bg-zinc-900/60 transition py-1 cursor-pointer"
                                     >
-                                      <div className="w-[52px] sm:w-[66px] shrink-0 pr-2 text-right">
+                                      <div className="w-[38px] sm:w-[46px] shrink-0 pr-1 sm:pr-1.5 text-right">
                                         <span
-                                          className={`text-[10.5px] font-semibold tabular-nums whitespace-nowrap transition ${
+                                          className={`text-[10px] font-semibold tabular-nums whitespace-nowrap tracking-tight transition ${
                                             isHourPast
                                               ? 'text-[#d87268]/75 dark:text-[#f29b94]/70'
                                               : 'text-slate-400 group-hover/hr:text-[#d87268] dark:text-zinc-500 dark:group-hover/hr:text-[#f29b94]'
                                           }`}
                                         >
-                                          {formatHourLabel(hr, useAMPM)}
+                                          {formatCompactRailHour(hr, useAMPM)}
                                         </span>
                                       </div>
 
-                                      <div className="w-[36px] sm:w-[44px] shrink-0 relative flex items-center justify-center self-stretch">
+                                      <div className="w-[30px] sm:w-[36px] shrink-0 relative flex items-center justify-center self-stretch">
                                         <div
                                           className={`w-[2px] h-full border-l-2 border-dashed absolute top-0 bottom-0 left-1/2 -translate-x-1/2 ${
                                             isHourPast
@@ -2206,7 +2384,7 @@ export const VisualTimeBlockingGrid: React.FC<VisualTimeBlockingGridProps> = ({
                                         />
                                       </div>
 
-                                      <div className="flex-1 min-w-0 pl-2 sm:pl-3 pr-2 flex items-center justify-between gap-2">
+                                      <div className="flex-1 min-w-0 pl-1.5 sm:pl-2 pr-1.5 flex items-center justify-between gap-2">
                                         <div className="flex-1 h-[1px] border-t border-dashed border-slate-200/80 dark:border-zinc-800/80 group-hover/hr:border-[#e88d84]/50 transition" />
                                         <span className="text-[11px] font-semibold text-slate-400 sm:opacity-0 sm:group-hover/hr:opacity-100 group-hover/hr:text-[#d87268] dark:text-zinc-500 dark:group-hover/hr:text-[#f29b94] inline-flex items-center gap-1 transition whitespace-nowrap">
                                           <Plus className="w-3 h-3" />
@@ -2231,8 +2409,8 @@ export const VisualTimeBlockingGrid: React.FC<VisualTimeBlockingGridProps> = ({
 
                               {/* Quiet Stretch Trigger (fills exact gap duration) */}
                               <div className="flex items-stretch min-h-[24px]">
-                                <div className="w-[52px] sm:w-[66px] shrink-0 pr-2" />
-                                <div className="w-[36px] sm:w-[44px] shrink-0 relative flex justify-center">
+                                <div className="w-[38px] sm:w-[46px] shrink-0 pr-1 sm:pr-1.5" />
+                                <div className="w-[30px] sm:w-[36px] shrink-0 relative flex justify-center">
                                   <div
                                     className={`w-[2px] h-full ${
                                       gapBeforeMins >= 30
@@ -2245,7 +2423,7 @@ export const VisualTimeBlockingGrid: React.FC<VisualTimeBlockingGridProps> = ({
                                     }`}
                                   />
                                 </div>
-                                <div className="flex-1 min-w-0 pl-2 sm:pl-3 py-1 flex items-center">
+                                <div className="flex-1 min-w-0 pl-1.5 sm:pl-2 py-1 flex items-center">
                                   {showFreeGaps && gapBeforeMins >= 30 && prevCluster ? (
                                     <button
                                       type="button"
@@ -2288,30 +2466,30 @@ export const VisualTimeBlockingGrid: React.FC<VisualTimeBlockingGridProps> = ({
 
                               <div className="flex items-stretch py-1">
                                 {/* Left Shared Cluster Time Anchor */}
-                                <div className="w-[52px] sm:w-[66px] shrink-0 pr-2 flex flex-col justify-between text-right py-2 select-none">
+                                <div className="w-[38px] sm:w-[46px] shrink-0 pr-1 sm:pr-1.5 flex flex-col justify-between text-right py-2 select-none">
                                   <span
-                                    className={`text-[10.5px] sm:text-[11px] font-semibold tabular-nums leading-none whitespace-nowrap ${
+                                    className={`text-[9.5px] sm:text-[10.5px] font-semibold tabular-nums leading-none whitespace-nowrap tracking-tight ${
                                       isClusterPast
                                         ? 'text-amber-600/70 dark:text-amber-400/70'
                                         : 'text-amber-600 dark:text-amber-400'
                                     }`}
                                   >
-                                    {formatTimeDisplay(
+                                    {formatCompactRailTime(
                                       formatMinutesToTime(cluster.startMin),
                                       useAMPM
                                     )}
                                   </span>
 
                                   {isClusterActive && (
-                                    <span className="inline-flex items-center justify-end gap-1 text-[10px] sm:text-[10.5px] font-black text-[#d87268] dark:text-[#f29b94] tabular-nums leading-none my-auto whitespace-nowrap">
-                                      <span className="w-1.5 h-1.5 rounded-full bg-[#e88d84] animate-pulse" />
+                                    <span className="inline-flex items-center justify-end gap-0.5 text-[9px] sm:text-[10px] font-black text-[#d87268] dark:text-[#f29b94] tabular-nums leading-none my-auto whitespace-nowrap tracking-tight">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-[#e88d84] animate-pulse shrink-0" />
                                       <span>{formattedNowTime}</span>
                                     </span>
                                   )}
 
                                   {!isContiguousWithNext && cluster.blocks.some((b: any) => b.hasExplicitTimeRange) ? (
-                                    <span className="text-[10px] sm:text-[10.5px] font-medium text-slate-400 dark:text-zinc-500 tabular-nums leading-none whitespace-nowrap">
-                                      {formatTimeDisplay(
+                                    <span className="text-[9.5px] sm:text-[10px] font-medium text-slate-400 dark:text-zinc-500 tabular-nums leading-none whitespace-nowrap tracking-tight">
+                                      {formatCompactRailTime(
                                         formatMinutesToTime(cluster.endMin),
                                         useAMPM
                                       )}
@@ -2322,10 +2500,10 @@ export const VisualTimeBlockingGrid: React.FC<VisualTimeBlockingGridProps> = ({
                                 </div>
 
                                 {/* Center Spine Overlap Node */}
-                                <div className="w-[36px] sm:w-[44px] shrink-0 relative flex items-center justify-center py-1">
+                                <div className="w-[30px] sm:w-[36px] shrink-0 relative flex items-center justify-center py-1">
                                   {renderClusterSpineRail()}
                                   <div
-                                    className={`relative z-10 w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-amber-100 dark:bg-amber-950 border-2 border-amber-400 dark:border-amber-500 text-amber-700 dark:text-amber-300 flex items-center justify-center shadow-2xs ${
+                                    className={`relative z-10 w-[30px] h-[30px] sm:w-9 sm:h-9 rounded-full bg-amber-100 dark:bg-amber-950 border-2 border-amber-400 dark:border-amber-500 text-amber-700 dark:text-amber-300 flex items-center justify-center shadow-2xs ${
                                       isClusterActive
                                         ? 'ring-4 ring-[#e88d84]/30'
                                         : isClusterPast
@@ -2334,12 +2512,12 @@ export const VisualTimeBlockingGrid: React.FC<VisualTimeBlockingGridProps> = ({
                                     }`}
                                     title={`${cluster.blocks.length} overlapping blocks`}
                                   >
-                                    <Layers className="w-4 h-4 stroke-[2.3]" />
+                                    <Layers className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.3]" />
                                   </div>
                                 </div>
 
                                 {/* Grouped Concurrent Cluster Card */}
-                                <div className="flex-1 min-w-0 pl-2 sm:pl-3">
+                                <div className="flex-1 min-w-0 pl-1.5 sm:pl-2">
                                   <div className="rounded-2xl border border-amber-200/80 dark:border-amber-900/60 bg-amber-50/45 dark:bg-amber-950/20 p-2 sm:p-2.5 space-y-2">
                                     <div className="flex items-center justify-between gap-2 px-0.5">
                                       <span className="text-[11px] font-bold text-amber-700 dark:text-amber-300 tabular-nums">
@@ -2358,7 +2536,10 @@ export const VisualTimeBlockingGrid: React.FC<VisualTimeBlockingGridProps> = ({
                                       className={`grid grid-cols-1 gap-1.5 sm:gap-2 ${clusterDesktopCols}`}
                                     >
                                       {cluster.blocks.map(block => {
-                                        const isChecked = Boolean(block.completed);
+                                        const measurableInfo = getMeasurableHabitInfo(block);
+                                        const isChecked = measurableInfo
+                                          ? measurableInfo.isGoalMet
+                                          : Boolean(block.completed);
                                         const isSelected = inspectedItemId === block.id;
                                         const { color, IconComponent } = block.visualMeta;
 
@@ -2370,7 +2551,7 @@ export const VisualTimeBlockingGrid: React.FC<VisualTimeBlockingGridProps> = ({
                                               isSelected
                                                 ? 'border-[#e88d84] ring-1 ring-[#e88d84]/40'
                                                 : 'border-slate-200/80 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700'
-                                            } ${isChecked ? 'opacity-60' : ''}`}
+                                            } ${isChecked && !measurableInfo ? 'opacity-60' : ''}`}
                                           >
                                             <div className="flex items-center gap-2 min-w-0 flex-1">
                                               <div
@@ -2409,32 +2590,89 @@ export const VisualTimeBlockingGrid: React.FC<VisualTimeBlockingGridProps> = ({
                                                 >
                                                   {block.title}
                                                 </h4>
+                                                {measurableInfo && (
+                                                  <div className="mt-1 h-1 w-full max-w-[110px] rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
+                                                    <div
+                                                      className="h-full rounded-full transition-[width] duration-300"
+                                                      style={{
+                                                        width: `${measurableInfo.progressPct}%`,
+                                                        backgroundColor: measurableInfo.isGoalMet ? '#10b981' : color,
+                                                      }}
+                                                    />
+                                                  </div>
+                                                )}
                                               </div>
                                             </div>
 
-                                            <button
-                                              type="button"
-                                              onClick={e => {
-                                                e.stopPropagation();
-                                                handleToggleItem(block);
-                                              }}
-                                              className="w-9 h-9 -mr-1 rounded-full flex items-center justify-center shrink-0 cursor-pointer"
-                                              title={isChecked ? 'Mark incomplete' : 'Mark completed'}
-                                            >
-                                              <span
-                                                style={{
-                                                  borderColor: block.tickColor,
-                                                  backgroundColor: isChecked
-                                                    ? block.tickColor
-                                                    : block.tickTint,
-                                                }}
-                                                className={`w-5 h-5 ${block.tickCompactShapeClass} border-2 flex items-center justify-center transition-transform hover:scale-110 active:scale-90`}
+                                            {measurableInfo ? (
+                                              <div
+                                                onClick={e => e.stopPropagation()}
+                                                className={`inline-flex items-center gap-1 p-0.5 rounded-full border shrink-0 select-none ${
+                                                  measurableInfo.isGoalMet
+                                                    ? 'bg-emerald-50/90 dark:bg-emerald-950/40 border-emerald-300/90 dark:border-emerald-700/80'
+                                                    : 'bg-slate-50/95 dark:bg-zinc-900 border-slate-200/90 dark:border-zinc-700/80'
+                                                }`}
                                               >
-                                                {isChecked && (
-                                                  <Check className="w-3 h-3 text-white stroke-[3]" />
-                                                )}
-                                              </span>
-                                            </button>
+                                                <button
+                                                  type="button"
+                                                  disabled={!measurableInfo.canDecrement}
+                                                  onClick={e => {
+                                                    e.stopPropagation();
+                                                    measurableInfo.onDecrement();
+                                                  }}
+                                                  className={`w-6 h-6 rounded-full flex items-center justify-center transition ${
+                                                    measurableInfo.canDecrement
+                                                      ? 'bg-white dark:bg-zinc-800 text-slate-700 dark:text-zinc-200 hover:bg-slate-200/70 dark:hover:bg-zinc-700 cursor-pointer active:scale-90 shadow-2xs'
+                                                      : 'text-slate-300 dark:text-zinc-700 cursor-not-allowed'
+                                                  }`}
+                                                  title={`Subtract ${measurableInfo.stepVal}${measurableInfo.unitLabel ? ` ${measurableInfo.unitLabel}` : ''}`}
+                                                >
+                                                  <Minus className="w-3 h-3 stroke-[2.5]" />
+                                                </button>
+                                                <span className="px-0.5 text-[10px] font-extrabold tabular-nums text-slate-800 dark:text-zinc-100 inline-flex items-center gap-0.5 whitespace-nowrap">
+                                                  {measurableInfo.isGoalMet && (
+                                                    <Check className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400 stroke-[3]" />
+                                                  )}
+                                                  {measurableInfo.currentVal}/{measurableInfo.targetVal}
+                                                </span>
+                                                <button
+                                                  type="button"
+                                                  onClick={e => {
+                                                    e.stopPropagation();
+                                                    measurableInfo.onIncrement();
+                                                  }}
+                                                  style={{ backgroundColor: measurableInfo.isGoalMet ? '#10b981' : color }}
+                                                  className="h-6 min-w-[24px] px-1.5 rounded-full text-white text-[10px] font-extrabold flex items-center justify-center transition hover:opacity-95 active:scale-90 cursor-pointer tabular-nums"
+                                                  title={`Add ${measurableInfo.stepVal}${measurableInfo.unitLabel ? ` ${measurableInfo.unitLabel}` : ''}`}
+                                                >
+                                                  {measurableInfo.stepLabel}
+                                                </button>
+                                              </div>
+                                            ) : (
+                                              <button
+                                                type="button"
+                                                onClick={e => {
+                                                  e.stopPropagation();
+                                                  handleToggleItem(block);
+                                                }}
+                                                className="w-9 h-9 -mr-1 rounded-full flex items-center justify-center shrink-0 cursor-pointer"
+                                                title={isChecked ? 'Mark incomplete' : 'Mark completed'}
+                                              >
+                                                <span
+                                                  style={{
+                                                    borderColor: block.tickColor,
+                                                    backgroundColor: isChecked
+                                                      ? block.tickColor
+                                                      : block.tickTint,
+                                                  }}
+                                                  className={`w-5 h-5 ${block.tickCompactShapeClass} border-2 flex items-center justify-center transition-transform hover:scale-110 active:scale-90`}
+                                                >
+                                                  {isChecked && (
+                                                    <Check className="w-3 h-3 text-white stroke-[3]" />
+                                                  )}
+                                                </span>
+                                              </button>
+                                            )}
                                           </div>
                                         );
                                       })}
@@ -2448,7 +2686,10 @@ export const VisualTimeBlockingGrid: React.FC<VisualTimeBlockingGridProps> = ({
 
                         // CASE B: SINGLE COMPACT SPINE BLOCK
                         const block = cluster.blocks[0];
-                        const isChecked = Boolean(block.completed);
+                        const measurableInfo = getMeasurableHabitInfo(block);
+                        const isChecked = measurableInfo
+                          ? measurableInfo.isGoalMet
+                          : Boolean(block.completed);
                         const isSelected = inspectedItemId === block.id;
                         const { color, progressColor, IconComponent } = block.visualMeta;
 
@@ -2490,33 +2731,33 @@ export const VisualTimeBlockingGrid: React.FC<VisualTimeBlockingGridProps> = ({
                               className="flex items-stretch group/row relative py-0.5 cursor-pointer"
                             >
                               {/* 1. LEFT TIME MARGIN */}
-                              <div className="w-[52px] sm:w-[66px] shrink-0 pr-2 flex flex-col justify-between text-right py-2 select-none">
+                              <div className="w-[38px] sm:w-[46px] shrink-0 pr-1 sm:pr-1.5 flex flex-col justify-between text-right py-2 select-none">
                                 <span
-                                  className={`text-[10.5px] sm:text-[11px] font-medium tabular-nums leading-none whitespace-nowrap ${
+                                  className={`text-[9.5px] sm:text-[10.5px] font-medium tabular-nums leading-none whitespace-nowrap tracking-tight ${
                                     isClusterPast
                                       ? 'text-slate-400/75 dark:text-zinc-600'
                                       : 'text-slate-400 dark:text-zinc-500'
                                   }`}
                                 >
-                                  {formatTimeDisplay(block.startTime, useAMPM)}
+                                  {formatCompactRailTime(block.startTime, useAMPM)}
                                 </span>
 
                                 {isCurrentlyActive && (
-                                  <span className="inline-flex items-center justify-end gap-1 text-[10px] sm:text-[10.5px] font-black text-[#d87268] dark:text-[#f29b94] tabular-nums leading-none my-auto whitespace-nowrap">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-[#e88d84] animate-pulse" />
+                                  <span className="inline-flex items-center justify-end gap-0.5 text-[9px] sm:text-[10px] font-black text-[#d87268] dark:text-[#f29b94] tabular-nums leading-none my-auto whitespace-nowrap tracking-tight">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-[#e88d84] animate-pulse shrink-0" />
                                     <span>{formattedNowTime}</span>
                                   </span>
                                 )}
 
                                 {!isContiguousWithNext && block.hasExplicitTimeRange ? (
                                   <span
-                                    className={`text-[10px] sm:text-[10.5px] font-medium tabular-nums leading-none whitespace-nowrap ${
+                                    className={`text-[9.5px] sm:text-[10px] font-medium tabular-nums leading-none whitespace-nowrap tracking-tight ${
                                       isClusterPast
                                         ? 'text-slate-400/75 dark:text-zinc-600'
                                         : 'text-slate-400 dark:text-zinc-500'
                                     }`}
                                   >
-                                    {formatTimeDisplay(block.endTime, useAMPM)}
+                                    {formatCompactRailTime(block.endTime, useAMPM)}
                                   </span>
                                 ) : (
                                   <span className="h-2" />
@@ -2524,7 +2765,7 @@ export const VisualTimeBlockingGrid: React.FC<VisualTimeBlockingGridProps> = ({
                               </div>
 
                               {/* 2. CENTER SPINE LINE + STRUCTURED VISUAL NODE */}
-                              <div className="w-[36px] sm:w-[44px] shrink-0 relative flex items-center justify-center py-1">
+                              <div className="w-[30px] sm:w-[36px] shrink-0 relative flex items-center justify-center py-1">
                                 {renderClusterSpineRail()}
 
                                 <div
@@ -2532,7 +2773,7 @@ export const VisualTimeBlockingGrid: React.FC<VisualTimeBlockingGridProps> = ({
                                     height: `${nodeHeightPx}px`,
                                     backgroundColor: color,
                                   }}
-                                  className={`relative z-10 w-9 sm:w-10 rounded-full flex items-center justify-center text-white shadow-2xs overflow-hidden transition-transform group-hover/row:scale-[1.04] ${
+                                  className={`relative z-10 w-[30px] sm:w-9 rounded-full flex items-center justify-center text-white shadow-2xs overflow-hidden transition-transform group-hover/row:scale-[1.04] ${
                                     isCurrentlyActive
                                       ? 'ring-4 ring-[#e88d84]/30'
                                       : isChecked
@@ -2551,14 +2792,14 @@ export const VisualTimeBlockingGrid: React.FC<VisualTimeBlockingGridProps> = ({
                                       className="absolute top-0 left-0 right-0 transition-all duration-500"
                                     />
                                   )}
-                                  <IconComponent className="w-[17px] h-[17px] sm:w-[18px] sm:h-[18px] stroke-[2.2] relative z-10" />
+                                  <IconComponent className="w-[15px] h-[15px] sm:w-[17px] sm:h-[17px] stroke-[2.2] relative z-10" />
                                 </div>
                               </div>
 
                               {/* 3. RIGHT COMPACT SPINE CARD (Clean hairline, calm hierarchy, 44px check hitbox) */}
-                              <div className="flex-1 min-w-0 pl-2 sm:pl-3 py-0.5 flex items-center">
+                              <div className="flex-1 min-w-0 pl-1.5 sm:pl-2 py-0.5 flex items-center">
                                 <div
-                                  className={`w-full min-w-0 rounded-2xl border px-3 sm:px-3.5 py-2 flex items-center justify-between gap-2 transition ${
+                                  className={`w-full min-w-0 rounded-2xl border px-2.5 sm:px-3.5 py-2 flex items-center justify-between gap-2 transition ${
                                     isSelected
                                       ? 'bg-[#fbf4f2]/85 dark:bg-zinc-900/95 border-[#e88d84]/60 ring-1 ring-[#e88d84]/35'
                                       : isCurrentlyActive
@@ -2650,6 +2891,23 @@ export const VisualTimeBlockingGrid: React.FC<VisualTimeBlockingGridProps> = ({
                                       {block.title}
                                     </h4>
 
+                                    {measurableInfo && (
+                                      <div className="mt-1 flex items-center gap-1.5">
+                                        <div className="flex-1 max-w-[120px] h-1.5 rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
+                                          <div
+                                            className="h-full rounded-full transition-[width] duration-300"
+                                            style={{
+                                              width: `${measurableInfo.progressPct}%`,
+                                              backgroundColor: measurableInfo.isGoalMet ? '#10b981' : color,
+                                            }}
+                                          />
+                                        </div>
+                                        <span className="text-[10px] font-semibold text-slate-400 dark:text-zinc-500 tabular-nums">
+                                          {measurableInfo.progressPct}%
+                                        </span>
+                                      </div>
+                                    )}
+
                                     {(subtasksCount > 0 || block.notes) && (
                                       <div className="flex items-center gap-2 mt-0.5 text-[11px] text-slate-400 dark:text-zinc-500 truncate tabular-nums">
                                         {subtasksCount > 0 && (
@@ -2667,29 +2925,84 @@ export const VisualTimeBlockingGrid: React.FC<VisualTimeBlockingGridProps> = ({
                                     )}
                                   </div>
 
-                                  <button
-                                    type="button"
-                                    onClick={e => {
-                                      e.stopPropagation();
-                                      handleToggleItem(block);
-                                    }}
-                                    className="w-10 h-10 -mr-1.5 flex items-center justify-center rounded-full shrink-0 cursor-pointer"
-                                    title={isChecked ? 'Mark incomplete' : 'Mark completed'}
-                                  >
-                                    <span
-                                      style={{
-                                        borderColor: block.tickColor,
-                                        backgroundColor: isChecked
-                                          ? block.tickColor
-                                          : block.tickTint,
-                                      }}
-                                      className={`w-[22px] h-[22px] ${block.tickShapeClass} border-[2.2px] flex items-center justify-center transition-transform hover:scale-110 active:scale-90`}
+                                  {measurableInfo ? (
+                                    <div
+                                      onClick={e => e.stopPropagation()}
+                                      className={`inline-flex items-center gap-1 p-0.5 rounded-full border shrink-0 select-none ${
+                                        measurableInfo.isGoalMet
+                                          ? 'bg-emerald-50/90 dark:bg-emerald-950/40 border-emerald-300/90 dark:border-emerald-700/80'
+                                          : 'bg-slate-50/95 dark:bg-zinc-900 border-slate-200/90 dark:border-zinc-700/80'
+                                      }`}
                                     >
-                                      {isChecked && (
-                                        <Check className="w-3.5 h-3.5 text-white stroke-[3]" />
-                                      )}
-                                    </span>
-                                  </button>
+                                      <button
+                                        type="button"
+                                        disabled={!measurableInfo.canDecrement}
+                                        onClick={e => {
+                                          e.stopPropagation();
+                                          measurableInfo.onDecrement();
+                                        }}
+                                        className={`w-7 h-7 rounded-full flex items-center justify-center transition ${
+                                          measurableInfo.canDecrement
+                                            ? 'bg-white dark:bg-zinc-800 text-slate-700 dark:text-zinc-200 hover:bg-slate-200/70 dark:hover:bg-zinc-700 cursor-pointer active:scale-90 shadow-2xs'
+                                            : 'text-slate-300 dark:text-zinc-700 cursor-not-allowed'
+                                        }`}
+                                        title={`Subtract ${measurableInfo.stepVal}${measurableInfo.unitLabel ? ` ${measurableInfo.unitLabel}` : ''}`}
+                                      >
+                                        <Minus className="w-3.5 h-3.5 stroke-[2.5]" />
+                                      </button>
+                                      <div className="px-0.5 text-center leading-none">
+                                        <div className="inline-flex items-center gap-0.5 text-[10.5px] font-extrabold tabular-nums text-slate-800 dark:text-zinc-100 whitespace-nowrap">
+                                          {measurableInfo.isGoalMet && (
+                                            <Check className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400 stroke-[3]" />
+                                          )}
+                                          <span>
+                                            {measurableInfo.currentVal}/{measurableInfo.targetVal}
+                                          </span>
+                                        </div>
+                                        {measurableInfo.unitLabel && (
+                                          <div className="text-[8.5px] font-semibold text-slate-400 dark:text-zinc-500 leading-tight">
+                                            {measurableInfo.unitLabel}
+                                          </div>
+                                        )}
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={e => {
+                                          e.stopPropagation();
+                                          measurableInfo.onIncrement();
+                                        }}
+                                        style={{ backgroundColor: measurableInfo.isGoalMet ? '#10b981' : color }}
+                                        className="h-7 min-w-[28px] px-2 rounded-full text-white text-[10.5px] font-extrabold flex items-center justify-center transition hover:opacity-95 active:scale-90 cursor-pointer tabular-nums shadow-2xs"
+                                        title={`Add ${measurableInfo.stepVal}${measurableInfo.unitLabel ? ` ${measurableInfo.unitLabel}` : ''}`}
+                                      >
+                                        {measurableInfo.stepLabel}
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={e => {
+                                        e.stopPropagation();
+                                        handleToggleItem(block);
+                                      }}
+                                      className="w-10 h-10 -mr-1.5 flex items-center justify-center rounded-full shrink-0 cursor-pointer"
+                                      title={isChecked ? 'Mark incomplete' : 'Mark completed'}
+                                    >
+                                      <span
+                                        style={{
+                                          borderColor: block.tickColor,
+                                          backgroundColor: isChecked
+                                            ? block.tickColor
+                                            : block.tickTint,
+                                        }}
+                                        className={`w-[22px] h-[22px] ${block.tickShapeClass} border-[2.2px] flex items-center justify-center transition-transform hover:scale-110 active:scale-90`}
+                                      >
+                                        {isChecked && (
+                                          <Check className="w-3.5 h-3.5 text-white stroke-[3]" />
+                                        )}
+                                      </span>
+                                    </button>
+                                  )}
                                 </div>
                               </div>
                             </div>
@@ -2704,15 +3017,15 @@ export const VisualTimeBlockingGrid: React.FC<VisualTimeBlockingGridProps> = ({
 
                 {/* Bottom Trailing Quick-Add Node */}
                 <div className="flex items-center mt-1.5">
-                  <div className="w-[52px] sm:w-[66px] shrink-0 pr-2 text-right">
-                    <span className="text-[10.5px] font-medium text-slate-300 dark:text-zinc-600 tabular-nums whitespace-nowrap">
-                      {formatTimeDisplay(
+                  <div className="w-[38px] sm:w-[46px] shrink-0 pr-1 sm:pr-1.5 text-right">
+                    <span className="text-[9.5px] sm:text-[10.5px] font-medium text-slate-300 dark:text-zinc-600 tabular-nums whitespace-nowrap tracking-tight">
+                      {formatCompactRailTime(
                         formatMinutesToTime(getNextAvailableStartMin('12:00')),
                         useAMPM
                       )}
                     </span>
                   </div>
-                  <div className="w-[36px] sm:w-[44px] shrink-0 flex flex-col items-center">
+                  <div className="w-[30px] sm:w-[36px] shrink-0 flex flex-col items-center">
                     <div className="w-[2px] h-2.5 bg-slate-200 dark:bg-zinc-800" />
                     <button
                       type="button"
@@ -2729,7 +3042,7 @@ export const VisualTimeBlockingGrid: React.FC<VisualTimeBlockingGridProps> = ({
                       <Plus className="w-3.5 h-3.5" />
                     </button>
                   </div>
-                  <div className="flex-1 pl-2 sm:pl-3">
+                  <div className="flex-1 pl-1.5 sm:pl-2">
                     <button
                       type="button"
                       onClick={() => {

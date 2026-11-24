@@ -11,6 +11,8 @@ import {
   Share2,
   Archive,
   ArchiveRestore,
+  Minus,
+  Plus,
 } from 'lucide-react';
 import { Habit } from '../../types';
 import { useApp } from '../../context/AppContext';
@@ -23,7 +25,8 @@ import { IconRenderer } from '../common/IconRenderer';
 import { getFontInlineStyle, getSafeFontColor } from '../../utils/activityStyles';
 import { InlineTagMeta } from '../common/TagVisuals';
 import { ArchiveConfirmModal } from '../common/ArchiveConfirmModal';
-import { FORM_SPRING, FORM_EXIT_TRANSITION } from '../common/FormPrimitives';
+import { FORM_SPRING, FORM_EXIT_TRANSITION, CRISP_TRANSFORM_TEMPLATE } from '../common/FormPrimitives';
+import { showAndroidToast } from '../common/AndroidToast';
 
 interface HabitDetailModalProps {
   habit: Habit;
@@ -36,7 +39,18 @@ export const HabitDetailModal: React.FC<HabitDetailModalProps> = ({
   onClose,
   onEdit,
 }) => {
-  const { habits, tags = [], toggleHabitDay, deleteHabit, updateHabit, updateHabitSubSteps, soundEngine, theme } = useApp();
+  const {
+    habits,
+    tags = [],
+    hydration,
+    toggleHabitDay,
+    updateHabitCounter,
+    deleteHabit,
+    updateHabit,
+    updateHabitSubSteps,
+    soundEngine,
+    theme,
+  } = useApp();
   const [historyTab, setHistoryTab] = useState<'month' | '13weeks' | '12months'>('month');
   const [currentCalendarMonth, setCurrentCalendarMonth] = useState(() => new Date());
   const [celebrationKey, setCelebrationKey] = useState<number>(0);
@@ -141,11 +155,75 @@ export const HabitDetailModal: React.FC<HabitDetailModalProps> = ({
 
   const habit = habits.find(h => h.id === initialHabit.id) || initialHabit;
   const todayStr = formatLocalDate();
-  const isCheckedToday = !!habit.completionHistory?.[todayStr];
+  const isSyncedWater =
+    Boolean(habit.syncHydration) ||
+    habit.name.toLowerCase().includes('water') ||
+    habit.name.toLowerCase().includes('hydration') ||
+    habit.id === 'hab_1';
+  const isMeasurable =
+    habit.habitType === 'counter' || habit.habitType === 'measurement' || isSyncedWater;
+
+  const currentTotalMl = Math.max(
+    0,
+    (hydration?.todayLogs || []).reduce((acc, log) => acc + (log.amountMl || 0), 0)
+  );
+  const hydrationTargetMl = hydration?.targetMl || 3000;
+
+  const currentMeasureVal = isSyncedWater ? currentTotalMl : habit.counterValue || 0;
+  const targetMeasureVal = isSyncedWater ? hydrationTargetMl : habit.targetCount || 1;
+  const measureStep =
+    habit.incrementStep && habit.incrementStep > 0
+      ? habit.incrementStep
+      : isSyncedWater
+      ? 250
+      : 1;
+  const measureUnit = habit.unit || (isSyncedWater ? 'ml' : 'times');
+
+  const isCheckedToday =
+    !!habit.completionHistory?.[todayStr] ||
+    (isSyncedWater && currentMeasureVal >= targetMeasureVal);
   const completionHistory = habit.completionHistory || {};
   const completedTotal = Object.values(completionHistory).filter(Boolean).length;
 
+  const handleMeasureAdjust = (delta: number, showStepToast = false) => {
+    const prevVal = currentMeasureVal;
+    const nextVal = Math.max(0, Math.round((prevVal + delta) * 100) / 100);
+    const wasComplete = prevVal >= targetMeasureVal;
+    const willComplete = nextVal >= targetMeasureVal;
+
+    updateHabitCounter(habit.id, delta);
+
+    if (willComplete && !wasComplete) {
+      setCelebrationKey(prev => prev + 1);
+      try {
+        soundEngine?.playWaterDropNotification?.();
+        haptics.complete();
+      } catch {}
+      showAndroidToast(`Done: ${habit.name} (${nextVal}/${targetMeasureVal} ${measureUnit})`, 1800);
+    } else {
+      haptics.toggle();
+      if (showStepToast) {
+        const remaining = Math.max(0, Math.round((targetMeasureVal - nextVal) * 100) / 100);
+        showAndroidToast(
+          remaining > 0
+            ? `${nextVal}/${targetMeasureVal} ${measureUnit} · ${remaining} left`
+            : `${nextVal}/${targetMeasureVal} ${measureUnit}`,
+          1500
+        );
+      }
+    }
+  };
+
   const handleToggleDone = (dateStr: string = todayStr) => {
+    if (isMeasurable && dateStr === todayStr) {
+      if (isCheckedToday) {
+        handleMeasureAdjust(-measureStep, true);
+      } else {
+        handleMeasureAdjust(measureStep, true);
+      }
+      return;
+    }
+
     const wasChecked = !!completionHistory[dateStr];
     toggleHabitDay(habit.id, dateStr, { skipSound: true });
     if (!wasChecked) {
@@ -163,7 +241,11 @@ export const HabitDetailModal: React.FC<HabitDetailModalProps> = ({
   const now = new Date();
   const daysActive = Math.max(1, Math.ceil((now.getTime() - createdDate.getTime()) / (1000 * 3600 * 24)));
   const successRate = Math.min(100, Math.round((completedTotal / daysActive) * 100));
-  const todayProgress = isCheckedToday ? 100 : 0;
+  const todayProgress = isMeasurable
+    ? Math.min(100, Math.round((currentMeasureVal / Math.max(1, targetMeasureVal)) * 100))
+    : isCheckedToday
+    ? 100
+    : 0;
 
   const periodProgress = (days: number) => {
     let done = 0;
@@ -288,7 +370,7 @@ export const HabitDetailModal: React.FC<HabitDetailModalProps> = ({
       const curDate = new Date(year, month, i);
       const dStr = formatLocalDate(curDate);
       const isPast = curDate < todayMidnight;
-      const isDone = !!completionHistory[dStr];
+      const isDone = dStr === todayStr ? isCheckedToday : !!completionHistory[dStr];
       days.push({
         dateStr: dStr,
         dayNum: i,
@@ -300,7 +382,7 @@ export const HabitDetailModal: React.FC<HabitDetailModalProps> = ({
     }
 
     return days;
-  }, [currentCalendarMonth, completionHistory, todayStr, now]);
+  }, [currentCalendarMonth, completionHistory, todayStr, isCheckedToday, now]);
 
   const calendarRowCount = Math.ceil(calendarDays.length / 7);
 
@@ -376,10 +458,11 @@ export const HabitDetailModal: React.FC<HabitDetailModalProps> = ({
       data-unified-modal="true"
       data-habit-detail-modal="true"
       data-dark-modal={isDark ? 'true' : undefined}
-      initial={{ opacity: 0, y: 18, scale: 0.985 }}
+      initial={{ opacity: 0, y: 12, scale: 0.99 }}
       animate={{ opacity: 1, y: 0, scale: 1, transition: FORM_SPRING }}
-      exit={{ opacity: 0, y: 14, scale: 0.985, transition: FORM_EXIT_TRANSITION }}
-      style={{ backgroundColor: themeStyles.backdrop, color: themeStyles.textColor, willChange: 'transform, opacity' }}
+      exit={{ opacity: 0, y: 8, scale: 0.99, transition: FORM_EXIT_TRANSITION }}
+      transformTemplate={CRISP_TRANSFORM_TEMPLATE}
+      style={{ backgroundColor: themeStyles.backdrop, color: themeStyles.textColor }}
       className={`fixed inset-0 z-[100] h-[100dvh] flex flex-col overflow-hidden ${
         isDark ? 'modal-dark' : 'modal-light'
       }`}
@@ -443,8 +526,12 @@ export const HabitDetailModal: React.FC<HabitDetailModalProps> = ({
               style={{ color: themeStyles.subText }}
             >
               <span>{habitTypeLabel}</span>
-              <span aria-hidden="true">·</span>
-              <span>Target {habit.targetCount || 1}</span>
+              {!isMeasurable && (habit.targetCount || 1) > 1 && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span>Target {habit.targetCount}</span>
+                </>
+              )}
               {habit.reminderTime && (
                 <>
                   <span aria-hidden="true">·</span>
@@ -465,41 +552,106 @@ export const HabitDetailModal: React.FC<HabitDetailModalProps> = ({
           </div>
         </div>
 
-        {/* Today Check Toggle */}
+        {/* Today Check Toggle (or Live Measurable Stepper for Counter/Measurement Habits) */}
         <div className="relative flex items-center justify-center shrink-0">
           <CheckmarkCelebration
             activeKey={celebrationKey}
             badgeText={`Done🔥 ${Math.max(1, currentStreak + (isCheckedToday ? 0 : 1))}D`}
             ringColor="border-[#4c6ef5]"
           />
-          <motion.button
-            type="button"
-            whileTap={{ scale: 0.9 }}
-            animate={celebrationKey ? { scale: [1, 1.18, 0.95, 1] } : {}}
-            transition={{ duration: 0.3, ease: 'easeOut' }}
-            onClick={() => handleToggleDone(todayStr)}
-            aria-label={isCheckedToday ? 'Mark incomplete for today' : 'Mark complete for today'}
-            className="w-10 h-10 rounded-full border flex items-center justify-center transition-all cursor-pointer relative overflow-hidden"
-            style={{
-              backgroundColor: isCheckedToday ? '#4c6ef5' : themeStyles.btnCheckEmptyBg,
-              borderColor: isCheckedToday ? '#5c7cfa' : themeStyles.btnCheckEmptyBorder,
-              color: isCheckedToday ? '#ffffff' : themeStyles.btnCheckEmptyIcon,
-              boxShadow: isCheckedToday ? '0 8px 20px -4px rgba(76, 110, 245, 0.45)' : 'none',
-            }}
-          >
-            {isCheckedToday ? (
-              <AnimatedCheckIcon
-                className="w-5 h-5 text-white"
-                strokeWidth={3}
-                animate={celebrationKey > 0}
-              />
-            ) : (
-              <div
-                className="w-4.5 h-4.5 rounded-full border-2"
-                style={{ borderColor: themeStyles.btnCheckEmptyIcon }}
-              />
-            )}
-          </motion.button>
+          {isMeasurable ? (
+            <div
+              className="inline-flex items-center gap-1 rounded-full p-1 border"
+              style={{
+                backgroundColor: isCheckedToday
+                  ? isDark
+                    ? 'rgba(16, 185, 129, 0.16)'
+                    : 'rgba(16, 185, 129, 0.10)'
+                  : themeStyles.cardInnerBg,
+                borderColor: isCheckedToday
+                  ? isDark
+                    ? 'rgba(16, 185, 129, 0.45)'
+                    : 'rgba(16, 185, 129, 0.35)'
+                  : themeStyles.cardBorder,
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => handleMeasureAdjust(-measureStep)}
+                disabled={currentMeasureVal <= 0}
+                aria-label={`Decrease ${habit.name} by ${measureStep}`}
+                className="w-7 h-7 rounded-full flex items-center justify-center transition cursor-pointer active:scale-90 disabled:opacity-35 disabled:cursor-not-allowed"
+                style={{
+                  backgroundColor: isDark ? '#27272a' : '#e2e8f0',
+                  color: themeStyles.titleColor,
+                }}
+              >
+                <Minus className="w-3.5 h-3.5 stroke-[2.5]" />
+              </button>
+
+              <div className="px-1 text-center leading-none tabular-nums min-w-[44px]">
+                <div
+                  className="text-[11.5px] font-extrabold"
+                  style={{
+                    color: isCheckedToday
+                      ? isDark
+                        ? '#34d399'
+                        : '#059669'
+                      : themeStyles.numberColor,
+                  }}
+                >
+                  {currentMeasureVal}/{targetMeasureVal}
+                </div>
+                <div
+                  className="text-[8.5px] font-semibold truncate max-w-[54px]"
+                  style={{ color: themeStyles.subText }}
+                >
+                  {measureUnit}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => handleMeasureAdjust(measureStep)}
+                aria-label={`Increase ${habit.name} by ${measureStep}`}
+                className="h-7 min-w-7 px-1.5 rounded-full flex items-center justify-center text-white text-[10.5px] font-extrabold transition cursor-pointer active:scale-90 shadow-xs"
+                style={{
+                  backgroundColor: isCheckedToday ? '#10b981' : themeStyles.progressFill,
+                }}
+              >
+                {measureStep > 1 ? `+${measureStep}` : <Plus className="w-3.5 h-3.5 stroke-[2.75]" />}
+              </button>
+            </div>
+          ) : (
+            <motion.button
+              type="button"
+              whileTap={{ scale: 0.9 }}
+              animate={celebrationKey ? { scale: [1, 1.18, 0.95, 1] } : {}}
+              transition={{ duration: 0.3, ease: 'easeOut' }}
+              onClick={() => handleToggleDone(todayStr)}
+              aria-label={isCheckedToday ? 'Mark incomplete for today' : 'Mark complete for today'}
+              className="w-10 h-10 rounded-full border flex items-center justify-center transition-all cursor-pointer relative overflow-hidden"
+              style={{
+                backgroundColor: isCheckedToday ? '#4c6ef5' : themeStyles.btnCheckEmptyBg,
+                borderColor: isCheckedToday ? '#5c7cfa' : themeStyles.btnCheckEmptyBorder,
+                color: isCheckedToday ? '#ffffff' : themeStyles.btnCheckEmptyIcon,
+                boxShadow: isCheckedToday ? '0 8px 20px -4px rgba(76, 110, 245, 0.45)' : 'none',
+              }}
+            >
+              {isCheckedToday ? (
+                <AnimatedCheckIcon
+                  className="w-5 h-5 text-white"
+                  strokeWidth={3}
+                  animate={celebrationKey > 0}
+                />
+              ) : (
+                <div
+                  className="w-4.5 h-4.5 rounded-full border-2"
+                  style={{ borderColor: themeStyles.btnCheckEmptyIcon }}
+                />
+              )}
+            </motion.button>
+          )}
         </div>
       </header>
 
@@ -727,8 +879,8 @@ export const HabitDetailModal: React.FC<HabitDetailModalProps> = ({
                 ))}
               </div>
 
-              {/* Compact By Day of Week Bars */}
-              <div className="pt-1.5 border-t space-y-1" style={{ borderColor: themeStyles.cardBorder }}>
+              {/* Compact Horizontal By Day of Week Bars */}
+              <div className="pt-1.5 border-t space-y-1.5" style={{ borderColor: themeStyles.cardBorder }}>
                 <div className="flex items-center justify-between text-[10.5px]">
                   <span className="font-bold" style={{ color: themeStyles.sectionTitle }}>
                     By day of week
@@ -738,38 +890,41 @@ export const HabitDetailModal: React.FC<HabitDetailModalProps> = ({
                   </span>
                 </div>
 
-                <div className="flex items-end justify-between gap-1">
+                <div
+                  className="grid grid-cols-7 gap-1 p-1.5 rounded-xl border"
+                  style={{
+                    backgroundColor: themeStyles.cardInnerBg,
+                    borderColor: themeStyles.cardInnerBorder,
+                  }}
+                >
                   {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((dayLabel, idx) => {
                     const pct = dayOfWeekStats.percentages[idx] || 0;
                     return (
-                      <div key={idx} className="flex-1 flex flex-col items-center gap-0.5">
-                        <span
-                          className="text-[8.5px] font-mono font-semibold tabular-nums leading-none"
-                          style={{ color: themeStyles.barChartPct }}
-                        >
-                          {pct}%
-                        </span>
-                        <div
-                          className="w-full rounded-xs overflow-hidden h-4 flex items-end border"
-                          style={{
-                            backgroundColor: themeStyles.barChartTrack,
-                            borderColor: themeStyles.cardBorder,
-                          }}
-                        >
-                          <div
-                            className="w-full transition-all duration-300"
-                            style={{
-                              height: `${Math.max(12, pct)}%`,
-                              backgroundColor: themeStyles.progressFill,
-                            }}
-                          />
-                        </div>
+                      <div key={idx} className="flex flex-col items-center justify-center py-0.5 gap-0.5 min-w-0">
                         <span
                           className={`text-[9.5px] leading-none ${idx === 0 ? 'font-black' : 'font-bold'}`}
                           style={{ color: idx === 0 ? '#ef4444' : themeStyles.subText }}
                         >
                           {dayLabel}
                         </span>
+                        <span
+                          className="text-[10px] font-extrabold font-mono tabular-nums leading-tight"
+                          style={{ color: themeStyles.numberColor }}
+                        >
+                          {pct}%
+                        </span>
+                        <div
+                          className="w-full h-1.5 rounded-full overflow-hidden"
+                          style={{ backgroundColor: themeStyles.progressTrack }}
+                        >
+                          <div
+                            className="h-full rounded-full transition-all duration-300"
+                            style={{
+                              width: `${pct}%`,
+                              backgroundColor: themeStyles.progressFill,
+                            }}
+                          />
+                        </div>
                       </div>
                     );
                   })}
@@ -892,42 +1047,63 @@ export const HabitDetailModal: React.FC<HabitDetailModalProps> = ({
                       {d}
                     </div>
                   ))}
-                  {calendarDays.map((d, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => {
-                        if (d.isCurrentMonth && d.dateStr === todayStr) {
-                          handleToggleDone(d.dateStr);
+                  {calendarDays.map((d, i) => {
+                    const isPartialToday =
+                      isMeasurable && d.isCurrentMonth && d.isToday && !d.isDone && todayProgress > 0;
+                    return (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => {
+                          if (d.isCurrentMonth && d.dateStr === todayStr) {
+                            handleToggleDone(d.dateStr);
+                          }
+                        }}
+                        title={
+                          d.isCurrentMonth && d.isToday && isMeasurable
+                            ? `${currentMeasureVal}/${targetMeasureVal} ${measureUnit} — Tap to ${
+                                d.isDone ? `-${measureStep}` : `+${measureStep}`
+                              }`
+                            : undefined
                         }
-                      }}
-                      className={`${
-                        calendarRowCount >= 6 ? 'w-7 h-7 sm:w-8 sm:h-8' : 'w-8 h-8 sm:w-9 sm:h-9'
-                      } mx-auto rounded-full text-[11px] font-bold tabular-nums transition flex items-center justify-center border ${
-                        d.isCurrentMonth && d.dateStr === todayStr ? 'cursor-pointer ring-2 ring-indigo-500/40' : 'cursor-default'
-                      }`}
-                      style={{
-                        backgroundColor: d.isDone
-                          ? themeStyles.calDoneBg
-                          : d.isMissed
-                          ? 'transparent'
-                          : themeStyles.calDayBg,
-                        borderColor: d.isDone
-                          ? themeStyles.calDoneBg
-                          : d.isMissed
-                          ? themeStyles.calMissedBorder
-                          : themeStyles.calDayBorder,
-                        color: d.isDone
-                          ? themeStyles.calDoneText
-                          : d.isCurrentMonth
-                          ? themeStyles.calDayText
-                          : themeStyles.calDayInactive,
-                        opacity: d.isCurrentMonth ? 1 : 0.35,
-                      }}
-                    >
-                      {d.dayNum}
-                    </button>
-                  ))}
+                        className={`${
+                          calendarRowCount >= 6 ? 'w-7 h-7 sm:w-8 sm:h-8' : 'w-8 h-8 sm:w-9 sm:h-9'
+                        } mx-auto rounded-full text-[11px] font-bold tabular-nums transition flex items-center justify-center border ${
+                          d.isCurrentMonth && d.dateStr === todayStr
+                            ? 'cursor-pointer ring-2 ring-indigo-500/40 active:scale-90'
+                            : 'cursor-default'
+                        }`}
+                        style={{
+                          backgroundColor: d.isDone
+                            ? themeStyles.calDoneBg
+                            : isPartialToday
+                            ? isDark
+                              ? 'rgba(76, 110, 245, 0.22)'
+                              : 'rgba(67, 97, 238, 0.14)'
+                            : d.isMissed
+                            ? 'transparent'
+                            : themeStyles.calDayBg,
+                          borderColor: d.isDone
+                            ? themeStyles.calDoneBg
+                            : isPartialToday
+                            ? themeStyles.calDoneBg
+                            : d.isMissed
+                            ? themeStyles.calMissedBorder
+                            : themeStyles.calDayBorder,
+                          color: d.isDone
+                            ? themeStyles.calDoneText
+                            : isPartialToday
+                            ? themeStyles.calDoneBg
+                            : d.isCurrentMonth
+                            ? themeStyles.calDayText
+                            : themeStyles.calDayInactive,
+                          opacity: d.isCurrentMonth ? 1 : 0.35,
+                        }}
+                      >
+                        {d.dayNum}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             )}

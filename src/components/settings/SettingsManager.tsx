@@ -386,35 +386,39 @@ export const SettingsManager: React.FC = () => {
   return (
     <div className="w-full min-w-0 max-w-3xl mx-auto pb-8 overflow-x-hidden">
       {activeSection === null ? (
-        <div className="px-3.5 sm:px-5 pt-2 pb-4 space-y-3.5 w-full min-w-0 animate-view-enter">
-          {/* Clean Phone-Style Settings Title */}
-          <header className="px-1 pt-1">
-            <h1 className="text-[28px] font-semibold text-slate-900 dark:text-white tracking-tight leading-tight">
-              Settings
-            </h1>
-          </header>
+        <div className="px-3.5 sm:px-5 pt-2.5 pb-4 space-y-3 w-full min-w-0 animate-view-enter">
+          {/* Compact Borderless Settings Title + Elevated M3 Search Pill */}
+          <div className="space-y-2 w-full min-w-0">
+            <div className="flex items-center justify-between px-1">
+              <h1 className="text-[22px] sm:text-[24px] font-bold text-slate-900 dark:text-white tracking-tight leading-none">
+                Settings
+              </h1>
+            </div>
 
-          {/* Compact Soft Pill Search Bar */}
-          <div className="relative w-full min-w-0">
-            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search"
-              aria-label="Search settings"
-              className="w-full h-10 pl-10 pr-9 rounded-full bg-slate-200/75 dark:bg-zinc-800/80 focus:bg-white dark:focus:bg-zinc-900 border border-transparent focus:border-[#4F46E5]/50 text-sm text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500 transition outline-hidden"
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => setSearchQuery('')}
-                aria-label="Clear search"
-                className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200 flex items-center justify-center cursor-pointer"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
+            <div
+              data-m3-tonal-card="true"
+              className="relative flex items-center w-full h-10 rounded-full px-3.5 gap-2.5 transition-all focus-within:ring-2 focus-within:ring-[var(--primary-accent-ring,rgba(79,70,229,0.22))] focus-within:border-[var(--primary-accent,#4f46e5)]"
+            >
+              <Search className="w-4 h-4 text-slate-400 dark:text-zinc-500 shrink-0 pointer-events-none" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search settings"
+                aria-label="Search settings"
+                className="w-full h-full bg-transparent border-0 text-[14px] text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500 outline-none focus:outline-none focus:ring-0"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  aria-label="Clear search"
+                  className="w-6 h-6 rounded-full bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-300 hover:bg-slate-200 dark:hover:bg-zinc-700 flex items-center justify-center shrink-0 transition cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
           </div>
 
           {searchQuery ? (
@@ -430,8 +434,9 @@ export const SettingsManager: React.FC = () => {
               {/* Single Compact Account / Profile Card (Never duplicated in list) */}
               <button
                 type="button"
+                data-m3-tonal-card="true"
                 onClick={() => setActiveSection('profile')}
-                className="w-full rounded-[22px] px-4 py-3 bg-white dark:bg-zinc-900 border border-[#E5E7EB]/80 dark:border-zinc-800/90 hover:bg-slate-50 dark:hover:bg-zinc-800/60 active:bg-slate-100/80 dark:active:bg-zinc-800 transition flex items-center justify-between gap-3 text-left cursor-pointer group"
+                className="w-full rounded-[22px] px-4 py-3 hover:bg-slate-50 dark:hover:bg-zinc-800/60 active:bg-slate-100/80 dark:active:bg-zinc-800 transition flex items-center justify-between gap-3 text-left cursor-pointer group"
               >
                 <div className="flex items-center gap-3 min-w-0 flex-1">
                   {userProfile.avatarPhoto ? (
@@ -500,7 +505,8 @@ export const SettingsManager: React.FC = () => {
                 href={APP_GITHUB_REPO}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="w-full min-h-[54px] rounded-[22px] px-4 py-2.5 bg-white dark:bg-zinc-900 border border-[#E5E7EB]/80 dark:border-zinc-800/90 hover:bg-slate-50 dark:hover:bg-zinc-800/60 transition flex items-center justify-between gap-3 group"
+                data-m3-tonal-card="true"
+                className="w-full min-h-[54px] rounded-[22px] px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-zinc-800/60 transition flex items-center justify-between gap-3 group"
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <JivanLogoMark withFrame className="w-8 h-8 shrink-0" />

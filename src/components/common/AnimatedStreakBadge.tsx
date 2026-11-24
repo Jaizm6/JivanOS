@@ -27,10 +27,10 @@ export const AnimatedStreakBadge: React.FC<AnimatedStreakBadgeProps> = ({
   size = 'xs',
   className = '',
   showZero = false,
-  label = 'd',
+  label = '',
   onClick,
   tooltipText,
-  variant = 'badge',
+  variant = 'inline',
 }) => {
   const [showPop, setShowPop] = useState(false);
   const prevCompletedRef = useRef<boolean>(isCompleted);
@@ -58,36 +58,37 @@ export const AnimatedStreakBadge: React.FC<AnimatedStreakBadgeProps> = ({
     prevStreakRef.current = streak;
   }, [isCompleted, streak]);
 
-  // If streak is 0 and showZero is false, hide or show minimal starter cue
+  // If streak is 0 and showZero is false, hide
   if (streak <= 0 && !showZero && !isCompleted && !isAnimating) {
     return null;
   }
 
   // Display streak count (at least 1 if completed or animating)
   const displayStreak = Math.max(isCompleted || isAnimating ? 1 : 0, streak);
+  const isActive = isCompleted || showPop || displayStreak > 0;
 
   const sizeClasses = {
     xs: {
-      badge: 'px-1.5 py-0.2 text-[12px] gap-0.5 rounded-md border shadow-2xs font-bold',
-      icon: 'w-3 h-3',
+      container: 'gap-1 text-[12px]',
+      icon: 'w-3.5 h-3.5',
       label: 'text-[11px]',
     },
     sm: {
-      badge: 'px-2 py-0.5 text-[13px] gap-1 rounded-lg border shadow-2xs font-bold',
-      icon: 'w-3.5 h-3.5',
+      container: 'gap-1 text-[13.5px]',
+      icon: 'w-4 h-4',
       label: 'text-[12px]',
     },
     md: {
-      badge: 'px-2.5 py-1 text-[15px] gap-1.5 rounded-xl border shadow-2xs font-bold',
-      icon: 'w-4 h-4',
-      label: 'text-[14px]',
+      container: 'gap-1.5 text-[15px]',
+      icon: 'w-[18px] h-[18px]',
+      label: 'text-[13px]',
     },
   }[size];
 
   const defaultTooltip = `${displayStreak} day consistency streak! ${
     isCompleted
-      ? 'Completed today • Streak safe! 🔥'
-      : 'Complete to keep your daily momentum going! 🔥'
+      ? 'Completed today • Streak safe!'
+      : 'Complete to keep your daily momentum going!'
   }`;
 
   return (
@@ -95,8 +96,9 @@ export const AnimatedStreakBadge: React.FC<AnimatedStreakBadgeProps> = ({
       onClick={onClick}
       className={`relative inline-flex items-center select-none ${className}`}
       title={tooltipText || defaultTooltip}
+      data-variant={variant}
     >
-      {/* Floating "+1 🔥" celebratory reinforcement */}
+      {/* Floating "+1" celebratory reinforcement */}
       <AnimatePresence>
         {showPop && (
           <motion.span
@@ -109,84 +111,80 @@ export const AnimatedStreakBadge: React.FC<AnimatedStreakBadgeProps> = ({
             }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.9, ease: [0.16, 1, 0.3, 1] }}
-            className="absolute -top-3.5 left-1/2 -translate-x-1/2 text-[10px] font-black text-amber-500 dark:text-amber-400 pointer-events-none drop-shadow-xs whitespace-nowrap z-30 flex items-center gap-0.5"
+            className="absolute -top-3.5 left-1/2 -translate-x-1/2 text-[10px] font-bold text-amber-500 dark:text-amber-400 pointer-events-none whitespace-nowrap z-30 flex items-center gap-0.5"
           >
-            +1<Flame className="w-3 h-3 fill-current text-amber-500 inline" />
+            +1<Flame className="w-3 h-3 text-amber-500 dark:text-amber-400 inline" strokeWidth={2.2} />
           </motion.span>
         )}
       </AnimatePresence>
 
-      {/* Ripple ring on increment */}
-      <AnimatePresence>
-        {showPop && (
-          <motion.span
-            key="streak-ripple"
-            initial={{ scale: 0.85, opacity: 0.8 }}
-            animate={{ scale: 1.55, opacity: 0 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.45, ease: 'easeOut' }}
-            className="absolute inset-0 rounded-[inherit] bg-amber-400/35 border border-amber-500/50 pointer-events-none z-10"
-          />
-        )}
-      </AnimatePresence>
-
-      {/* Main Animated Badge Container */}
+      {/* Main Clean Unboxed Streak Display (Outlined Amber Flame + Tabular Count) */}
       <motion.div
         animate={
           showPop
             ? {
-                scale: [1, 1.28, 0.95, 1.08, 1],
-                rotate: [0, -6, 6, -3, 0],
+                scale: [1, 1.22, 0.96, 1.06, 1],
+                rotate: [0, -5, 5, -2, 0],
               }
             : {}
         }
         transition={{ duration: 0.42, ease: [0.16, 1, 0.3, 1] }}
-        className={`relative inline-flex items-center font-bold tracking-tight transition-colors duration-200 shrink-0 ${
-          variant === 'inline'
-            ? 'bg-transparent border-0 shadow-none p-0 text-amber-600 dark:text-amber-400'
-            : `${sizeClasses.badge} ${
-                isCompleted || showPop
-                  ? 'bg-amber-500/15 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-400/80 dark:border-amber-500/70 shadow-2xs'
-                  : displayStreak > 0
-                  ? 'bg-amber-50/80 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border-amber-300/80 dark:border-amber-700/70 shadow-2xs'
-                  : 'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border-slate-200 dark:border-slate-700/80'
-              }`
-        }`}
+        className={`relative inline-flex items-center leading-none tracking-tight transition-colors duration-200 shrink-0 ${sizeClasses.container}`}
       >
-        {/* Flame Icon with flame vibration and glow on complete */}
+        {/* Outlined Flame Icon retaining our warm amber streak color */}
         <motion.span
           animate={
             showPop
               ? {
-                  scale: [1, 1.4, 1.1, 1],
-                  filter: ['brightness(1)', 'brightness(1.5)', 'brightness(1)'],
+                  scale: [1, 1.35, 1.08, 1],
                 }
               : {}
           }
           transition={{ duration: 0.35 }}
-          className="inline-flex items-center justify-center shrink-0"
+          className="relative inline-flex items-center justify-center shrink-0"
         >
+          <AnimatePresence>
+            {showPop && (
+              <motion.span
+                key="streak-ripple"
+                initial={{ scale: 0.7, opacity: 0.75 }}
+                animate={{ scale: 1.9, opacity: 0 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.45, ease: 'easeOut' }}
+                className="absolute inset-0 rounded-full bg-amber-400/35 pointer-events-none"
+              />
+            )}
+          </AnimatePresence>
           <Flame
-            className={`${sizeClasses.icon} fill-current transition-colors duration-200 ${
-              isCompleted || showPop
-                ? 'text-amber-500 fill-amber-500'
-                : displayStreak > 0
-                ? 'text-amber-500/90 fill-amber-500/80'
-                : 'text-slate-400 dark:text-slate-500'
+            strokeWidth={2.15}
+            className={`${sizeClasses.icon} fill-none transition-colors duration-200 ${
+              isActive
+                ? 'text-amber-500 dark:text-amber-400'
+                : 'text-slate-400 dark:text-zinc-500'
             }`}
           />
         </motion.span>
 
-        {/* Animated Counter Digit */}
+        {/* Clean Unboxed Counter Digit */}
         <motion.span
           key={`digit-${displayStreak}-${showPop}`}
-          initial={showPop ? { y: 4, opacity: 0 } : false}
+          initial={showPop ? { y: 3, opacity: 0 } : false}
           animate={{ y: 0, opacity: 1 }}
           transition={{ duration: 0.2, ease: 'easeOut' }}
-          className="font-mono font-black leading-none inline-block tabular-nums"
+          className={`font-sans font-semibold leading-none inline-block tabular-nums transition-colors duration-200 ${
+            showPop
+              ? 'text-amber-600 dark:text-amber-400'
+              : isActive
+              ? 'text-slate-600 dark:text-zinc-300'
+              : 'text-slate-400 dark:text-zinc-500'
+          }`}
         >
           {displayStreak}
-          {label && <span className={`${sizeClasses.label} font-sans font-bold opacity-85 ml-0.5`}>{label}</span>}
+          {label && (
+            <span className={`${sizeClasses.label} font-medium opacity-80 ml-0.5`}>
+              {label}
+            </span>
+          )}
         </motion.span>
       </motion.div>
     </div>

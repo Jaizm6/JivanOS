@@ -28,7 +28,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { ActionableItem } from '../../types';
-import { FORM_EASE, FORM_SPRING, FORM_EXIT_TRANSITION } from '../common/FormPrimitives';
+import { FORM_EASE, FORM_SPRING, FORM_EXIT_TRANSITION, CRISP_TRANSFORM_TEMPLATE } from '../common/FormPrimitives';
 
 interface AIChatDrawerProps {
   isOpen: boolean;
@@ -325,9 +325,8 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({ isOpen, onClose }) =
           <motion.div
             data-unified-modal="true"
             initial={{ opacity: 0 }}
-            animate={{ opacity: 1, transition: { duration: 0.2, ease: FORM_EASE } }}
+            animate={{ opacity: 1, transition: { duration: 0.14, ease: FORM_EASE } }}
             exit={{ opacity: 0, transition: FORM_EXIT_TRANSITION }}
-            style={{ willChange: 'opacity' }}
             onClick={handleBackdropClick}
             className={`fixed inset-0 touch-none ${
               isMaximized
@@ -337,10 +336,10 @@ export const AIChatDrawer: React.FC<AIChatDrawerProps> = ({ isOpen, onClose }) =
           />
           <motion.div
             data-unified-modal="true"
-            initial={{ opacity: 0, y: 18, scale: 0.97 }}
+            initial={{ opacity: 0, y: 12, scale: 0.985 }}
             animate={{ opacity: 1, y: 0, scale: 1, transition: FORM_SPRING }}
-            exit={{ opacity: 0, y: 14, scale: 0.97, transition: FORM_EXIT_TRANSITION }}
-            style={{ willChange: 'transform, opacity' }}
+            exit={{ opacity: 0, y: 10, scale: 0.985, transition: FORM_EXIT_TRANSITION }}
+            transformTemplate={CRISP_TRANSFORM_TEMPLATE}
             onClick={e => e.stopPropagation()}
             className={`relative z-10 w-full ${
               isMaximized

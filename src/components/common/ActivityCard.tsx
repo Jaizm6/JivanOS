@@ -79,10 +79,9 @@ export const ActivityCard: React.FC<ActivityCardProps> = ({
           <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-500 dark:text-slate-400">
              <span className="capitalize">{activity.category}</span>
              {!isTask && (habit as Habit).currentStreak ? (
-               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg border border-amber-300/80 dark:border-amber-700/70 bg-amber-50/80 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 font-mono font-black text-[12px]">
-                 <Flame className="w-3 h-3 fill-current text-amber-500" />
+               <span className="inline-flex items-center gap-1 text-[12px] font-semibold tabular-nums leading-none text-slate-600 dark:text-zinc-300">
+                 <Flame strokeWidth={2.15} className="w-3.5 h-3.5 fill-none text-amber-500 dark:text-amber-400" />
                  {(habit as Habit).currentStreak}
-                 <span className="text-[11px] font-sans font-bold opacity-85">d</span>
                </span>
              ) : null}
           </div>

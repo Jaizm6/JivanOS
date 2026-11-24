@@ -17,7 +17,14 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { AppTag, Goal, Habit, TaskItem } from '../../types';
-import { PetalShapeBadge, M3SegmentedGroup, getHabitExpressiveShape } from '../common/PetalExpressive';
+import {
+  PetalShapeBadge,
+  M3SegmentedGroup,
+  getHabitExpressiveShape,
+  getPetalGroupRadiusClass,
+  useIsDesktopMd,
+  distributeIntoTwoColumns,
+} from '../common/PetalExpressive';
 import { cleanTagName, formatTagLabel, getTagColor } from '../common/TagVisuals';
 import { UnifiedSubModal } from '../common/FormPrimitives';
 import { TaskFormModal } from '../tasks/TaskFormModal';
@@ -57,6 +64,7 @@ export const TagsManager: React.FC = () => {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filterMode, setFilterMode] = useState<TagFilter>('all');
+  const isDesktopMd = useIsDesktopMd();
 
   // Selected tag opens its own dedicated page showing linked Tasks, Habits & Goals
   const [selectedTagName, setSelectedTagName] = useState<string | null>(null);
@@ -302,11 +310,11 @@ export const TagsManager: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setIsAddingLinkedTask(true)}
-                className="h-8 w-8 sm:w-auto sm:px-3 rounded-lg bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-xs font-bold shadow-2xs transition shrink-0 cursor-pointer flex items-center justify-center gap-1 whitespace-nowrap"
+                className="h-8 w-8 rounded-lg bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white shadow-2xs transition shrink-0 cursor-pointer flex items-center justify-center"
                 title={`New task tagged ${label}`}
+                aria-label={`New task tagged ${label}`}
               >
                 <Plus className="w-4 h-4 stroke-[2.5]" />
-                <span className="hidden sm:inline">Add Task</span>
               </button>
             </div>
           </div>
@@ -808,15 +816,15 @@ export const TagsManager: React.FC = () => {
               setIsAddingTag(prev => !prev);
               setEditingTag(null);
             }}
-            className={`h-8 w-8 sm:w-auto sm:px-3 rounded-lg active:scale-95 text-xs font-bold shadow-2xs transition shrink-0 cursor-pointer flex items-center justify-center gap-1 whitespace-nowrap ${
+            className={`h-8 w-8 rounded-lg active:scale-95 shadow-2xs transition shrink-0 cursor-pointer flex items-center justify-center ${
               isAddingTag
                 ? 'bg-slate-200 dark:bg-zinc-800 text-slate-700 dark:text-zinc-200'
                 : 'bg-indigo-600 hover:bg-indigo-700 text-white'
             }`}
             title={isAddingTag ? 'Cancel' : 'New Tag'}
+            aria-label={isAddingTag ? 'Cancel' : 'New Tag'}
           >
             <Plus className={`w-4 h-4 stroke-[2.5] transition-transform ${isAddingTag ? 'rotate-45' : ''}`} />
-            <span className="hidden sm:inline">{isAddingTag ? 'Cancel' : 'New Tag'}</span>
           </button>
         </div>
 
@@ -1013,8 +1021,8 @@ export const TagsManager: React.FC = () => {
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-1.5 sm:gap-2 w-full min-w-0">
-          {filteredTags.map((tagItem, idx) => {
+        (() => {
+          const renderTagCard = (tagItem: AppTag, idx: number, colTotal: number) => {
             const { linkedTasks, linkedHabits, linkedGoals, total } = getLinked(tagItem.name);
             const taskCount = linkedTasks.length;
             const habitCount = linkedHabits.length;
@@ -1022,6 +1030,7 @@ export const TagsManager: React.FC = () => {
             const tagColor = getTagColor(tagItem.name, tags);
             const label = formatTagLabel(tagItem.name);
             const shape = getHabitExpressiveShape(tagItem.name, idx);
+            const petalRadius = getPetalGroupRadiusClass(idx, colTotal, true);
 
             const usageParts: string[] = [];
             if (taskCount > 0) usageParts.push(`${taskCount} task${taskCount !== 1 ? 's' : ''}`);
@@ -1043,7 +1052,7 @@ export const TagsManager: React.FC = () => {
                 }}
                 data-m3-tonal-card="true"
                 data-tonal-tone="neutral"
-                className="group p-2.5 sm:p-3 rounded-[18px] flex items-center justify-between gap-2 transition-colors hover:ring-1 hover:ring-indigo-500/35 min-w-0 cursor-pointer text-left"
+                className={`group p-2.5 sm:p-3 ${petalRadius} flex items-center justify-between gap-2 transition-colors hover:ring-1 hover:ring-indigo-500/35 min-w-0 cursor-pointer text-left`}
               >
                 <div className="flex items-center gap-2.5 min-w-0 flex-1">
                   <PetalShapeBadge
@@ -1099,8 +1108,28 @@ export const TagsManager: React.FC = () => {
                 </div>
               </div>
             );
-          })}
-        </div>
+          };
+
+          if (isDesktopMd && filteredTags.length > 1) {
+            const [leftTags, rightTags] = distributeIntoTwoColumns(filteredTags);
+            return (
+              <div className="grid grid-cols-2 gap-2.5 items-start w-full min-w-0">
+                <div className="flex flex-col gap-[3px] min-w-0">
+                  {leftTags.map((t, idx) => renderTagCard(t, idx, leftTags.length))}
+                </div>
+                <div className="flex flex-col gap-[3px] min-w-0">
+                  {rightTags.map((t, idx) => renderTagCard(t, idx, rightTags.length))}
+                </div>
+              </div>
+            );
+          }
+
+          return (
+            <div className="flex flex-col gap-[3px] w-full min-w-0">
+              {filteredTags.map((t, idx) => renderTagCard(t, idx, filteredTags.length))}
+            </div>
+          );
+        })()
       )}
 
       {/* 5. Delete Confirmation Dialog */}

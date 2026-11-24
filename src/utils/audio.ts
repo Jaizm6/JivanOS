@@ -432,7 +432,6 @@ export const ALARM_TONE_OPTIONS: SoundOption<AlarmToneType>[] = [
   },
 ];
 
-export type NotificationPopupStyle = 'ticktick_card' | 'dynamic_island' | 'android_heads_up' | 'compact_card';
 export type AlarmPopupStyle = 'ticktick_card' | 'pip_card' | 'classic_banner';
 
 export class SoundEngine {
@@ -441,7 +440,6 @@ export class SoundEngine {
   private masterVolume = 0.8;
   private currentAlarmTone: AlarmToneType = 'classic_phone';
   private currentNotificationSound: NotificationSoundType = 'tick';
-  private notificationPopupStyle: NotificationPopupStyle = 'ticktick_card';
   private alarmPopupStyle: AlarmPopupStyle = 'ticktick_card';
 
   private eventSounds: Record<EventSoundCategory, string> = {
@@ -468,7 +466,6 @@ export class SoundEngine {
 
   private snoozeOptions: number[] = [2, 5, 10];
   private stackExpandBehavior: 'expanded' | 'collapsed' = 'expanded';
-  private toastSwipeThreshold = 70;
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -501,16 +498,6 @@ export class SoundEngine {
         } catch {}
       }
 
-      const savedNotifPopup = localStorage.getItem('omniplan_notif_popup_style_v2') as NotificationPopupStyle | null;
-      if (
-        savedNotifPopup === 'ticktick_card' ||
-        savedNotifPopup === 'dynamic_island' ||
-        savedNotifPopup === 'android_heads_up' ||
-        savedNotifPopup === 'compact_card'
-      ) {
-        this.notificationPopupStyle = savedNotifPopup;
-      }
-
       const savedAlarmPopup = localStorage.getItem('omniplan_alarm_popup_style_v2') as AlarmPopupStyle | null;
       if (
         savedAlarmPopup === 'ticktick_card' ||
@@ -529,12 +516,6 @@ export class SoundEngine {
 
       const savedExpand = localStorage.getItem('omniplan_alarm_stack_expand') as 'expanded' | 'collapsed' | null;
       if (savedExpand) this.stackExpandBehavior = savedExpand;
-
-      const savedThreshold = localStorage.getItem('omniplan_toast_swipe_threshold');
-      if (savedThreshold) {
-        const val = parseInt(savedThreshold, 10);
-        if (!isNaN(val)) this.toastSwipeThreshold = val;
-      }
 
       ['task', 'medication', 'water', 'bill', 'habit', 'schedule', 'quote'].forEach(type => {
         const saved = localStorage.getItem(`omniplan_sound_toggle_${type}`);
@@ -708,30 +689,7 @@ export class SoundEngine {
     }
   }
 
-  getToastSwipeThreshold(): number {
-    return this.toastSwipeThreshold;
-  }
-
-  setToastSwipeThreshold(val: number) {
-    this.toastSwipeThreshold = val;
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('omniplan_toast_swipe_threshold', val.toString());
-    }
-  }
-
-  // Notification & Alarm Pop-Up Style Controls
-  getNotificationPopupStyle(): NotificationPopupStyle {
-    return this.notificationPopupStyle;
-  }
-
-  setNotificationPopupStyle(style: NotificationPopupStyle) {
-    this.notificationPopupStyle = style;
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('omniplan_notif_popup_style_v2', style);
-      window.dispatchEvent(new CustomEvent('omni_popup_style_changed'));
-    }
-  }
-
+  // Alarm Pop-Up Style Controls
   getAlarmPopupStyle(): AlarmPopupStyle {
     return this.alarmPopupStyle;
   }

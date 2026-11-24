@@ -377,11 +377,178 @@ async function connectDropboxWebPkce(): Promise<DropboxAccount> {
   return account;
 }
 
+// Persisted in sessionStorage so code_verifier survives page reloads and mobile backgrounding
+const DROPBOX_PKCE_VERIFIER_STORAGE_KEY = 'jivanos_dropbox_pkce_verifier_v1';
+const DROPBOX_PKCE_AUTH_URL_STORAGE_KEY = 'jivanos_dropbox_pkce_auth_url_v1';
+const DROPBOX_POPUP_MODE_PREF_KEY = 'jivanos_dropbox_popup_mode_v1';
+
+export const DROPBOX_EXPIRED_CODE_ERROR =
+  'That code has expired or was already used. Tap Open Dropbox Authorization again to get a new one.';
+
+let pendingManualPkceVerifier: string | null = null;
+let pendingManualPkceAuthUrl: string | null = null;
+
+function loadSavedManualPkce(): { verifier: string; authUrl: string } | null {
+  try {
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      const verifier = window.sessionStorage.getItem(DROPBOX_PKCE_VERIFIER_STORAGE_KEY);
+      const authUrl = window.sessionStorage.getItem(DROPBOX_PKCE_AUTH_URL_STORAGE_KEY);
+      if (verifier && authUrl && !authUrl.includes('redirect_uri')) {
+        pendingManualPkceVerifier = verifier;
+        pendingManualPkceAuthUrl = authUrl;
+        return { verifier, authUrl };
+      }
+    }
+  } catch {
+    // Fallback to in-memory mirror if sessionStorage is unavailable
+  }
+  if (
+    pendingManualPkceVerifier &&
+    pendingManualPkceAuthUrl &&
+    !pendingManualPkceAuthUrl.includes('redirect_uri')
+  ) {
+    return { verifier: pendingManualPkceVerifier, authUrl: pendingManualPkceAuthUrl };
+  }
+  return null;
+}
+
+function saveManualPkce(verifier: string, authUrl: string): void {
+  pendingManualPkceVerifier = verifier;
+  pendingManualPkceAuthUrl = authUrl;
+  try {
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      window.sessionStorage.setItem(DROPBOX_PKCE_VERIFIER_STORAGE_KEY, verifier);
+      window.sessionStorage.setItem(DROPBOX_PKCE_AUTH_URL_STORAGE_KEY, authUrl);
+    }
+  } catch {
+    // Keep in-memory fallback if storage quota or privacy mode blocks sessionStorage
+  }
+}
+
+function clearManualPkce(): void {
+  pendingManualPkceVerifier = null;
+  pendingManualPkceAuthUrl = null;
+  try {
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      window.sessionStorage.removeItem(DROPBOX_PKCE_VERIFIER_STORAGE_KEY);
+      window.sessionStorage.removeItem(DROPBOX_PKCE_AUTH_URL_STORAGE_KEY);
+    }
+  } catch {
+    // Ignore storage cleanup errors
+  }
+}
+
+export function isDropboxPopupModeEnabled(): boolean {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      return window.localStorage.getItem(DROPBOX_POPUP_MODE_PREF_KEY) === 'true';
+    }
+  } catch {
+    // Default off
+  }
+  return false;
+}
+
+export function setDropboxPopupModeEnabled(enabled: boolean): void {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      if (enabled) {
+        window.localStorage.setItem(DROPBOX_POPUP_MODE_PREF_KEY, 'true');
+      } else {
+        window.localStorage.removeItem(DROPBOX_POPUP_MODE_PREF_KEY);
+      }
+    }
+  } catch {
+    // Ignore storage write errors
+  }
+}
+
+/**
+ * Generates an official Dropbox OAuth2 PKCE authorization URL with NO redirect_uri parameter.
+ * Reuses any saved sessionStorage code_verifier unless forceNew is true so reloads/backgrounding
+ * never invalidate an in-progress paste-code login.
+ */
+export async function startDropboxManualCodePkce(options?: {
+  forceNew?: boolean;
+}): Promise<{ authUrl: string }> {
+  if (!options?.forceNew) {
+    const existing = loadSavedManualPkce();
+    if (existing) {
+      return { authUrl: existing.authUrl };
+    }
+  }
+
+  const pair = await generatePkcePair();
+  const params = new URLSearchParams({
+    client_id: DROPBOX_APP_KEY,
+    response_type: 'code',
+    code_challenge: pair.challenge,
+    code_challenge_method: 'S256',
+    token_access_type: 'offline',
+  });
+  const authUrl = `https://www.dropbox.com/oauth2/authorize?${params.toString()}`;
+  saveManualPkce(pair.verifier, authUrl);
+  return { authUrl };
+}
+
+/**
+ * Exchanges the pasted Dropbox authorization code via PKCE (NO redirect_uri, no client secret)
+ * for access + offline refresh tokens.
+ */
+export async function completeDropboxManualCodePkce(authCode: string): Promise<DropboxAccount> {
+  const cleanCode = (authCode || '').trim();
+  if (!cleanCode) {
+    throw new Error('Paste the authorization code shown by Dropbox first.');
+  }
+
+  const saved = loadSavedManualPkce();
+  if (!saved?.verifier) {
+    throw new Error(DROPBOX_EXPIRED_CODE_ERROR);
+  }
+
+  const tokenBody = new URLSearchParams({
+    code: cleanCode,
+    grant_type: 'authorization_code',
+    client_id: DROPBOX_APP_KEY,
+    code_verifier: saved.verifier,
+  });
+
+  const tokenRes = await fetch('https://api.dropboxapi.com/oauth2/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: tokenBody.toString(),
+  });
+  if (!tokenRes.ok) {
+    const errText = await tokenRes.text().catch(() => '');
+    if (
+      tokenRes.status === 400 ||
+      tokenRes.status === 401 ||
+      /invalid_grant|expired|invalid.*code|code_verifier/i.test(errText)
+    ) {
+      clearManualPkce();
+      throw new Error(DROPBOX_EXPIRED_CODE_ERROR);
+    }
+    throw new Error(`Dropbox sign-in failed (HTTP ${tokenRes.status})${errText ? `: ${errText}` : ''}`);
+  }
+
+  clearManualPkce();
+  const tokenData = await tokenRes.json();
+  webAccessToken = String(tokenData.access_token || '');
+  webRefreshToken = tokenData.refresh_token ? String(tokenData.refresh_token) : null;
+  const expiresInSec = Number(tokenData.expires_in || 14400);
+  webTokenExpiresAt = Date.now() + expiresInSec * 1000;
+
+  const account = await fetchWebDropboxProfile(webAccessToken);
+  currentDropboxAccount = account;
+  updateStoredDropboxSyncMeta({ wasConnected: true, lastError: null });
+  return account;
+}
+
 // ============================================================================
 // PUBLIC AUTH API: connectDropbox, silentReAuthDropbox, disconnectDropbox
 // ============================================================================
 
-export async function connectDropbox(): Promise<DropboxAccount> {
+export async function connectDropbox(options?: { allowPopup?: boolean }): Promise<DropboxAccount> {
   const nativePlugin = getNativeDropboxPlugin();
   if (nativePlugin) {
     const res = await nativePlugin.connect();
@@ -403,6 +570,12 @@ export async function connectDropbox(): Promise<DropboxAccount> {
   if (isCapacitorNative()) {
     throw new Error(
       'Native JivanDropbox plugin is unavailable in this build. Rebuild the Android APK with Dropbox SDK.'
+    );
+  }
+
+  if (!options?.allowPopup && !isDropboxPopupModeEnabled()) {
+    throw new Error(
+      '1-Click Popup Mode is disabled. Use the paste-code flow or turn on 1-Click Popup Mode first.'
     );
   }
 

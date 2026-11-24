@@ -3,7 +3,13 @@ import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Archive } from 'lucide-react';
 import { PetalShapeBadge } from './PetalExpressive';
-import { FORM_EASE, FORM_SPRING, FORM_EXIT_TRANSITION, useModalScrollLock } from './FormPrimitives';
+import {
+  FORM_EASE,
+  FORM_SPRING,
+  FORM_EXIT_TRANSITION,
+  CRISP_TRANSFORM_TEMPLATE,
+  useModalScrollLock,
+} from './FormPrimitives';
 
 export interface ArchiveConfirmModalProps {
   isOpen: boolean;
@@ -60,9 +66,8 @@ export const ArchiveConfirmModal: React.FC<ArchiveConfirmModalProps> = ({
           <motion.div
             data-unified-modal="true"
             initial={{ opacity: 0 }}
-            animate={{ opacity: 1, transition: { duration: 0.18, ease: FORM_EASE } }}
+            animate={{ opacity: 1, transition: { duration: 0.14, ease: FORM_EASE } }}
             exit={{ opacity: 0, transition: FORM_EXIT_TRANSITION }}
-            style={{ willChange: 'opacity' }}
             className="fixed inset-0 bg-black/55 dark:bg-black/75 touch-none"
             onClick={e => {
               e.stopPropagation();
@@ -72,10 +77,10 @@ export const ArchiveConfirmModal: React.FC<ArchiveConfirmModalProps> = ({
 
           <motion.div
             data-unified-modal="true"
-            initial={{ opacity: 0, scale: 0.94, y: 12 }}
+            initial={{ opacity: 0, scale: 0.98, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0, transition: FORM_SPRING }}
-            exit={{ opacity: 0, scale: 0.94, y: 10, transition: FORM_EXIT_TRANSITION }}
-            style={{ willChange: 'transform, opacity' }}
+            exit={{ opacity: 0, scale: 0.98, y: 8, transition: FORM_EXIT_TRANSITION }}
+            transformTemplate={CRISP_TRANSFORM_TEMPLATE}
             onClick={e => e.stopPropagation()}
             className="relative z-10 w-full max-w-sm rounded-[28px] bg-white dark:bg-[#141418] text-zinc-900 dark:text-zinc-100 ring-1 ring-black/[0.06] dark:ring-white/[0.08] shadow-2xl p-6 space-y-4"
           >

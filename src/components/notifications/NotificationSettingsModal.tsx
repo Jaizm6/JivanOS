@@ -8,7 +8,6 @@ import {
   CheckCircle2,
   AlertCircle,
   Play,
-  Smartphone,
   ShieldCheck,
   Sparkles,
   PictureInPicture2,
@@ -19,14 +18,12 @@ import {
   AlarmToneType,
   NotificationSoundType,
   EventSoundCategory,
-  NotificationPopupStyle,
   AlarmPopupStyle,
   NOTIFICATION_SOUND_OPTIONS,
   ALARM_TONE_OPTIONS,
   EVENT_SOUND_ITEMS,
 } from '../../utils/audio';
 import { haptics } from '../../utils/haptics';
-import { useApp } from '../../context/AppContext';
 
 interface NotificationSettingsModalProps {
   isOpen: boolean;
@@ -37,12 +34,10 @@ export const NotificationSettingsModal: React.FC<NotificationSettingsModalProps>
   isOpen,
   onClose,
 }) => {
-  const { pushNotification } = useApp();
   const [permission, setPermission] = useState<NotificationPermissionStatus>('default');
   const [selectedTone, setSelectedTone] = useState<AlarmToneType>('classic_phone');
   const [selectedNotificationSound, setSelectedNotificationSound] = useState<NotificationSoundType>('tick');
   const [eventSounds, setEventSounds] = useState<Record<EventSoundCategory, string>>(() => soundEngine.getAllEventSounds());
-  const [notifPopupStyle, setNotifPopupStyle] = useState<NotificationPopupStyle>(() => soundEngine.getNotificationPopupStyle());
   const [alarmPopupStyle, setAlarmPopupStyle] = useState<AlarmPopupStyle>(() => soundEngine.getAlarmPopupStyle());
   const [hapticsActive, setHapticsActive] = useState<boolean>(() => haptics.getEnabled());
   const [volume, setVolume] = useState<number>(0.8);
@@ -59,7 +54,6 @@ export const NotificationSettingsModal: React.FC<NotificationSettingsModalProps>
       setSelectedTone(soundEngine.getTone());
       setSelectedNotificationSound(soundEngine.getNotificationSound());
       setEventSounds(soundEngine.getAllEventSounds());
-      setNotifPopupStyle(soundEngine.getNotificationPopupStyle());
       setAlarmPopupStyle(soundEngine.getAlarmPopupStyle());
       setHapticsActive(haptics.getEnabled());
       setVolume(soundEngine.getVolume());
@@ -104,36 +98,10 @@ export const NotificationSettingsModal: React.FC<NotificationSettingsModalProps>
     soundEngine.playEventSound(event);
   };
 
-  const handleNotifPopupStyleChange = (style: NotificationPopupStyle) => {
-    setNotifPopupStyle(style);
-    soundEngine.setNotificationPopupStyle(style);
-    haptics.toggle();
-  };
-
   const handleAlarmPopupStyleChange = (style: AlarmPopupStyle) => {
     setAlarmPopupStyle(style);
     soundEngine.setAlarmPopupStyle(style);
     haptics.toggle();
-  };
-
-  const handlePreviewNotificationPopup = () => {
-    pushNotification(
-      'YouTube Task',
-      'Search about what value I can provide on YouTube',
-      'task',
-      { sound: 'task' }
-    );
-    setTestStatus(
-      `✨ Previewing ${
-        notifPopupStyle === 'ticktick_card'
-          ? 'TickTick Bottom Task Pop-Up Card'
-          : notifPopupStyle === 'dynamic_island'
-            ? 'Dynamic Island / Camera Pill'
-            : notifPopupStyle === 'android_heads_up'
-              ? 'Android Heads-Up'
-              : 'Compact Card'
-      } notification!`
-    );
   };
 
   const handlePreviewAlarmPip = () => {
@@ -294,87 +262,9 @@ export const NotificationSettingsModal: React.FC<NotificationSettingsModalProps>
             </div>
           </div>
 
-          {/* Pop-Up & Floating PiP Display Styles */}
+          {/* Active Alarm Floating PiP Card Option */}
           <div className="space-y-3.5 p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800">
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <label className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
-                  <Smartphone className="w-3.5 h-3.5 text-indigo-500" />
-                  <span>Notification Pop-Up Style</span>
-                </label>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Choose Camera Pill (Dynamic Island), Android Heads-Up, or Compact Card
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={handlePreviewNotificationPopup}
-                className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold transition cursor-pointer shrink-0"
-              >
-                Preview Pop-Up
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {[
-                {
-                  id: 'ticktick_card' as NotificationPopupStyle,
-                  name: 'TickTick Task Pop-Up Card',
-                  desc: 'Dark bottom-sheet card with schedule range, Focus target ◉, Snooze & Complete',
-                  badge: 'Task Pop-Up',
-                },
-                {
-                  id: 'dynamic_island' as NotificationPopupStyle,
-                  name: 'Dynamic Island / Pill',
-                  desc: 'Obsidian camera pill that expands on tap',
-                  badge: 'Camera Pill',
-                },
-                {
-                  id: 'android_heads_up' as NotificationPopupStyle,
-                  name: 'Android Heads-Up',
-                  desc: 'Material 3 pop-up banner with quick actions',
-                  badge: 'Android',
-                },
-                {
-                  id: 'compact_card' as NotificationPopupStyle,
-                  name: 'Compact Card',
-                  desc: 'Classic JivanOS swipeable card',
-                  badge: 'Classic',
-                },
-              ].map(style => {
-                const isSelected = notifPopupStyle === style.id;
-                return (
-                  <button
-                    key={style.id}
-                    type="button"
-                    onClick={() => handleNotifPopupStyleChange(style.id)}
-                    className={`p-2.5 rounded-xl border text-left transition flex flex-col justify-between gap-1 cursor-pointer ${
-                      isSelected
-                        ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/60 ring-2 ring-indigo-500/40'
-                        : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 hover:bg-slate-100 dark:hover:bg-slate-800'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-1">
-                      <span className="text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300">
-                        {style.badge}
-                      </span>
-                      {isSelected && <span className="w-2 h-2 rounded-full bg-indigo-600" />}
-                    </div>
-                    <div>
-                      <div className="text-xs font-bold text-slate-900 dark:text-white">
-                        {style.name}
-                      </div>
-                      <div className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight mt-0.5">
-                        {style.desc}
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Active Alarm Floating PiP Card Option */}
-            <div className="pt-3 border-t border-slate-200/70 dark:border-slate-700/70 space-y-2">
+            <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <div>
                   <label className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-1.5">

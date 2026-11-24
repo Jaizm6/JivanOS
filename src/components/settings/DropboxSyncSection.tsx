@@ -1,14 +1,16 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  RefreshCw,
   Check,
+  Copy,
+  ExternalLink,
+  KeyRound,
+  Loader2,
   X,
   AlertTriangle,
   CloudDownload,
   GitMerge,
   Smartphone,
   LogOut,
-  ShieldCheck,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { showAndroidToast } from '../common/AndroidToast';
@@ -19,25 +21,25 @@ import {
   DropboxSyncStatus,
   StoredDropboxSyncMeta,
   autoSync,
+  completeDropboxManualCodePkce,
   formatDriveFileSize,
   formatRelativeSyncTime,
   getConnectedDropboxAccount,
+  getDropboxWebRedirectUri,
   getStoredDropboxSyncMeta,
+  isDropboxPopupModeEnabled,
   isNativeAndroidDropboxAvailable,
   isRemoteNewerThanLocal,
   mergeDriveData,
+  setDropboxPopupModeEnabled,
+  startDropboxManualCodePkce,
   updateStoredDropboxSyncMeta,
 } from '../../utils/dropboxSync';
 import { dropboxSyncProvider } from '../../sync/providers/DropboxProvider';
 import { getCachedDesktopOAuthAccount } from '../../sync/desktop/DesktopSyncTransport';
 import { isDesktop } from '../../desktop/KeychainService';
 
-const INTERVAL_OPTIONS: { label: string; value: AutoSyncIntervalMinutes }[] = [
-  { label: '15 min', value: 15 },
-  { label: '30 min', value: 30 },
-  { label: '1 hr', value: 60 },
-  { label: 'Manual', value: 0 },
-];
+import { SyncProviderRow } from './SyncProviderRow';
 
 interface DropboxConflictDialogState {
   remoteEnvelope: DriveBackupEnvelope;
@@ -46,13 +48,21 @@ interface DropboxConflictDialogState {
   localLastSyncedAt: string | null;
 }
 
+export interface DropboxSyncSectionProps {
+  isFirst?: boolean;
+  isLast?: boolean;
+}
+
 const DropboxLogoSvg: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) => (
   <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden="true">
     <path d="M6.004 2L0 5.83l6.004 3.83L12 5.83 6.004 2zm11.992 0L12 5.83l5.996 3.83L24 5.83 17.996 2zM0 13.49l6.004 3.83L12 13.49 6.004 9.66 0 13.49zm17.996-3.83L12 13.49l5.996 3.83L24 13.49l-6.004-3.83zM6.004 18.59L12 22.42l5.996-3.83-5.996-3.83-5.996 3.83z" />
   </svg>
 );
 
-export const DropboxSyncSection: React.FC = () => {
+export const DropboxSyncSection: React.FC<DropboxSyncSectionProps> = ({
+  isFirst = false,
+  isLast = false,
+}) => {
   const { exportEncryptedJSON, replaceAllAppDataFromBackup } = useApp();
 
   const [account, setAccount] = useState<DropboxAccount | null>(() =>
@@ -72,12 +82,30 @@ export const DropboxSyncSection: React.FC = () => {
   const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
   const [, setRelativeTick] = useState(0);
 
-  const isNativeAndroid = isNativeAndroidDropboxAvailable();
+  // Web/mobile-preview paste-code PKCE modal state (default flow)
+  const [isConnectSheetOpen, setIsConnectSheetOpen] = useState(false);
+  const [manualAuthUrl, setManualAuthUrl] = useState('');
+  const [manualCodeInput, setManualCodeInput] = useState('');
+  const [isCompletingManual, setIsCompletingManual] = useState(false);
+  const [manualSetupError, setManualSetupError] = useState<string | null>(null);
+  const [popupModeEnabled, setPopupModeEnabled] = useState<boolean>(() =>
+    isDropboxPopupModeEnabled()
+  );
+  const [copiedRedirectUri, setCopiedRedirectUri] = useState(false);
 
   const getLocalAppDataObject = useCallback((): Record<string, any> => {
     const raw = exportEncryptedJSON();
     return JSON.parse(raw);
   }, [exportEncryptedJSON]);
+
+  const prepareManualAuthUrl = useCallback(async (forceNew = false) => {
+    try {
+      const { authUrl } = await startDropboxManualCodePkce({ forceNew });
+      setManualAuthUrl(authUrl);
+    } catch (err: any) {
+      setManualSetupError(err?.message || 'Could not initialize Dropbox authorization link.');
+    }
+  }, []);
 
   // Refresh "Last synced X min ago" every 30s
   useEffect(() => {
@@ -198,23 +226,78 @@ export const DropboxSyncSection: React.FC = () => {
     [getLocalAppDataObject]
   );
 
-  // 1. CONNECT DROPBOX (OAuth2 PKCE)
-  const handleConnect = async () => {
+  // 1. CONNECT DROPBOX (Native Android / Desktop direct, Web/Preview opens zero-config PKCE modal)
+  const handleDirectPopupConnect = async () => {
     if (isConnecting) return;
     setIsConnecting(true);
     setErrorMessage(null);
+    setManualSetupError(null);
     try {
       const connectedAcc = await dropboxSyncProvider.connect();
       setAccount(connectedAcc);
+      setIsConnectSheetOpen(false);
       showAndroidToast(`Connected Dropbox as ${connectedAcc.email || connectedAcc.name}`, 2800, 'success');
       await runSyncOrInspect('after-connect');
     } catch (err: any) {
       const msg = err?.message || 'Could not connect to Dropbox.';
       setErrorMessage(msg);
+      setManualSetupError(msg);
       setSyncStatus('error');
       showAndroidToast(msg, 3400, 'error');
     } finally {
       setIsConnecting(false);
+    }
+  };
+
+  const handleConnect = async () => {
+    if (isNativeAndroidDropboxAvailable() || isDesktop()) {
+      await handleDirectPopupConnect();
+      return;
+    }
+    setManualCodeInput('');
+    setManualSetupError(null);
+    setCopiedRedirectUri(false);
+    setIsConnectSheetOpen(true);
+    await prepareManualAuthUrl(false);
+  };
+
+  const handleTogglePopupMode = () => {
+    const next = !popupModeEnabled;
+    setPopupModeEnabled(next);
+    setDropboxPopupModeEnabled(next);
+  };
+
+  const handleManualCodeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isCompletingManual) return;
+    setIsCompletingManual(true);
+    setManualSetupError(null);
+    try {
+      const connectedAcc = await completeDropboxManualCodePkce(manualCodeInput);
+      setAccount(connectedAcc);
+      setManualCodeInput('');
+      setIsConnectSheetOpen(false);
+      setErrorMessage(null);
+      showAndroidToast(`Connected Dropbox as ${connectedAcc.email || connectedAcc.name}`, 2800, 'success');
+      await runSyncOrInspect('after-connect');
+    } catch (err: any) {
+      const msg = err?.message || 'Could not verify Dropbox authorization code.';
+      setManualSetupError(msg);
+      // Generate a fresh PKCE challenge + verifier so the next tap of Open Dropbox Authorization gets a valid pair
+      await prepareManualAuthUrl(true);
+    } finally {
+      setIsCompletingManual(false);
+    }
+  };
+
+  const handleCopyRedirectUri = async () => {
+    try {
+      await navigator.clipboard.writeText(getDropboxWebRedirectUri());
+      setCopiedRedirectUri(true);
+      showAndroidToast('Redirect URI copied', 2000, 'success');
+      window.setTimeout(() => setCopiedRedirectUri(false), 2400);
+    } catch {
+      showAndroidToast('Select and copy the Redirect URI manually', 2400, 'default');
     }
   };
 
@@ -270,29 +353,7 @@ export const DropboxSyncSection: React.FC = () => {
     }
   };
 
-  // 3. AUTO-SYNC TOGGLE & SEGMENTED INTERVAL SELECTOR
-  const handleToggleAutoSync = async () => {
-    const nextEnabled = !meta.autoSyncEnabled;
-    const nextInterval: AutoSyncIntervalMinutes = nextEnabled
-      ? meta.autoSyncIntervalMinutes > 0
-        ? meta.autoSyncIntervalMinutes
-        : 30
-      : 0;
-    try {
-      await autoSync(nextInterval, performWebBackgroundTick);
-      setMeta(getStoredDropboxSyncMeta());
-      showAndroidToast(
-        nextInterval > 0
-          ? `Dropbox auto-sync enabled (every ${nextInterval === 60 ? '1 hr' : `${nextInterval} min`})`
-          : 'Dropbox auto-sync set to Manual',
-        2400,
-        'default'
-      );
-    } catch (err: any) {
-      showAndroidToast(err?.message || 'Could not update Dropbox auto-sync schedule', 3000, 'error');
-    }
-  };
-
+  // 3. AUTO-SYNC INTERVAL SELECTOR
   const handleSelectInterval = async (intervalMinutes: AutoSyncIntervalMinutes) => {
     try {
       await autoSync(intervalMinutes, performWebBackgroundTick);
@@ -324,266 +385,263 @@ export const DropboxSyncSection: React.FC = () => {
     }
   };
 
-  const renderStatusChip = () => {
-    if (!account?.connected && syncStatus !== 'error') {
-      return (
-        <span
-          role="status"
-          className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-200/80 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 whitespace-nowrap shrink-0"
-        >
-          Not connected
-        </span>
-      );
-    }
-    if (syncStatus === 'syncing') {
-      return (
-        <span
-          role="status"
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-600 text-white animate-pulse whitespace-nowrap shrink-0"
-        >
-          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-          <span>Syncing…</span>
-        </span>
-      );
-    }
-    if (syncStatus === 'error') {
-      return (
-        <button
-          type="button"
-          onClick={() => (account?.connected ? runSyncOrInspect('sync-now') : handleConnect())}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white whitespace-nowrap shrink-0 cursor-pointer"
-          title="Tap to retry"
-        >
-          <X className="w-3.5 h-3.5" />
-          <span>Error ✗</span>
-        </button>
-      );
-    }
-    if (syncStatus === 'synced' && account?.connected && meta.lastSyncedAt) {
-      return (
-        <span
-          role="status"
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-600 text-white whitespace-nowrap shrink-0"
-        >
-          <Check className="w-3.5 h-3.5" />
-          <span>Synced ✓</span>
-        </span>
-      );
-    }
-    return null;
-  };
-
+  const isConnected = Boolean(account?.connected);
   const activeInterval: AutoSyncIntervalMinutes = meta.autoSyncEnabled
     ? meta.autoSyncIntervalMinutes
     : 0;
 
+  const rowStatus = !isConnected
+    ? syncStatus === 'error'
+      ? 'error'
+      : 'disconnected'
+    : syncStatus === 'syncing'
+      ? 'syncing'
+      : syncStatus === 'error'
+        ? 'error'
+        : meta.lastSyncedAt
+          ? 'synced'
+          : 'connected';
+
+  const metaLine = meta.lastSyncedAt
+    ? `Last synced ${formatRelativeSyncTime(meta.lastSyncedAt)}${
+        meta.lastFileSizeBytes != null && meta.lastFileSizeBytes > 0
+          ? ` · ${formatDriveFileSize(meta.lastFileSizeBytes)}`
+          : ''
+      }`
+    : 'Connected · /Apps/JivanOS/';
+
   return (
     <>
-      <section
-        aria-label="Dropbox Sync"
-        style={
-          account?.connected
-            ? { borderLeftWidth: 3, borderLeftColor: '#0061FF' }
-            : undefined
-        }
-        className="rounded-2xl border border-[#E5E7EB] dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 space-y-4 w-full min-w-0"
-      >
-        {/* Material Design 3 Section Header */}
-        <div className="flex items-start justify-between gap-3 flex-wrap">
-          <div className="flex items-start gap-3 min-w-0 flex-1">
-            <div className="w-11 h-11 rounded-2xl bg-[#0061FF]/10 dark:bg-[#0061FF]/20 text-[#0061FF] dark:text-[#60A5FA] flex items-center justify-center shrink-0">
-              <DropboxLogoSvg className="w-5 h-5" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <h3 className="text-base font-semibold tracking-tight text-slate-900 dark:text-zinc-100 leading-snug">
-                Dropbox
-              </h3>
-              <p className="text-xs text-slate-600 dark:text-zinc-400 mt-0.5 leading-relaxed">
-                Sandboxed App Folder sync inside <code className="font-mono text-xs">/Apps/JivanOS/</code>.
-              </p>
-            </div>
-          </div>
+      <SyncProviderRow
+        name="Dropbox"
+        description="Sandboxed App Folder sync"
+        logo={<DropboxLogoSvg className="w-4.5 h-4.5 text-[#0061FF] dark:text-[#60A5FA]" />}
+        logoBgClass="bg-[#0061FF]/10 dark:bg-[#0061FF]/20"
+        brandColor="#0061FF"
+        isConnected={isConnected}
+        status={rowStatus}
+        accountLabel={isConnected ? account?.email || account?.name : undefined}
+        metaLine={isConnected ? metaLine : undefined}
+        connectLabel={isConnecting ? 'Connecting…' : 'Connect →'}
+        connectDisabled={isConnecting}
+        connectButtonId="btn-m3-connect-dropbox"
+        onConnect={handleConnect}
+        onSyncNow={isConnected ? () => runSyncOrInspect('sync-now') : undefined}
+        syncButtonId="btn-m3-dropbox-sync-now"
+        isSyncing={syncStatus === 'syncing'}
+        onRetry={() => (isConnected ? runSyncOrInspect('sync-now') : handleConnect())}
+        autoSyncInterval={activeInterval}
+        onSelectInterval={isConnected ? handleSelectInterval : undefined}
+        onRestore={isConnected ? () => runSyncOrInspect('restore-check') : undefined}
+        onDisconnect={isConnected ? () => setShowDisconnectConfirm(true) : undefined}
+        errorMessage={errorMessage}
+        isFirst={isFirst}
+        isLast={isLast}
+      />
 
-          {renderStatusChip()}
-        </div>
-
-        {/* DISCONNECTED STATE */}
-        {!account?.connected ? (
-          <div className="space-y-3.5">
-            <button
-              type="button"
-              id="btn-m3-connect-dropbox"
-              onClick={handleConnect}
-              disabled={isConnecting}
-              className="w-full min-h-[48px] px-5 py-3 rounded-full bg-[#0061FF] hover:bg-[#0052D9] active:scale-[0.99] disabled:opacity-60 text-white text-sm font-semibold shadow-xs transition flex items-center justify-center gap-2.5 cursor-pointer whitespace-nowrap"
-            >
-              <DropboxLogoSvg className="w-4.5 h-4.5 shrink-0" />
-              <span>{isConnecting ? 'Connecting Dropbox…' : 'Connect Dropbox'}</span>
-            </button>
-
-            <div className="flex items-start gap-2 text-[11.5px] text-slate-500 dark:text-zinc-400 leading-relaxed">
-              <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
-              <span>
-                Uses OAuth 2.0 PKCE with App Folder access only. JivanOS can only access{' '}
-                <code className="font-mono text-[11px]">/Apps/JivanOS/</code> and cannot read your other Dropbox files.
-              </span>
-            </div>
-
-            {errorMessage && (
-              <div className="rounded-2xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900/70 px-3.5 py-2.5 text-xs text-rose-700 dark:text-rose-300">
-                {errorMessage}
-              </div>
-            )}
-          </div>
-        ) : (
-          /* CONNECTED STATE */
-          <div className="space-y-5">
-            <div className="rounded-2xl border border-slate-200/85 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-950/50 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-3.5 min-w-0">
-                <div
-                  aria-hidden="true"
-                  className="w-12 h-12 rounded-full bg-[#0061FF] text-white font-semibold text-base flex items-center justify-center shrink-0 tracking-wide shadow-xs"
-                >
-                  {account.initials}
+      {/* CONNECT DROPBOX BOTTOM SHEET (Web / Mobile Preview) */}
+      {isConnectSheetOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="m3-dropbox-connect-title"
+          className="fixed inset-0 z-[100002] bg-black/50 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4"
+          onClick={() => !isCompletingManual && !isConnecting && setIsConnectSheetOpen(false)}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            className="w-full sm:max-w-[440px] max-h-[90dvh] overflow-y-auto overscroll-contain rounded-t-[28px] sm:rounded-[28px] bg-white dark:bg-zinc-900 border border-slate-200/90 dark:border-zinc-800 px-5 pt-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:p-6 shadow-2xl space-y-4"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-[#0061FF]/10 dark:bg-[#0061FF]/20 text-[#0061FF] dark:text-[#60A5FA] flex items-center justify-center">
+                  <DropboxLogoSvg className="w-5 h-5" />
                 </div>
+                <div>
+                  <h3
+                    id="m3-dropbox-connect-title"
+                    className="text-base font-semibold text-slate-900 dark:text-zinc-100"
+                  >
+                    Connect Dropbox
+                  </h3>
+                  <p className="text-[11px] text-slate-500 dark:text-zinc-400">
+                    Sandboxed sync to /Apps/JivanOS/backup.json
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => !isCompletingManual && !isConnecting && setIsConnectSheetOpen(false)}
+                className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-500 cursor-pointer"
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleManualCodeSubmit} className="space-y-3.5">
+              {/* Step 1: Authorize on Dropbox */}
+              <div className="rounded-2xl bg-slate-50 dark:bg-zinc-950/60 border border-slate-200/80 dark:border-zinc-800 p-3.5 space-y-2.5">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-[#0061FF] dark:text-[#60A5FA]">
+                  Step 1 · Authorize on Dropbox
+                </div>
+                <p className="text-xs text-slate-600 dark:text-zinc-300 leading-relaxed">
+                  Tap below to sign in to Dropbox and click <strong>Allow</strong>. Dropbox will display a
+                  one-time authorization code on screen (works on any URL with zero redirect setup).
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <a
+                    href={manualAuthUrl || '#'}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={e => {
+                      if (!manualAuthUrl) {
+                        e.preventDefault();
+                        prepareManualAuthUrl();
+                      }
+                    }}
+                    className={`inline-flex items-center justify-center gap-1.5 min-h-[42px] px-4 py-2 rounded-full bg-[#0061FF] hover:bg-[#0052D9] text-white text-xs font-semibold shadow-xs transition ${
+                      !manualAuthUrl ? 'opacity-60 pointer-events-none' : ''
+                    }`}
+                  >
+                    <span>Open Dropbox Authorization</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                </div>
+              </div>
+
+              {/* Step 2: Paste Code */}
+              <div className="rounded-2xl bg-slate-50 dark:bg-zinc-950/60 border border-slate-200/80 dark:border-zinc-800 p-3.5 space-y-2">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-[#0061FF] dark:text-[#60A5FA]">
+                  Step 2 · Paste Authorization Code
+                </div>
+                <label
+                  htmlFor="dropbox-manual-auth-code"
+                  className="block text-xs font-semibold text-slate-800 dark:text-zinc-200"
+                >
+                  Dropbox Code
+                </label>
+                <div className="relative">
+                  <KeyRound className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    id="dropbox-manual-auth-code"
+                    type="text"
+                    required
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={manualCodeInput}
+                    onChange={e => {
+                      setManualCodeInput(e.target.value);
+                      setManualSetupError(null);
+                    }}
+                    placeholder="Paste the code shown by Dropbox…"
+                    className="w-full min-h-[44px] pl-10 pr-3.5 py-2.5 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-300 dark:border-zinc-700 text-xs font-mono text-slate-900 dark:text-zinc-100 outline-none focus:border-[#0061FF]"
+                  />
+                </div>
+              </div>
+
+              {manualSetupError && (
+                <div className="rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 px-3 py-2.5 text-xs text-rose-700 dark:text-rose-300 leading-relaxed">
+                  {manualSetupError}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={isCompletingManual || isConnecting || !manualCodeInput.trim()}
+                className="w-full min-h-[48px] px-5 py-3 rounded-full bg-[#0061FF] hover:bg-[#0052D9] disabled:opacity-60 text-white text-sm font-semibold shadow-xs transition flex items-center justify-center gap-2 cursor-pointer"
+              >
+                {isCompletingManual ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Connecting Dropbox…</span>
+                  </>
+                ) : (
+                  <span>Connect Dropbox</span>
+                )}
+              </button>
+            </form>
+
+            {/* Optional 1-Click Popup Mode (off by default — runs only when explicitly turned on) */}
+            <div className="pt-2 border-t border-slate-200/80 dark:border-zinc-800 space-y-2.5">
+              <label className="flex items-center justify-between gap-3 cursor-pointer select-none py-1">
                 <div className="min-w-0">
-                  <div className="text-sm font-semibold text-slate-900 dark:text-zinc-100 truncate">
-                    {account.name}
+                  <div className="text-xs font-medium text-slate-700 dark:text-zinc-300">
+                    1-Click Popup Mode (optional)
                   </div>
-                  <div className="text-xs text-slate-600 dark:text-zinc-400 truncate">
-                    {account.email}
-                  </div>
-                  <div className="text-xs text-slate-500 dark:text-zinc-400 mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 tabular-nums">
-                    <span>
-                      {meta.lastSyncedAt
-                        ? `Last synced ${formatRelativeSyncTime(meta.lastSyncedAt)}`
-                        : 'Not synced yet'}
-                    </span>
-                    {meta.lastFileSizeBytes != null && meta.lastFileSizeBytes > 0 && (
-                      <>
-                        <span aria-hidden="true">·</span>
-                        <span>{formatDriveFileSize(meta.lastFileSizeBytes)}</span>
-                      </>
-                    )}
+                  <div className="text-[11px] text-slate-500 dark:text-zinc-400">
+                    Off by default · requires Redirect URI in Dropbox App Console
                   </div>
                 </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 shrink-0">
-                <button
-                  type="button"
-                  id="btn-m3-dropbox-sync-now"
-                  onClick={() => runSyncOrInspect('sync-now')}
-                  disabled={syncStatus === 'syncing'}
-                  title="Sync Now"
-                  aria-label="Sync Now"
-                  className="min-h-[44px] min-w-[44px] px-3.5 rounded-full bg-[#0061FF] hover:bg-[#0052D9] active:scale-[0.98] disabled:opacity-60 text-white text-xs font-semibold shadow-xs transition inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
-                >
-                  <RefreshCw className={`w-4 h-4 shrink-0 ${syncStatus === 'syncing' ? 'animate-spin' : ''}`} />
-                  <span>Sync Now</span>
-                </button>
-
-                <button
-                  type="button"
-                  id="btn-m3-dropbox-restore-check"
-                  onClick={() => runSyncOrInspect('restore-check')}
-                  disabled={syncStatus === 'syncing'}
-                  title="Restore or merge from Dropbox"
-                  aria-label="Restore from Dropbox"
-                  className="min-h-[44px] min-w-[44px] px-3 rounded-full border border-slate-300 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-60 text-slate-700 dark:text-zinc-200 transition inline-flex items-center justify-center cursor-pointer"
-                >
-                  <CloudDownload className="w-4 h-4 shrink-0" />
-                </button>
-
-                <button
-                  type="button"
-                  id="btn-m3-dropbox-disconnect"
-                  onClick={() => setShowDisconnectConfirm(true)}
-                  disabled={syncStatus === 'syncing'}
-                  className="min-h-[44px] px-3 rounded-full text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition inline-flex items-center gap-1 cursor-pointer whitespace-nowrap"
-                >
-                  <LogOut className="w-3.5 h-3.5 shrink-0" />
-                  <span>Disconnect</span>
-                </button>
-              </div>
-            </div>
-
-            {errorMessage && (
-              <div className="rounded-2xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900/70 px-3.5 py-2.5 text-xs text-rose-700 dark:text-rose-300">
-                {errorMessage}
-              </div>
-            )}
-
-            <div className="h-px bg-slate-200/80 dark:bg-zinc-800" />
-
-            {/* Auto-sync Toggle + Segmented Interval Selector */}
-            <div className="space-y-3.5">
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-slate-900 dark:text-zinc-100">
-                    Auto-sync
-                  </div>
-                  <div className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5">
-                    {isNativeAndroid
-                      ? 'Scheduled via Android WorkManager using encrypted tokens.'
-                      : 'Automatically backs up to /Apps/JivanOS/backup.json.'}
-                  </div>
-                </div>
-
-                {/* Material Design 3 Switch */}
                 <button
                   type="button"
                   role="switch"
-                  aria-checked={meta.autoSyncEnabled}
-                  aria-label="Toggle Dropbox Auto-sync"
-                  onClick={handleToggleAutoSync}
-                  className={`relative inline-flex h-8 w-[52px] shrink-0 items-center rounded-full border-2 transition-colors cursor-pointer ${
-                    meta.autoSyncEnabled
-                      ? 'bg-[#0061FF] border-[#0061FF]'
-                      : 'bg-slate-200 dark:bg-zinc-800 border-slate-400 dark:border-zinc-600'
+                  aria-checked={popupModeEnabled}
+                  onClick={handleTogglePopupMode}
+                  className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors cursor-pointer ${
+                    popupModeEnabled
+                      ? 'bg-[#0061FF]'
+                      : 'bg-slate-300 dark:bg-zinc-700'
                   }`}
                 >
                   <span
-                    className={`inline-block rounded-full transition-transform ${
-                      meta.autoSyncEnabled
-                        ? 'h-6 w-6 translate-x-5 bg-white shadow-xs'
-                        : 'h-4 w-4 translate-x-1 bg-slate-600 dark:bg-zinc-400'
+                    className={`inline-block h-4.5 w-4.5 transform rounded-full bg-white shadow-xs transition-transform ${
+                      popupModeEnabled ? 'translate-x-5.5' : 'translate-x-1'
                     }`}
                   />
                 </button>
-              </div>
+              </label>
 
-              {/* Segmented Interval Selector: 15 min | 30 min | 1 hr | Manual */}
-              <div
-                role="radiogroup"
-                aria-label="Dropbox auto-sync interval"
-                className="grid grid-cols-4 rounded-full border border-slate-300 dark:border-zinc-700 overflow-hidden divide-x divide-slate-300 dark:divide-zinc-700"
-              >
-                {INTERVAL_OPTIONS.map(opt => {
-                  const selected = activeInterval === opt.value;
-                  return (
+              {popupModeEnabled && (
+                <div className="rounded-2xl bg-slate-50 dark:bg-zinc-950/60 border border-slate-200/80 dark:border-zinc-800 p-3 space-y-2.5">
+                  <p className="text-[11px] text-slate-600 dark:text-zinc-400 leading-relaxed">
+                    Add this exact URL in{' '}
+                    <strong>Dropbox App Console → Settings → OAuth 2 → Redirect URIs</strong>:
+                  </p>
+                  <div className="flex items-center gap-1.5">
+                    <code className="flex-1 min-w-0 px-2.5 py-2 rounded-xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 text-[10px] font-mono text-slate-800 dark:text-zinc-200 break-all select-all">
+                      {getDropboxWebRedirectUri()}
+                    </code>
                     <button
-                      key={opt.value}
                       type="button"
-                      role="radio"
-                      aria-checked={selected}
-                      onClick={() => handleSelectInterval(opt.value)}
-                      className={`min-h-[44px] px-2 text-xs font-semibold transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap tabular-nums ${
-                        selected
-                          ? 'bg-[#0061FF]/15 dark:bg-[#0061FF]/30 text-[#0052D9] dark:text-blue-200'
-                          : 'bg-transparent text-slate-700 dark:text-zinc-300 hover:bg-slate-100/80 dark:hover:bg-zinc-800/70'
-                      }`}
+                      onClick={handleCopyRedirectUri}
+                      className="shrink-0 min-h-[36px] px-2.5 rounded-xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-200 text-xs font-medium flex items-center gap-1 cursor-pointer"
+                      aria-label="Copy Redirect URI"
                     >
-                      {selected && <Check className="w-3.5 h-3.5 shrink-0" />}
-                      <span>{opt.label}</span>
+                      {copiedRedirectUri ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Copied</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>Copy</span>
+                        </>
+                      )}
                     </button>
-                  );
-                })}
-              </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={isConnecting || isCompletingManual}
+                    onClick={handleDirectPopupConnect}
+                    className="w-full min-h-[40px] px-4 py-2 rounded-full border border-slate-300 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-60 text-slate-800 dark:text-zinc-200 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    {isConnecting ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Waiting for Dropbox popup…</span>
+                      </>
+                    ) : (
+                      <span>Connect with 1-Click Popup</span>
+                    )}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
-        )}
-      </section>
+        </div>
+      )}
 
       {/* CONFLICT RESOLUTION DIALOG */}
       {conflictState && (

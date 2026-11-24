@@ -525,13 +525,35 @@ export const Sidebar: React.FC = () => {
 
             {/* M3 EXPRESSIVE 2-IN-A-ROW NAVIGATION & UTILITY GRID (App APK Removed) */}
             <div className="space-y-1.5">
-              {/* Row 1: Quotes | Analytics */}
+              {/* Row 1: Tags | Quotes */}
               <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  id="sidebar-btn-entities"
+                  onClick={() => handleNavigate('tags')}
+                  className={`flex items-center gap-2.5 px-3 py-2.5 min-h-[46px] rounded-l-[20px] rounded-r-[10px] text-[13px] transition-all duration-200 active:scale-[0.97] cursor-pointer border ${
+                    activeTab === 'tags'
+                      ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-xs'
+                      : 'bg-white dark:bg-zinc-900/95 hover:bg-indigo-50/70 dark:hover:bg-zinc-800 text-slate-800 dark:text-zinc-100 border-slate-200/80 dark:border-zinc-800/80 font-semibold'
+                  }`}
+                >
+                  <span
+                    className={`w-7 h-7 rounded-xl flex items-center justify-center shrink-0 ${
+                      activeTab === 'tags'
+                        ? 'bg-white/20 text-white'
+                        : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400'
+                    }`}
+                  >
+                    <FolderKanban className="w-4 h-4" />
+                  </span>
+                  <span className="truncate">Tags</span>
+                </button>
+
                 <button
                   id="sidebar-nav-quotes"
                   type="button"
                   onClick={() => handleNavigate('quotes')}
-                  className={`flex items-center gap-2.5 px-3 py-2.5 min-h-[46px] rounded-l-[20px] rounded-r-[10px] text-[13px] transition-all duration-200 active:scale-[0.97] cursor-pointer border ${
+                  className={`flex items-center gap-2.5 px-3 py-2.5 min-h-[46px] rounded-r-[20px] rounded-l-[10px] text-[13px] transition-all duration-200 active:scale-[0.97] cursor-pointer border ${
                     activeTab === 'quotes'
                       ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-xs'
                       : 'bg-white dark:bg-zinc-900/95 hover:bg-indigo-50/70 dark:hover:bg-zinc-800 text-slate-800 dark:text-zinc-100 border-slate-200/80 dark:border-zinc-800/80 font-semibold'
@@ -548,12 +570,15 @@ export const Sidebar: React.FC = () => {
                   </span>
                   <span className="truncate">Quotes</span>
                 </button>
+              </div>
 
+              {/* Row 2: Analytics | Jivan AI */}
+              <div className="grid grid-cols-2 gap-1.5">
                 <button
                   id="sidebar-nav-analytics"
                   type="button"
                   onClick={() => handleNavigate('analytics')}
-                  className={`flex items-center gap-2.5 px-3 py-2.5 min-h-[46px] rounded-r-[20px] rounded-l-[10px] text-[13px] transition-all duration-200 active:scale-[0.97] cursor-pointer border ${
+                  className={`flex items-center gap-2.5 px-3 py-2.5 min-h-[46px] rounded-l-[20px] rounded-r-[10px] text-[13px] transition-all duration-200 active:scale-[0.97] cursor-pointer border ${
                     activeTab === 'analytics'
                       ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-xs'
                       : 'bg-white dark:bg-zinc-900/95 hover:bg-indigo-50/70 dark:hover:bg-zinc-800 text-slate-800 dark:text-zinc-100 border-slate-200/80 dark:border-zinc-800/80 font-semibold'
@@ -570,10 +595,7 @@ export const Sidebar: React.FC = () => {
                   </span>
                   <span className="truncate">Analytics</span>
                 </button>
-              </div>
 
-              {/* Row 2: Jivan AI | Tags */}
-              <div className="grid grid-cols-2 gap-1.5">
                 <button
                   type="button"
                   id="sidebar-btn-ai"
@@ -581,34 +603,12 @@ export const Sidebar: React.FC = () => {
                     setIsAIChatOpen(true);
                     setIsSidebarCollapsed(true);
                   }}
-                  className="flex items-center gap-2.5 px-3 py-2.5 min-h-[46px] rounded-l-[20px] rounded-r-[10px] text-[13px] font-semibold bg-white dark:bg-zinc-900/95 hover:bg-violet-50/70 dark:hover:bg-zinc-800 text-slate-800 dark:text-zinc-100 border border-slate-200/80 dark:border-zinc-800/80 transition-all duration-200 active:scale-[0.97] cursor-pointer"
+                  className="flex items-center gap-2.5 px-3 py-2.5 min-h-[46px] rounded-r-[20px] rounded-l-[10px] text-[13px] font-semibold bg-white dark:bg-zinc-900/95 hover:bg-violet-50/70 dark:hover:bg-zinc-800 text-slate-800 dark:text-zinc-100 border border-slate-200/80 dark:border-zinc-800/80 transition-all duration-200 active:scale-[0.97] cursor-pointer"
                 >
                   <span className="w-7 h-7 rounded-xl bg-violet-50 dark:bg-violet-950/60 text-violet-600 dark:text-violet-400 flex items-center justify-center shrink-0">
                     <Sparkles className="w-4 h-4" />
                   </span>
                   <span className="truncate">Jivan AI</span>
-                </button>
-
-                <button
-                  type="button"
-                  id="sidebar-btn-entities"
-                  onClick={() => handleNavigate('tags')}
-                  className={`flex items-center gap-2.5 px-3 py-2.5 min-h-[46px] rounded-r-[20px] rounded-l-[10px] text-[13px] transition-all duration-200 active:scale-[0.97] cursor-pointer border ${
-                    activeTab === 'tags'
-                      ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-xs'
-                      : 'bg-white dark:bg-zinc-900/95 hover:bg-indigo-50/70 dark:hover:bg-zinc-800 text-slate-800 dark:text-zinc-100 border-slate-200/80 dark:border-zinc-800/80 font-semibold'
-                  }`}
-                >
-                  <span
-                    className={`w-7 h-7 rounded-xl flex items-center justify-center shrink-0 ${
-                      activeTab === 'tags'
-                        ? 'bg-white/20 text-white'
-                        : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400'
-                    }`}
-                  >
-                    <FolderKanban className="w-4 h-4" />
-                  </span>
-                  <span className="truncate">Tags</span>
                 </button>
               </div>
             </div>

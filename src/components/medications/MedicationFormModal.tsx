@@ -203,7 +203,7 @@ export const MedicationFormModal: React.FC<MedicationFormModalProps> = ({
       iconType,
       totalPills: Math.max(1, totalPills),
       remainingPills: Math.max(0, remainingPills),
-      refillThreshold: Math.max(1, refillThreshold),
+      refillThreshold: Math.max(0, refillThreshold),
       startDate: startDate || getTodayStr(),
       endDate: endDate || undefined,
       active: editingMed ? editingMed.active : true,
@@ -938,13 +938,13 @@ export const MedicationFormModal: React.FC<MedicationFormModalProps> = ({
 
           <div>
             <label className="text-[10px] uppercase font-bold tracking-wider text-zinc-400 mb-1 block">
-              Low Supply Alert Threshold ({refillThreshold} left)
+              Low Supply Alert Threshold ({refillThreshold === 0 ? 'When empty (0)' : `≤ ${refillThreshold} left`})
             </label>
             <input
               type="number"
-              min={1}
+              min={0}
               value={refillThreshold}
-              onChange={e => setRefillThreshold(Math.max(1, Number(e.target.value)))}
+              onChange={e => setRefillThreshold(Math.max(0, Number(e.target.value)))}
               className="w-full px-3.5 py-2.5 rounded-[16px] bg-[#f3f5fa] dark:bg-[#111116] text-xs font-mono font-bold text-zinc-900 dark:text-white outline-none tabular-nums"
             />
           </div>

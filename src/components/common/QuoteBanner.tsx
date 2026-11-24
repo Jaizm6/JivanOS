@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { CURATED_QUOTES, QuoteItem } from '../../data/quotes';
 import { useApp } from '../../context/AppContext';
+import { formatQuoteForShare } from '../../utils/quoteText';
 import {
   UnifiedFormModal,
   FormHeroTitleCard,
@@ -26,16 +27,6 @@ interface QuoteBannerProps {
   className?: string;
 }
 
-const QUOTE_CATEGORIES: QuoteItem['category'][] = [
-  'wisdom',
-  'discipline',
-  'mindset',
-  'focus',
-  'stoicism',
-  'health',
-  'habits',
-];
-
 export const QuoteBanner: React.FC<QuoteBannerProps> = ({ className = '' }) => {
   const {
     quotes,
@@ -44,6 +35,8 @@ export const QuoteBanner: React.FC<QuoteBannerProps> = ({ className = '' }) => {
     toggleFavoriteQuote,
     isQuoteFavorited,
     updateQuote,
+    quoteCategories,
+    getCategoryForQuote,
     soundEngine,
   } = useApp();
   const allQuotes = quotes && quotes.length > 0 ? quotes : CURATED_QUOTES;
@@ -69,7 +62,7 @@ export const QuoteBanner: React.FC<QuoteBannerProps> = ({ className = '' }) => {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editFormText, setEditFormText] = useState('');
   const [editFormAuthor, setEditFormAuthor] = useState('');
-  const [editFormCategory, setEditFormCategory] = useState<QuoteItem['category']>('wisdom');
+  const [editFormCategory, setEditFormCategory] = useState<string>('wisdom');
   const [editFormSource, setEditFormSource] = useState('');
 
   // Auto-minimize expanded quote or dropdown menu when interacting with anything outside
@@ -183,7 +176,7 @@ export const QuoteBanner: React.FC<QuoteBannerProps> = ({ className = '' }) => {
   const handleShareQuote = async (e: React.MouseEvent) => {
     e.stopPropagation();
     setIsMenuOpen(false);
-    const shareText = `"${currentQuote.text}" — ${currentQuote.author}${currentQuote.source ? ` (${currentQuote.source})` : ''}`;
+    const shareText = formatQuoteForShare(currentQuote);
     if (navigator.share) {
       try {
         await navigator.share({
@@ -219,7 +212,7 @@ export const QuoteBanner: React.FC<QuoteBannerProps> = ({ className = '' }) => {
     setIsExpanded(false);
     setEditFormText(currentQuote.text);
     setEditFormAuthor(currentQuote.author);
-    setEditFormCategory(currentQuote.category || 'wisdom');
+    setEditFormCategory(getCategoryForQuote(currentQuote).id);
     setEditFormSource(currentQuote.source || '');
     setIsEditModalOpen(true);
   };
@@ -502,18 +495,18 @@ export const QuoteBanner: React.FC<QuoteBannerProps> = ({ className = '' }) => {
             <span>Category</span>
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {QUOTE_CATEGORIES.map(cat => (
+            {quoteCategories.map(cat => (
               <button
-                key={cat}
+                key={cat.id}
                 type="button"
-                onClick={() => setEditFormCategory(cat)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold capitalize transition cursor-pointer ${
-                  editFormCategory === cat
+                onClick={() => setEditFormCategory(cat.id)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                  editFormCategory === cat.id
                     ? 'bg-indigo-600 text-white shadow-2xs'
                     : 'bg-zinc-100 dark:bg-zinc-800/80 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700'
                 }`}
               >
-                {cat}
+                {cat.name}
               </button>
             ))}
           </div>

@@ -34,18 +34,18 @@ import { googleDriveSyncProvider } from '../../sync/providers/GoogleDriveProvide
 import { getCachedDesktopOAuthAccount } from '../../sync/desktop/DesktopSyncTransport';
 import { isDesktop } from '../../desktop/KeychainService';
 
-const INTERVAL_OPTIONS: { label: string; value: AutoSyncIntervalMinutes }[] = [
-  { label: '15 min', value: 15 },
-  { label: '30 min', value: 30 },
-  { label: '1 hr', value: 60 },
-  { label: 'Manual', value: 0 },
-];
+import { SyncProviderRow } from './SyncProviderRow';
 
 interface ConflictDialogState {
   remoteEnvelope: DriveBackupEnvelope;
   remoteUpdatedAt: string;
   remoteSizeBytes: number;
   localLastSyncedAt: string | null;
+}
+
+export interface GoogleDriveSyncSectionProps {
+  isFirst?: boolean;
+  isLast?: boolean;
 }
 
 const GoogleLogoSvg: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) => (
@@ -73,7 +73,10 @@ const GoogleLogoSvg: React.FC<{ className?: string }> = ({ className = 'w-5 h-5'
   </svg>
 );
 
-export const GoogleDriveSyncSection: React.FC = () => {
+export const GoogleDriveSyncSection: React.FC<GoogleDriveSyncSectionProps> = ({
+  isFirst = false,
+  isLast = false,
+}) => {
   const { exportEncryptedJSON, replaceAllAppDataFromBackup } = useApp();
 
   const [account, setAccount] = useState<DriveAccountInfo | null>(() =>
@@ -93,8 +96,6 @@ export const GoogleDriveSyncSection: React.FC = () => {
   const [showUploadConfirm, setShowUploadConfirm] = useState(false);
   const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
   const [, setRelativeTick] = useState(0);
-
-  const isNativeAndroid = isNativeAndroidDriveAvailable();
 
   const getLocalAppDataObject = useCallback((): Record<string, any> => {
     const raw = exportEncryptedJSON();
@@ -124,7 +125,7 @@ export const GoogleDriveSyncSection: React.FC = () => {
     return () => window.removeEventListener(DRIVE_SYNC_STATE_EVENT, handleMetaEvent);
   }, []);
 
-  // Silent re-auth when opening Backup & Restore screen
+  // Silent re-auth when opening Backup & Sync screen
   useEffect(() => {
     let active = true;
     googleDriveSyncProvider
@@ -310,29 +311,7 @@ export const GoogleDriveSyncSection: React.FC = () => {
     }
   };
 
-  // 4. AUTO-SYNC TOGGLE & SEGMENTED INTERVAL SELECTOR
-  const handleToggleAutoSync = async () => {
-    const nextEnabled = !meta.autoSyncEnabled;
-    const nextInterval: AutoSyncIntervalMinutes = nextEnabled
-      ? meta.autoSyncIntervalMinutes > 0
-        ? meta.autoSyncIntervalMinutes
-        : 30
-      : 0;
-    try {
-      await autoSync(nextInterval, performWebBackgroundTick);
-      setMeta(getStoredDriveSyncMeta());
-      showAndroidToast(
-        nextInterval > 0
-          ? `Auto-sync enabled (every ${nextInterval === 60 ? '1 hr' : `${nextInterval} min`})`
-          : 'Auto-sync switched to Manual',
-        2400,
-        'default'
-      );
-    } catch (err: any) {
-      showAndroidToast(err?.message || 'Could not update auto-sync schedule', 3000, 'error');
-    }
-  };
-
+  // 4. AUTO-SYNC INTERVAL SELECTOR
   const handleSelectInterval = async (intervalMinutes: AutoSyncIntervalMinutes) => {
     try {
       await autoSync(intervalMinutes, performWebBackgroundTick);
@@ -364,271 +343,59 @@ export const GoogleDriveSyncSection: React.FC = () => {
     }
   };
 
-  const renderStatusChip = () => {
-    if (!account?.connected && syncStatus !== 'error') {
-      return (
-        <span
-          role="status"
-          className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-200/80 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 whitespace-nowrap shrink-0"
-        >
-          Not connected
-        </span>
-      );
-    }
-    if (syncStatus === 'syncing') {
-      return (
-        <span
-          role="status"
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-600 text-white animate-pulse whitespace-nowrap shrink-0"
-        >
-          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-          <span>Syncing…</span>
-        </span>
-      );
-    }
-    if (syncStatus === 'error') {
-      return (
-        <button
-          type="button"
-          onClick={() => (account?.connected ? inspectRemoteBeforeSync('sync-now') : handleConnect())}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white whitespace-nowrap shrink-0 cursor-pointer"
-          title="Tap to retry"
-        >
-          <X className="w-3.5 h-3.5" />
-          <span>Error ✗</span>
-        </button>
-      );
-    }
-    if (syncStatus === 'synced' && account?.connected && meta.lastSyncedAt) {
-      return (
-        <span
-          role="status"
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-600 text-white whitespace-nowrap shrink-0"
-        >
-          <Check className="w-3.5 h-3.5" />
-          <span>Synced ✓</span>
-        </span>
-      );
-    }
-    return null;
-  };
-
+  const isConnected = Boolean(account?.connected);
   const activeInterval: AutoSyncIntervalMinutes = meta.autoSyncEnabled
     ? meta.autoSyncIntervalMinutes
     : 0;
 
+  const rowStatus = !isConnected
+    ? syncStatus === 'error'
+      ? 'error'
+      : 'disconnected'
+    : syncStatus === 'syncing'
+      ? 'syncing'
+      : syncStatus === 'error'
+        ? 'error'
+        : meta.lastSyncedAt
+          ? 'synced'
+          : 'connected';
+
+  const metaLine = meta.lastSyncedAt
+    ? `Last synced ${formatRelativeSyncTime(meta.lastSyncedAt)}${
+        meta.lastFileSizeBytes != null && meta.lastFileSizeBytes > 0
+          ? ` · ${formatDriveFileSize(meta.lastFileSizeBytes)}`
+          : ''
+      }`
+    : 'Connected · Ready to sync';
+
   return (
     <>
-      <section
-        aria-label="Google Drive Sync"
-        style={
-          account?.connected
-            ? { borderLeftWidth: 3, borderLeftColor: '#4285F4' }
-            : undefined
-        }
-        className="rounded-2xl border border-[#E5E7EB] dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 space-y-4 w-full min-w-0"
-      >
-        {/* Material Design 3 Section Header */}
-        <div className="flex items-start justify-between gap-3 flex-wrap">
-          <div className="flex items-start gap-3 min-w-0 flex-1">
-            <div className="w-11 h-11 rounded-2xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
-              <GoogleLogoSvg className="w-5 h-5" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <h3 className="text-base font-semibold tracking-tight text-slate-900 dark:text-zinc-100 leading-snug">
-                Google Drive
-              </h3>
-              <p className="text-xs text-slate-600 dark:text-zinc-400 mt-0.5 leading-relaxed">
-                Private AppData backup hidden from your Drive files.
-              </p>
-            </div>
-          </div>
-
-          {renderStatusChip()}
-        </div>
-
-        {/* DISCONNECTED STATE */}
-        {!account?.connected ? (
-          <div className="space-y-3.5">
-            <button
-              type="button"
-              id="btn-m3-connect-google-drive"
-              onClick={handleConnect}
-              disabled={isConnecting}
-              className="w-full min-h-[48px] px-5 py-3 rounded-full bg-indigo-600 hover:bg-indigo-700 active:scale-[0.99] disabled:opacity-60 text-white text-sm font-semibold shadow-xs transition flex items-center justify-center gap-3 cursor-pointer whitespace-nowrap"
-            >
-              <span className="w-7 h-7 rounded-full bg-white flex items-center justify-center shrink-0 shadow-xs">
-                <GoogleLogoSvg className="w-4 h-4" />
-              </span>
-              <span>{isConnecting ? 'Connecting Google Drive…' : 'Connect Google Drive'}</span>
-            </button>
-
-            <div className="flex items-start gap-2 text-[11.5px] text-slate-500 dark:text-zinc-400 leading-relaxed">
-              <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
-              <span>
-                Uses least-privilege <code className="font-mono text-[11px]">drive.appdata</code> scope only.
-                JivanOS cannot see or modify any of your other Google Drive files.
-              </span>
-            </div>
-
-            {errorMessage && (
-              <div className="rounded-2xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900/70 px-3.5 py-2.5 text-xs text-rose-700 dark:text-rose-300">
-                {errorMessage}
-              </div>
-            )}
-          </div>
-        ) : (
-          /* CONNECTED STATE */
-          <div className="space-y-5">
-            {/* Connected Account Card */}
-            <div className="rounded-2xl border border-slate-200/85 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-950/50 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-3.5 min-w-0">
-                <div
-                  aria-hidden="true"
-                  className="w-12 h-12 rounded-full bg-indigo-600 dark:bg-indigo-500 text-white font-semibold text-base flex items-center justify-center shrink-0 tracking-wide shadow-xs"
-                >
-                  {account.initials}
-                </div>
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-slate-900 dark:text-zinc-100 truncate">
-                    {account.name}
-                  </div>
-                  <div className="text-xs text-slate-600 dark:text-zinc-400 truncate">
-                    {account.email}
-                  </div>
-                  <div className="text-xs text-slate-500 dark:text-zinc-400 mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 tabular-nums">
-                    <span>
-                      {meta.lastSyncedAt
-                        ? `Last synced ${formatRelativeSyncTime(meta.lastSyncedAt)}`
-                        : 'Not synced yet'}
-                    </span>
-                    {meta.lastFileSizeBytes != null && meta.lastFileSizeBytes > 0 && (
-                      <>
-                        <span aria-hidden="true">·</span>
-                        <span>{formatDriveFileSize(meta.lastFileSizeBytes)}</span>
-                      </>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Sync Now icon button + Check Cloud + Disconnect text button */}
-              <div className="flex items-center justify-end gap-2 shrink-0">
-                <button
-                  type="button"
-                  id="btn-m3-drive-sync-now"
-                  onClick={() => inspectRemoteBeforeSync('sync-now')}
-                  disabled={syncStatus === 'syncing'}
-                  title="Sync Now"
-                  aria-label="Sync Now"
-                  className="min-h-[44px] min-w-[44px] px-3.5 rounded-full bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] disabled:opacity-60 text-white text-xs font-semibold shadow-xs transition inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
-                >
-                  <RefreshCw className={`w-4 h-4 shrink-0 ${syncStatus === 'syncing' ? 'animate-spin' : ''}`} />
-                  <span>Sync Now</span>
-                </button>
-
-                <button
-                  type="button"
-                  id="btn-m3-drive-restore-check"
-                  onClick={() => inspectRemoteBeforeSync('restore-check')}
-                  disabled={syncStatus === 'syncing'}
-                  title="Restore or merge from Google Drive"
-                  aria-label="Restore from Google Drive"
-                  className="min-h-[44px] min-w-[44px] px-3 rounded-full border border-slate-300 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-60 text-slate-700 dark:text-zinc-200 transition inline-flex items-center justify-center cursor-pointer"
-                >
-                  <CloudDownload className="w-4 h-4 shrink-0" />
-                </button>
-
-                <button
-                  type="button"
-                  id="btn-m3-drive-disconnect"
-                  onClick={() => setShowDisconnectConfirm(true)}
-                  disabled={syncStatus === 'syncing'}
-                  className="min-h-[44px] px-3 rounded-full text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition inline-flex items-center gap-1 cursor-pointer whitespace-nowrap"
-                >
-                  <LogOut className="w-3.5 h-3.5 shrink-0" />
-                  <span>Disconnect</span>
-                </button>
-              </div>
-            </div>
-
-            {errorMessage && (
-              <div className="rounded-2xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900/70 px-3.5 py-2.5 text-xs text-rose-700 dark:text-rose-300">
-                {errorMessage}
-              </div>
-            )}
-
-            {/* Hairline Divider */}
-            <div className="h-px bg-slate-200/80 dark:bg-zinc-800" />
-
-            {/* Auto-sync Toggle + Segmented Interval Selector */}
-            <div className="space-y-3.5">
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-slate-900 dark:text-zinc-100">
-                    Auto-sync
-                  </div>
-                  <div className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5">
-                    {isNativeAndroid
-                      ? 'Scheduled via Android WorkManager when connected to a network.'
-                      : 'Automatically backs up to your private Drive AppData folder.'}
-                  </div>
-                </div>
-
-                {/* Material Design 3 Switch */}
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={meta.autoSyncEnabled}
-                  aria-label="Toggle Google Drive Auto-sync"
-                  onClick={handleToggleAutoSync}
-                  className={`relative inline-flex h-8 w-[52px] shrink-0 items-center rounded-full border-2 transition-colors cursor-pointer ${
-                    meta.autoSyncEnabled
-                      ? 'bg-indigo-600 border-indigo-600'
-                      : 'bg-slate-200 dark:bg-zinc-800 border-slate-400 dark:border-zinc-600'
-                  }`}
-                >
-                  <span
-                    className={`inline-block rounded-full transition-transform ${
-                      meta.autoSyncEnabled
-                        ? 'h-6 w-6 translate-x-5 bg-white shadow-xs'
-                        : 'h-4 w-4 translate-x-1 bg-slate-600 dark:bg-zinc-400'
-                    }`}
-                  />
-                </button>
-              </div>
-
-              {/* Material Design 3 Segmented Button Group: 15 min | 30 min | 1 hr | Manual */}
-              <div
-                role="radiogroup"
-                aria-label="Auto-sync interval"
-                className="grid grid-cols-4 rounded-full border border-slate-300 dark:border-zinc-700 overflow-hidden divide-x divide-slate-300 dark:divide-zinc-700"
-              >
-                {INTERVAL_OPTIONS.map(opt => {
-                  const selected = activeInterval === opt.value;
-                  return (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      role="radio"
-                      aria-checked={selected}
-                      onClick={() => handleSelectInterval(opt.value)}
-                      className={`min-h-[44px] px-2 text-xs font-semibold transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap tabular-nums ${
-                        selected
-                          ? 'bg-indigo-100 dark:bg-indigo-950/90 text-indigo-800 dark:text-indigo-200'
-                          : 'bg-transparent text-slate-700 dark:text-zinc-300 hover:bg-slate-100/80 dark:hover:bg-zinc-800/70'
-                      }`}
-                    >
-                      {selected && <Check className="w-3.5 h-3.5 shrink-0" />}
-                      <span>{opt.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        )}
-      </section>
+      <SyncProviderRow
+        name="Google Drive"
+        description="Private AppData backup"
+        logo={<GoogleLogoSvg className="w-4.5 h-4.5" />}
+        logoBgClass="bg-blue-50 dark:bg-blue-950/60"
+        brandColor="#4285F4"
+        isConnected={isConnected}
+        status={rowStatus}
+        accountLabel={isConnected ? account?.email || account?.name : undefined}
+        metaLine={isConnected ? metaLine : undefined}
+        connectLabel={isConnecting ? 'Connecting…' : 'Connect →'}
+        connectDisabled={isConnecting}
+        connectButtonId="btn-m3-connect-google-drive"
+        onConnect={handleConnect}
+        onSyncNow={isConnected ? () => inspectRemoteBeforeSync('sync-now') : undefined}
+        syncButtonId="btn-m3-drive-sync-now"
+        isSyncing={syncStatus === 'syncing'}
+        onRetry={() => (isConnected ? inspectRemoteBeforeSync('sync-now') : handleConnect())}
+        autoSyncInterval={activeInterval}
+        onSelectInterval={isConnected ? handleSelectInterval : undefined}
+        onRestore={isConnected ? () => inspectRemoteBeforeSync('restore-check') : undefined}
+        onDisconnect={isConnected ? () => setShowDisconnectConfirm(true) : undefined}
+        errorMessage={errorMessage}
+        isFirst={isFirst}
+        isLast={isLast}
+      />
 
       {/* CONFLICT RESOLUTION DIALOG (Remote updatedAt > Local lastSyncedAt) */}
       {conflictState && (

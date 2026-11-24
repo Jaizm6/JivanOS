@@ -26,29 +26,89 @@ export const SmoothCollapse: React.FC<SmoothCollapseProps> = ({
   eager = false,
 }) => {
   const [hasMounted, setHasMounted] = useState(isOpen || eager);
+  const [isSettledOpen, setIsSettledOpen] = useState(isOpen);
 
   useEffect(() => {
     if (isOpen && !hasMounted) {
       setHasMounted(true);
     }
+    if (isOpen) {
+      const timer = window.setTimeout(() => setIsSettledOpen(true), 165);
+      return () => window.clearTimeout(timer);
+    }
+    setIsSettledOpen(false);
+    return undefined;
   }, [isOpen, hasMounted]);
 
   return (
     <div
       onClick={onClick}
       aria-hidden={!isOpen}
-      className={`grid transition-[grid-template-rows,opacity] duration-220 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+      className={`grid grid-cols-[minmax(0,1fr)] w-full min-w-0 transition-[grid-template-rows,opacity] duration-150 ease-[cubic-bezier(0.2,0,0,1)] ${
         isOpen
           ? 'grid-rows-[1fr] opacity-100'
           : 'grid-rows-[0fr] opacity-0 pointer-events-none'
       } ${className}`}
     >
-      <div className={`overflow-hidden min-h-0 ${innerClassName}`}>
+      <div className={`${isSettledOpen ? 'overflow-visible' : 'overflow-hidden'} min-h-0 min-w-0 w-full ${innerClassName}`}>
         {hasMounted ? children : null}
       </div>
     </div>
   );
 };
+
+/**
+ * Lightweight reactive media-query hook for Desktop (>=768px) 2-column Material 3 Expressive layouts
+ * with zero duplicate DOM nodes.
+ */
+export function useIsDesktopMd(): boolean {
+  const [isDesktop, setIsDesktop] = useState<boolean>(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(min-width: 768px)').matches : false
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mql = window.matchMedia('(min-width: 768px)');
+    const onChange = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
+    setIsDesktop(mql.matches);
+    mql.addEventListener('change', onChange);
+    return () => mql.removeEventListener('change', onChange);
+  }, []);
+
+  return isDesktop;
+}
+
+/**
+ * Packs items or tag groups into 2 balanced independent vertical columns for desktop
+ * Material 3 Expressive stacks (avoids row-stretching gaps when one card/section is taller).
+ */
+export function distributeIntoTwoColumns<T>(
+  items: T[],
+  getWeight?: (item: T) => number
+): [T[], T[]] {
+  const left: T[] = [];
+  const right: T[] = [];
+  if (!getWeight) {
+    items.forEach((item, idx) => {
+      if (idx % 2 === 0) left.push(item);
+      else right.push(item);
+    });
+    return [left, right];
+  }
+  let leftWeight = 0;
+  let rightWeight = 0;
+  items.forEach(item => {
+    const w = Math.max(1, getWeight(item));
+    if (leftWeight <= rightWeight) {
+      left.push(item);
+      leftWeight += w;
+    } else {
+      right.push(item);
+      rightWeight += w;
+    }
+  });
+  return [left, right];
+}
 
 /**
  * ============================================================================

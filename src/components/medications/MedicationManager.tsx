@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Pill,
@@ -20,9 +21,20 @@ import { Medication, MedicationFrequency } from '../../types';
 import { soundEngine } from '../../utils/audio';
 import { MedicationDetailModal } from './MedicationDetailModal';
 import { MedicationFormModal, MedIconRenderer } from './MedicationFormModal';
-import { PetalShapeBadge, getPetalGroupRadiusClass } from '../common/PetalExpressive';
+import {
+  PetalShapeBadge,
+  getPetalGroupRadiusClass,
+  useIsDesktopMd,
+  distributeIntoTwoColumns,
+} from '../common/PetalExpressive';
 import { ArchiveConfirmModal } from '../common/ArchiveConfirmModal';
-import { FORM_EASE, FORM_SPRING, FORM_EXIT_TRANSITION } from '../common/FormPrimitives';
+import {
+  FORM_EASE,
+  FORM_SPRING,
+  FORM_EXIT_TRANSITION,
+  CRISP_TRANSFORM_TEMPLATE,
+  useModalScrollLock,
+} from '../common/FormPrimitives';
 
 export interface MedConsumptionStats {
   dailyRate: number;
@@ -85,8 +97,12 @@ export const getMedConsumptionStats = (med: Medication, doseLogs: any[]): MedCon
     plannedDosesPerDay = (med.schedules?.length || 1) * 0.5;
   }
 
-  const dosageMatch = (med.dosage || '').match(/(\d+(\.\d+)?)/);
-  const unitsPerDose = dosageMatch ? parseFloat(dosageMatch[1]) : 1;
+  // Extract explicit unit count (e.g. "200 mg (2 Tablets)" -> 2, "2,000 IU (1 Softgel)" -> 1)
+  // Avoid treating potency values like "200 mg" or "2,000 IU" as pill counts.
+  const unitCountMatch = (med.dosage || '').match(
+    /(\d+(?:\.\d+)?)\s*(?:tablets?|tabs?|capsules?|caps?|softgels?|pills?|gummies?|gummy|lozenges?|chews?|drops?|sprays?|puffs?|scoops?|sachets?|units?)\b/i
+  );
+  const unitsPerDose = unitCountMatch ? Math.max(0.25, parseFloat(unitCountMatch[1])) : 1;
 
   const now = new Date();
   const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
@@ -123,8 +139,17 @@ export const getMedConsumptionStats = (med: Medication, doseLogs: any[]): MedCon
     day: 'numeric',
   });
 
+  // Trigger refill alert strictly when active, not a fixed-end course med,
+  // and remaining pills hit 0 (empty) or the user's configured refillThreshold.
+  const threshold =
+    typeof med.refillThreshold === 'number' && med.refillThreshold >= 0
+      ? med.refillThreshold
+      : 5;
+  const isCourseMed = Boolean(med.endDate);
   const needsRefillSoon =
-    (med.active ?? true) && (daysRemaining <= 5 || med.remainingPills <= med.refillThreshold);
+    (med.active ?? true) &&
+    !isCourseMed &&
+    (med.remainingPills <= 0 || med.remainingPills <= threshold);
 
   return {
     dailyRate,
@@ -142,12 +167,14 @@ export const MedicationManager: React.FC = () => {
     deleteMedication,
     doseLogs,
     logDose,
+    unlogDose,
     refillPills,
     pushNotification,
     theme,
   } = useApp();
 
   const isDarkMode = theme === 'dark';
+  const isDesktopMd = useIsDesktopMd();
 
   const [activeSubTab, setActiveSubTab] = useState<'schedule' | 'inventory' | 'history' | 'archived'>('schedule');
   const [showModal, setShowModal] = useState(false);
@@ -156,6 +183,8 @@ export const MedicationManager: React.FC = () => {
   const [refillMedId, setRefillMedId] = useState<string | null>(null);
   const [refillAmount, setRefillAmount] = useState('30');
   const [confirmDeleteInvId, setConfirmDeleteInvId] = useState<string | null>(null);
+
+  useModalScrollLock(Boolean(refillMedId));
 
   const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
 
@@ -319,11 +348,11 @@ export const MedicationManager: React.FC = () => {
           id="btn-open-add-med"
           type="button"
           onClick={handleOpenAddModal}
-          className="h-8 w-8 sm:w-auto sm:px-3 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-xs font-bold rounded-lg shadow-2xs transition shrink-0 cursor-pointer flex items-center justify-center gap-1 whitespace-nowrap ml-auto"
+          className="h-8 w-8 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white rounded-lg shadow-2xs transition shrink-0 cursor-pointer flex items-center justify-center ml-auto"
           title="Add Medication"
+          aria-label="Add Medication"
         >
           <Plus className="w-4 h-4 stroke-[2.5]" />
-          <span className="hidden sm:inline">Add Med</span>
         </button>
       </div>
 
@@ -354,7 +383,7 @@ export const MedicationManager: React.FC = () => {
 
         <div
           data-m3-tonal-card="true"
-          data-tonal-tone={refillSoonMeds.length > 0 ? 'soon' : 'paid'}
+          data-tonal-tone="neutral"
           className="px-2.5 py-1.5 rounded-[16px] flex items-center gap-2"
         >
           <PetalShapeBadge
@@ -404,29 +433,32 @@ export const MedicationManager: React.FC = () => {
         </div>
       </div>
 
-      {/* Refill Soon Smart Banner */}
+      {/* Refill Soon Compact Notice Strip (Neutral card surface, subtle amber accent only) */}
       {refillSoonMeds.length > 0 && (
         <div
           data-m3-tonal-card="true"
-          data-tonal-tone="soon"
-          className="px-3 py-1.5 rounded-[16px] text-xs text-amber-900 dark:text-amber-200 flex items-center justify-between gap-2"
+          data-tonal-tone="neutral"
+          className="px-3 py-1.5 rounded-[16px] text-xs text-slate-700 dark:text-zinc-200 flex items-center justify-between gap-2 border border-amber-400/45 dark:border-amber-500/35"
         >
           <div className="flex items-center gap-2 min-w-0">
-            <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+            <span className="w-5 h-5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+              <AlertTriangle className="w-3 h-3" />
+            </span>
             <span className="font-semibold truncate">
-              Refill Soon ({refillSoonMeds.length}):{' '}
+              <span className="text-amber-700 dark:text-amber-400">Refill ({refillSoonMeds.length}):</span>{' '}
               {refillSoonMeds
-                .map(m => {
-                  const st = getMedConsumptionStats(m, doseLogs);
-                  return `${m.name} (~${st.daysRemaining}d)`;
-                })
+                .map(m =>
+                  m.remainingPills <= 0
+                    ? `${m.name} (Empty)`
+                    : `${m.name} (${m.remainingPills} left)`
+                )
                 .join(' · ')}
             </span>
           </div>
           <button
             type="button"
             onClick={() => refillSoonMeds.forEach(m => handleSendRefillReminder(m))}
-            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-600 hover:bg-amber-500 text-white font-bold text-[11px] transition-colors cursor-pointer shrink-0 whitespace-nowrap"
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-500/15 hover:bg-amber-500/25 text-amber-700 dark:text-amber-300 border border-amber-500/30 font-bold text-[11px] transition-colors cursor-pointer shrink-0 whitespace-nowrap"
           >
             <Bell className="w-3 h-3" />
             <span>Remind</span>
@@ -460,24 +492,77 @@ export const MedicationManager: React.FC = () => {
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-1.5 md:gap-2 items-start">
-            {activeMedications.map((med, medIdx) => {
+          (() => {
+            const renderMedCard = (med: Medication, medIdx: number, colTotal: number) => {
               const stats = getMedConsumptionStats(med, doseLogs);
+              const isEmptyStock = !med.endDate && med.remainingPills <= 0;
               const isLowStock = stats.needsRefillSoon;
-              const stockPct = Math.min(100, Math.round((med.remainingPills / med.totalPills) * 100));
+              const stockPct = Math.min(100, Math.round((med.remainingPills / Math.max(1, med.totalPills)) * 100));
               const accent = med.color || '#3b82f6';
-              const medRadius = getPetalGroupRadiusClass(medIdx, activeMedications.length, false);
+              const medRadius = getPetalGroupRadiusClass(medIdx, colTotal, false);
+
+              const medSchedules = med.schedules || [];
+              const takenCountToday = medSchedules.filter(sched =>
+                doseLogs.some(
+                  d =>
+                    d.medicationId === med.id &&
+                    d.scheduledTime === sched.time &&
+                    d.loggedAt.startsWith(todayStr) &&
+                    d.status === 'taken'
+                )
+              ).length;
+              const prnTakenToday =
+                medSchedules.length === 0
+                  ? doseLogs.filter(
+                      d =>
+                        d.medicationId === med.id &&
+                        d.loggedAt.startsWith(todayStr) &&
+                        d.status === 'taken'
+                    ).length
+                  : 0;
+              const nextUntakenSched = medSchedules.find(
+                sched =>
+                  !doseLogs.some(
+                    d =>
+                      d.medicationId === med.id &&
+                      d.scheduledTime === sched.time &&
+                      d.loggedAt.startsWith(todayStr) &&
+                      d.status === 'taken'
+                  )
+              );
+              const allTakenToday =
+                medSchedules.length > 0
+                  ? takenCountToday >= medSchedules.length
+                  : prnTakenToday > 0;
+              const hasPartialTaken =
+                medSchedules.length > 1 && takenCountToday > 0 && !allTakenToday;
+
+              const handleQuickSquircleTake = (e: React.MouseEvent) => {
+                e.stopPropagation();
+                if (allTakenToday) {
+                  unlogDose(med.id, medSchedules.length === 0 ? 'PRN' : 'ALL_TODAY', todayStr);
+                  return;
+                }
+                if (medSchedules.length === 0) {
+                  logDose(med.id, 'PRN', 'taken');
+                  return;
+                }
+                if (nextUntakenSched) {
+                  logDose(med.id, nextUntakenSched.time, 'taken');
+                }
+              };
 
               return (
                 <div
                   key={med.id}
                   data-m3-tonal-card="true"
-                  data-tonal-tone={isLowStock ? 'soon' : 'neutral'}
-                  className={`p-2.5 sm:p-3 ${medRadius} md:rounded-[20px] flex flex-col justify-between gap-2`}
+                  data-tonal-tone="neutral"
+                  onClick={() => setSelectedMedDetail(med)}
+                  className={`p-2.5 sm:p-3 ${medRadius} flex flex-col justify-between gap-2 cursor-pointer`}
                 >
                   {/* Header */}
                   <div className="space-y-1.5">
-                    <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-start justify-between gap-2.5">
                       <div className="flex items-start gap-2 min-w-0 flex-1">
                         <PetalShapeBadge
                           shape={isLowStock ? 'scallop' : 'cookie9'}
@@ -494,10 +579,7 @@ export const MedicationManager: React.FC = () => {
                         </PetalShapeBadge>
 
                         <div className="min-w-0 flex-1">
-                          <h3
-                            onClick={() => setSelectedMedDetail(med)}
-                            className="text-[14.5px] font-bold text-slate-900 dark:text-white leading-snug tracking-tight cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors truncate"
-                          >
+                          <h3 className="text-[14.5px] font-bold text-slate-900 dark:text-white leading-snug tracking-tight group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors truncate">
                             {med.name}
                           </h3>
 
@@ -518,52 +600,69 @@ export const MedicationManager: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-0.5 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => handleToggleArchiveMed(med)}
-                          className="w-7 h-7 rounded-full flex items-center justify-center text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
-                          title="Archive Medication"
-                        >
-                          <Archive className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleOpenEditModal(med)}
-                          className="w-7 h-7 rounded-full flex items-center justify-center text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
-                          title="Edit Medication"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        {!med.endDate && (
-                          <button
-                            type="button"
-                            onClick={() => setRefillMedId(med.id)}
-                            className="h-7 px-2 rounded-full bg-[#f5f7fb] dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 text-[10.5px] font-bold transition-colors cursor-pointer whitespace-nowrap"
-                            title="Refill Supply"
-                          >
-                            + Refill
-                          </button>
+                      {/* Large Thumb-Friendly Squircle Take / Tick Box */}
+                      <motion.button
+                        type="button"
+                        whileTap={{ scale: 0.9 }}
+                        onClick={handleQuickSquircleTake}
+                        className={`relative w-[50px] h-[50px] sm:w-[54px] sm:h-[54px] rounded-[16px] sm:rounded-[17px] flex flex-col items-center justify-center gap-0.5 shrink-0 transition-all duration-200 touch-manipulation cursor-pointer ${
+                          allTakenToday
+                            ? 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-[0_4px_12px_-3px_rgba(16,185,129,0.5)]'
+                            : hasPartialTaken
+                            ? 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-[0_4px_12px_-3px_rgba(79,70,229,0.45)]'
+                            : 'bg-indigo-50/95 dark:bg-indigo-950/45 hover:bg-indigo-100/90 dark:hover:bg-indigo-900/55 text-indigo-600 dark:text-indigo-300 border-[1.75px] border-indigo-300/90 dark:border-indigo-700/80'
+                        }`}
+                        title={
+                          allTakenToday
+                            ? 'Taken today — tap to untick'
+                            : nextUntakenSched
+                            ? `Take ${nextUntakenSched.time} (${nextUntakenSched.label})`
+                            : 'Log dose taken'
+                        }
+                      >
+                        {allTakenToday ? (
+                          <Check className="w-6 h-6 stroke-[3]" />
+                        ) : hasPartialTaken ? (
+                          <>
+                            <Check className="w-4 h-4 stroke-[2.75]" />
+                            <span className="text-[9.5px] font-extrabold leading-none tabular-nums">
+                              {takenCountToday}/{medSchedules.length}
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <Check className="w-[18px] h-[18px] stroke-[2.5]" />
+                            <span className="text-[9.5px] font-extrabold leading-none">
+                              Take
+                            </span>
+                          </>
                         )}
-                      </div>
+                      </motion.button>
                     </div>
 
                     {/* Today's Scheduled Doses */}
                     <div className="space-y-1">
-                      {med.schedules.length === 0 ? (
+                      {medSchedules.length === 0 ? (
                         <div className="px-2.5 py-1.5 rounded-[12px] bg-[#f5f7fb] dark:bg-[#171a24] border border-slate-200/80 dark:border-zinc-800 text-[11.5px] text-slate-500 dark:text-zinc-400 flex items-center justify-between">
                           <span>Take as needed</span>
-                          <button
-                            type="button"
-                            onClick={() => logDose(med.id, 'PRN', 'taken')}
-                            className="px-2.5 py-1 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white text-[10.5px] font-bold cursor-pointer"
-                          >
-                            Log Dose
-                          </button>
+                          {prnTakenToday > 0 && (
+                            <button
+                              type="button"
+                              onClick={e => {
+                                e.stopPropagation();
+                                unlogDose(med.id, 'PRN', todayStr);
+                              }}
+                              title="Tap to untick last dose"
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/12 hover:bg-emerald-500/22 active:scale-95 text-[10.5px] font-bold text-emerald-600 dark:text-emerald-400 tabular-nums transition-colors cursor-pointer"
+                            >
+                              <Check className="w-3 h-3 stroke-[2.5]" />
+                              <span>{prnTakenToday} logged today</span>
+                            </button>
+                          )}
                         </div>
                       ) : (
                         <div className="space-y-[3px]">
-                          {med.schedules.map((sched, idx) => {
+                          {medSchedules.map((sched, idx) => {
                             const doseLog = doseLogs.find(
                               d =>
                                 d.medicationId === med.id &&
@@ -573,7 +672,7 @@ export const MedicationManager: React.FC = () => {
                             const isTaken = doseLog?.status === 'taken';
                             const radiusCls = getPetalGroupRadiusClass(
                               idx,
-                              med.schedules.length,
+                              medSchedules.length,
                               true
                             );
 
@@ -601,18 +700,33 @@ export const MedicationManager: React.FC = () => {
                                 </div>
 
                                 {isTaken ? (
-                                  <span className="inline-flex items-center gap-1 text-[10.5px] font-bold text-emerald-600 dark:text-emerald-400 shrink-0">
-                                    <Check className="w-3 h-3 stroke-[2.5]" />
-                                    <span>Taken</span>
-                                  </span>
-                                ) : (
                                   <button
                                     type="button"
-                                    onClick={() => logDose(med.id, sched.time, 'taken')}
+                                    onClick={e => {
+                                      e.stopPropagation();
+                                      unlogDose(med.id, sched.time, todayStr);
+                                    }}
+                                    title="Tap to untick dose"
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/12 hover:bg-emerald-500/22 active:scale-95 text-[10.5px] font-bold text-emerald-600 dark:text-emerald-400 transition-colors cursor-pointer shrink-0"
+                                  >
+                                    <Check className="w-3 h-3 stroke-[2.5]" />
+                                    <span>Taken</span>
+                                  </button>
+                                ) : medSchedules.length > 1 ? (
+                                  <button
+                                    type="button"
+                                    onClick={e => {
+                                      e.stopPropagation();
+                                      logDose(med.id, sched.time, 'taken');
+                                    }}
                                     className="px-2.5 py-0.5 rounded-full bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-bold text-[10.5px] transition-colors cursor-pointer shrink-0"
                                   >
                                     Take
                                   </button>
+                                ) : (
+                                  <span className="text-[10.5px] font-semibold text-slate-400 dark:text-zinc-500 shrink-0">
+                                    Pending
+                                  </span>
                                 )}
                               </div>
                             );
@@ -661,13 +775,28 @@ export const MedicationManager: React.FC = () => {
                       data-tonal-tone="subcard"
                       className="px-2.5 py-1.5 rounded-[12px] space-y-1"
                     >
-                      <div className="flex items-center justify-between text-[11px]">
-                        <span className="font-bold text-slate-700 dark:text-zinc-200">
-                          Supply
-                        </span>
+                      <div className="flex items-center justify-between gap-2 text-[11px]">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="font-bold text-slate-700 dark:text-zinc-200">
+                            Supply
+                          </span>
+                          {isEmptyStock ? (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-[1px] rounded-full text-[9.5px] font-bold bg-rose-500/12 text-rose-600 dark:text-rose-400 border border-rose-500/25 shrink-0">
+                              <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                              Empty
+                            </span>
+                          ) : isLowStock ? (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-[1px] rounded-full text-[9.5px] font-bold bg-amber-500/12 text-amber-700 dark:text-amber-300 border border-amber-500/25 shrink-0">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                              Low ≤{med.refillThreshold}
+                            </span>
+                          ) : null}
+                        </div>
                         <span
-                          className={`font-bold tabular-nums ${
-                            isLowStock
+                          className={`font-bold tabular-nums shrink-0 ${
+                            isEmptyStock
+                              ? 'text-rose-600 dark:text-rose-400'
+                              : isLowStock
                               ? 'text-amber-600 dark:text-amber-400'
                               : 'text-slate-700 dark:text-zinc-200'
                           }`}
@@ -681,20 +810,35 @@ export const MedicationManager: React.FC = () => {
                           className="h-full rounded-full transition-[width] duration-300"
                           style={{
                             width: `${stockPct}%`,
-                            backgroundColor: isLowStock ? '#f59e0b' : accent,
+                            backgroundColor: isEmptyStock ? '#ef4444' : isLowStock ? '#f59e0b' : accent,
                           }}
                         />
                       </div>
 
                       {isLowStock && (
-                        <div className="pt-1 border-t border-amber-500/20 flex items-center justify-between gap-2">
-                          <span className="text-[10.5px] font-semibold text-amber-700 dark:text-amber-300 truncate">
-                            Reorder by {stats.recommendedRefillDateStr}
+                        <div className="pt-1 border-t border-slate-200/70 dark:border-zinc-800/80 flex items-center justify-between gap-2">
+                          <span
+                            className={`text-[10.5px] font-semibold truncate ${
+                              isEmptyStock
+                                ? 'text-rose-600 dark:text-rose-400'
+                                : 'text-amber-700 dark:text-amber-300'
+                            }`}
+                          >
+                            {isEmptyStock
+                              ? 'Out of stock — Refill now'
+                              : `Reorder by ${stats.recommendedRefillDateStr}`}
                           </span>
                           <button
                             type="button"
-                            onClick={() => handleSendRefillReminder(med)}
-                            className="px-2 py-0.5 rounded-full bg-amber-600 hover:bg-amber-500 text-white font-bold text-[10px] transition-colors cursor-pointer shrink-0 flex items-center gap-1 whitespace-nowrap"
+                            onClick={e => {
+                              e.stopPropagation();
+                              handleSendRefillReminder(med);
+                            }}
+                            className={`px-2 py-0.5 rounded-full font-bold text-[10px] transition-colors cursor-pointer shrink-0 flex items-center gap-1 whitespace-nowrap border ${
+                              isEmptyStock
+                                ? 'bg-rose-500/12 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border-rose-500/25'
+                                : 'bg-amber-500/12 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-500/25'
+                            }`}
                             title="Send notification reminder to refill"
                           >
                             <Bell className="w-2.5 h-2.5" />
@@ -706,8 +850,28 @@ export const MedicationManager: React.FC = () => {
                   )}
                 </div>
               );
-            })}
-          </div>
+            };
+
+            if (isDesktopMd && activeMedications.length > 1) {
+              const [leftMeds, rightMeds] = distributeIntoTwoColumns(activeMedications);
+              return (
+                <div className="grid grid-cols-2 gap-2.5 items-start w-full min-w-0">
+                  <div className="flex flex-col gap-[3px] min-w-0">
+                    {leftMeds.map((m, idx) => renderMedCard(m, idx, leftMeds.length))}
+                  </div>
+                  <div className="flex flex-col gap-[3px] min-w-0">
+                    {rightMeds.map((m, idx) => renderMedCard(m, idx, rightMeds.length))}
+                  </div>
+                </div>
+              );
+            }
+
+            return (
+              <div className="flex flex-col gap-[3px] w-full min-w-0">
+                {activeMedications.map((m, idx) => renderMedCard(m, idx, activeMedications.length))}
+              </div>
+            );
+          })()
         )
       )}
 
@@ -939,16 +1103,16 @@ export const MedicationManager: React.FC = () => {
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-[4px] md:gap-1.5 items-start">
-            {archivedMedications.map((med, archIdx) => {
+          (() => {
+            const renderArchivedMedCard = (med: Medication, archIdx: number, colTotal: number) => {
               const accent = med.color || '#64748b';
-              const archRadius = getPetalGroupRadiusClass(archIdx, archivedMedications.length, false);
+              const archRadius = getPetalGroupRadiusClass(archIdx, colTotal, false);
               return (
                 <div
                   key={med.id}
                   data-m3-tonal-card="true"
                   data-tonal-tone="archived"
-                  className={`p-3 sm:p-3.5 ${archRadius} md:rounded-[22px] flex items-center justify-between gap-2.5`}
+                  className={`p-3 sm:p-3.5 ${archRadius} flex items-center justify-between gap-2.5`}
                 >
                   <div className="flex items-start gap-2.5 min-w-0 flex-1">
                     <PetalShapeBadge
@@ -1006,8 +1170,28 @@ export const MedicationManager: React.FC = () => {
                   </div>
                 </div>
               );
-            })}
-          </div>
+            };
+
+            if (isDesktopMd && archivedMedications.length > 1) {
+              const [leftArch, rightArch] = distributeIntoTwoColumns(archivedMedications);
+              return (
+                <div className="grid grid-cols-2 gap-2.5 items-start w-full min-w-0">
+                  <div className="flex flex-col gap-[3px] min-w-0">
+                    {leftArch.map((m, idx) => renderArchivedMedCard(m, idx, leftArch.length))}
+                  </div>
+                  <div className="flex flex-col gap-[3px] min-w-0">
+                    {rightArch.map((m, idx) => renderArchivedMedCard(m, idx, rightArch.length))}
+                  </div>
+                </div>
+              );
+            }
+
+            return (
+              <div className="flex flex-col gap-[3px] w-full min-w-0">
+                {archivedMedications.map((m, idx) => renderArchivedMedCard(m, idx, archivedMedications.length))}
+              </div>
+            );
+          })()
         )
       )}
 
@@ -1021,101 +1205,104 @@ export const MedicationManager: React.FC = () => {
         editingMed={editingMed}
       />
 
-      {/* Material 3 Expressive Refill Modal */}
-      <AnimatePresence>
-        {refillMedId && (
-          <div
-            key="med-refill-modal-root"
-            data-unified-modal="true"
-            className="fixed inset-0 z-[210] flex items-end sm:items-center justify-center p-0 sm:p-4"
-          >
-            <motion.div
-              data-unified-modal="true"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1, transition: { duration: 0.18, ease: FORM_EASE } }}
-              exit={{ opacity: 0, transition: FORM_EXIT_TRANSITION }}
-              style={{ willChange: 'opacity' }}
-              className="fixed inset-0 bg-black/55 dark:bg-black/75 touch-none"
-              onClick={() => setRefillMedId(null)}
-            />
-            <motion.div
-              data-unified-modal="true"
-              initial={{ opacity: 0, y: 20, scale: 0.97 }}
-              animate={{ opacity: 1, y: 0, scale: 1, transition: FORM_SPRING }}
-              exit={{ opacity: 0, y: 14, scale: 0.97, transition: FORM_EXIT_TRANSITION }}
-              style={{ willChange: 'transform, opacity' }}
-              onClick={e => e.stopPropagation()}
-              className="relative z-10 w-full sm:max-w-sm rounded-t-[28px] sm:rounded-[28px] bg-white dark:bg-[#0d0d11] ring-1 ring-black/[0.06] dark:ring-white/[0.08] shadow-2xl p-5 sm:p-6 space-y-4"
-            >
-              <div className="flex items-center gap-3">
-                <PetalShapeBadge
-                  shape="cookie9"
-                  sizeClass="w-11 h-11"
-                  fillColor={isDarkMode ? 'rgba(99, 102, 241, 0.2)' : 'rgba(79, 70, 229, 0.12)'}
-                  strokeColor={isDarkMode ? 'rgba(129, 140, 248, 0.35)' : 'rgba(79, 70, 229, 0.25)'}
+      {/* Material 3 Expressive Refill Modal (Portaled above Bottom Nav Bar) */}
+      {typeof document !== 'undefined' &&
+        createPortal(
+          <AnimatePresence>
+            {refillMedId && (
+              <div
+                key="med-refill-modal-root"
+                data-unified-modal="true"
+                className="fixed inset-0 z-[220] flex items-center justify-center p-4 overscroll-none"
+              >
+                <motion.div
+                  data-unified-modal="true"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1, transition: { duration: 0.14, ease: FORM_EASE } }}
+                  exit={{ opacity: 0, transition: FORM_EXIT_TRANSITION }}
+                  className="fixed inset-0 bg-black/55 dark:bg-black/75 touch-none overscroll-none"
+                  onClick={() => setRefillMedId(null)}
+                />
+                <motion.div
+                  data-unified-modal="true"
+                  initial={{ opacity: 0, y: 12, scale: 0.985 }}
+                  animate={{ opacity: 1, y: 0, scale: 1, transition: FORM_SPRING }}
+                  exit={{ opacity: 0, y: 8, scale: 0.985, transition: FORM_EXIT_TRANSITION }}
+                  transformTemplate={CRISP_TRANSFORM_TEMPLATE}
+                  onClick={e => e.stopPropagation()}
+                  className="relative z-10 w-full max-w-sm rounded-[28px] bg-white dark:bg-[#0d0d11] ring-1 ring-black/[0.06] dark:ring-white/[0.08] shadow-2xl p-5 sm:p-6 space-y-4"
                 >
-                  <Package className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-                </PetalShapeBadge>
-                <div className="min-w-0">
-                  <h3 className="text-base font-extrabold text-slate-900 dark:text-white truncate">
-                    Refill Supply
-                  </h3>
-                  <p className="text-xs text-slate-500 dark:text-zinc-400 truncate">
-                    {refillTargetMed?.name || 'Add tablets or doses to stock'}
-                  </p>
-                </div>
-              </div>
-
-              <form onSubmit={handleRefillSubmit} className="space-y-3.5">
-                <div className="p-3.5 rounded-[20px] bg-[#f4f7fc] dark:bg-[#141418] space-y-2.5">
-                  <label className="text-[11px] font-bold text-slate-500 dark:text-zinc-400 block">
-                    Quantity to add
-                  </label>
-                  <input
-                    type="number"
-                    value={refillAmount}
-                    onChange={e => setRefillAmount(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-[14px] bg-white dark:bg-[#0d0d11] text-slate-900 dark:text-white font-mono font-extrabold text-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/40 tabular-nums"
-                  />
-                  <div className="grid grid-cols-4 gap-1.5">
-                    {['15', '30', '60', '90'].map(qty => (
-                      <button
-                        key={qty}
-                        type="button"
-                        onClick={() => setRefillAmount(qty)}
-                        className={`py-1.5 text-xs font-bold transition-colors cursor-pointer tabular-nums ${
-                          refillAmount === qty
-                            ? 'rounded-full bg-indigo-600 text-white'
-                            : 'rounded-full bg-white dark:bg-[#0d0d11] text-slate-600 dark:text-zinc-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/40'
-                        }`}
-                      >
-                        +{qty}
-                      </button>
-                    ))}
+                  <div className="flex items-center gap-3">
+                    <PetalShapeBadge
+                      shape="cookie9"
+                      sizeClass="w-11 h-11"
+                      fillColor={isDarkMode ? 'rgba(99, 102, 241, 0.2)' : 'rgba(79, 70, 229, 0.12)'}
+                      strokeColor={isDarkMode ? 'rgba(129, 140, 248, 0.35)' : 'rgba(79, 70, 229, 0.25)'}
+                    >
+                      <Package className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                    </PetalShapeBadge>
+                    <div className="min-w-0">
+                      <h3 className="text-base font-extrabold text-slate-900 dark:text-white truncate">
+                        Refill Supply
+                      </h3>
+                      <p className="text-xs text-slate-500 dark:text-zinc-400 truncate">
+                        {refillTargetMed?.name || 'Add tablets or doses to stock'}
+                      </p>
+                    </div>
                   </div>
-                </div>
 
-                <div className="flex justify-end gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setRefillMedId(null)}
-                    className="px-4 py-2 rounded-full text-xs font-bold text-slate-600 dark:text-zinc-400 hover:bg-[#eff2f9] dark:hover:bg-zinc-800 transition-colors cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-5 py-2 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
-                  >
-                    <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-                    <span>Confirm Refill</span>
-                  </button>
-                </div>
-              </form>
-            </motion.div>
-          </div>
+                  <form onSubmit={handleRefillSubmit} className="space-y-3.5">
+                    <div className="p-3.5 rounded-[20px] bg-[#f4f7fc] dark:bg-[#141418] space-y-2.5">
+                      <label className="text-[11px] font-bold text-slate-500 dark:text-zinc-400 block">
+                        Quantity to add
+                      </label>
+                      <input
+                        type="number"
+                        value={refillAmount}
+                        onChange={e => setRefillAmount(e.target.value)}
+                        className="w-full px-3.5 py-2.5 rounded-[14px] bg-white dark:bg-[#0d0d11] text-slate-900 dark:text-white font-mono font-extrabold text-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/40 tabular-nums"
+                      />
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {['15', '30', '60', '90'].map(qty => (
+                          <button
+                            key={qty}
+                            type="button"
+                            onClick={() => setRefillAmount(qty)}
+                            className={`py-1.5 text-xs font-bold transition-colors cursor-pointer tabular-nums ${
+                              refillAmount === qty
+                                ? 'rounded-full bg-indigo-600 text-white'
+                                : 'rounded-full bg-white dark:bg-[#0d0d11] text-slate-600 dark:text-zinc-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/40'
+                            }`}
+                          >
+                            +{qty}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setRefillMedId(null)}
+                        className="px-4 py-2 rounded-full text-xs font-bold text-slate-600 dark:text-zinc-400 hover:bg-[#eff2f9] dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        className="px-5 py-2 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
+                      >
+                        <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                        <span>Confirm Refill</span>
+                      </button>
+                    </div>
+                  </form>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>,
+          document.body
         )}
-      </AnimatePresence>
 
       {/* Medication Detail & History Modal */}
       <AnimatePresence>

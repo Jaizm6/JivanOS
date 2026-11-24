@@ -193,6 +193,7 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
     setTaskQuadrant,
     scheduleItems,
     toggleScheduleItem,
+    updateScheduleItem,
     deleteScheduleItem,
     selectedDate,
     startPomodoro,
@@ -482,7 +483,24 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
 
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
   const [isExportImportModalOpen, setIsExportImportModalOpen] = useState(false);
-  const [filter, setFilter] = useState<'all' | 'today' | 'upcoming' | 'completed' | 'date' | 'archived'>('today');
+  const [filter, setFilter] = useState<'all' | 'today' | 'overdue' | 'upcoming' | 'completed' | 'date' | 'archived'>('today');
+  const [isOverdueSectionOpen, setIsOverdueSectionOpen] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('jivanos_tasks_overdue_open');
+      return saved !== null ? saved === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
+  const toggleOverdueSection = () => {
+    setIsOverdueSectionOpen(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem('jivanos_tasks_overdue_open', String(next));
+      } catch {}
+      return next;
+    });
+  };
   const [selectedTaskDate, setSelectedTaskDate] = useState<string>(formatLocalDate());
   const [selectedPriority, setSelectedPriority] = useState<Priority | 'all'>('all');
   const [selectedProject, setSelectedProject] = useState<string>('all');
@@ -1136,11 +1154,18 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
   };
 
   // Helper to check if task matches active time/status filter tab across List, Kanban, and Eisenhower views
-  const matchesFilterTab = (task: TaskItem, options?: { forKanbanColId?: TaskStatus }) => {
+  const matchesFilterTab = (
+    task: TaskItem,
+    options?: {
+      forKanbanColId?: TaskStatus;
+      overrideFilter?: 'all' | 'today' | 'overdue' | 'upcoming' | 'completed' | 'date' | 'archived';
+    }
+  ) => {
+    const activeTabFilter = options?.overrideFilter ?? filter;
     const taskArchived = isTaskArchived(task);
 
-    // If task was just created (and isn't archived), keep it visible so user sees it immediately
-    if (recentlyCreatedTaskId === task.id && !taskArchived) return true;
+    // If task was just created (and isn't archived), keep it visible on its own tab so user sees it immediately
+    if (!options?.overrideFilter && recentlyCreatedTaskId === task.id && !taskArchived) return true;
 
     if (!matchesPriorityAndProject(task)) return false;
 
@@ -1150,7 +1175,7 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
     }
 
     // Archived tab: only show archived tasks (never mix into active/done tabs)
-    if (filter === 'archived') {
+    if (activeTabFilter === 'archived') {
       return taskArchived;
     }
     if (taskArchived) return false;
@@ -1160,37 +1185,39 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
     const isTaskCompleted = (task.completed || task.status === 'done') && !isCompletingNow;
 
     // 1. Done tab: only show completed (non-archived) tasks
-    if (filter === 'completed') {
+    if (activeTabFilter === 'completed') {
       return (task.completed || task.status === 'done') && !isCompletingNow;
     }
 
-    // 2. Today tab
-    if (filter === 'today') {
+    // 2. Today tab: strictly tasks due today (or undated) — Overdue is rendered in its own dedicated collapsible section
+    if (activeTabFilter === 'today') {
       if (options?.forKanbanColId === 'done') {
         return (
           isTaskCompleted &&
           ((task.completedAt && (task.completedAt.startsWith(todayStr) || formatLocalDate(new Date(task.completedAt)) === todayStr)) || task.dueDate === todayStr)
         );
       }
-      const isCreatedToday = task.createdAt
-        ? (task.createdAt.startsWith(todayStr) || formatLocalDate(new Date(task.createdAt)) === todayStr)
-        : false;
-      return (
-        !isTaskCompleted &&
-        (!task.dueDate || task.dueDate <= todayStr || isCreatedToday)
-      );
+      return !isTaskCompleted && (!task.dueDate || task.dueDate === todayStr);
     }
 
-    // 3. Upcoming tab
-    if (filter === 'upcoming') {
+    // 2b. Overdue tab: strictly active tasks whose dueDate is strictly before today
+    if (activeTabFilter === 'overdue') {
       if (options?.forKanbanColId === 'done') {
         return false;
       }
-      return !isTaskCompleted && task.dueDate > todayStr;
+      return !isTaskCompleted && Boolean(task.dueDate) && task.dueDate < todayStr;
+    }
+
+    // 3. Upcoming tab
+    if (activeTabFilter === 'upcoming') {
+      if (options?.forKanbanColId === 'done') {
+        return false;
+      }
+      return !isTaskCompleted && Boolean(task.dueDate) && task.dueDate > todayStr;
     }
 
     // 4. Specific Date tab ('date')
-    if (filter === 'date') {
+    if (activeTabFilter === 'date') {
       if (options?.forKanbanColId === 'done') {
         return (
           isTaskCompleted &&
@@ -1264,7 +1291,7 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
     return true;
   }, [searchQuery, selectedCategory, selectedPriority, selectedGoal, selectedProject, selectedTag, taskTypeFilter, selectedStageFilter, selectedListId]);
 
-  const matchesScheduleTab = useCallback((s: ScheduleItem, tab: 'all' | 'today' | 'upcoming' | 'completed' | 'date' | 'archived') => {
+  const matchesScheduleTab = useCallback((s: ScheduleItem, tab: 'all' | 'today' | 'overdue' | 'upcoming' | 'completed' | 'date' | 'archived') => {
     if (tab === 'archived') return false;
     if (!matchesScheduleContext(s)) return false;
     const isCompleting = completingScheduleIds.has(s.id);
@@ -1272,7 +1299,10 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
     if (tab === 'completed') return Boolean(s.completed) && !isCompleting;
     if (isDone) return false;
     if (tab === 'today') {
-      return isScheduleItemOnDate(s, todayStr) || ((!s.repeatType || s.repeatType === 'none') && Boolean(s.date) && s.date <= todayStr);
+      return isScheduleItemOnDate(s, todayStr);
+    }
+    if (tab === 'overdue') {
+      return (!s.repeatType || s.repeatType === 'none') && Boolean(s.date) && s.date < todayStr;
     }
     if (tab === 'upcoming') {
       return Boolean(s.date) && s.date > todayStr;
@@ -1285,7 +1315,7 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
 
   // Pre-computed memoized counts for filter buttons in a single pass
   const filterCounts = useMemo(() => {
-    const counts = { today: 0, upcoming: 0, all: 0, completed: 0, date: 0, archived: 0 };
+    const counts = { today: 0, overdue: 0, upcoming: 0, all: 0, completed: 0, date: 0, archived: 0 };
     for (let i = 0; i < tasks.length; i++) {
       const t = tasks[i];
       if (!matchesSearch(t)) continue;
@@ -1314,11 +1344,11 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
         continue;
       }
       counts.all++;
-      const isCreatedToday = t.createdAt ? t.createdAt.startsWith(todayStr) : false;
-      if (!t.dueDate || t.dueDate <= todayStr || isCreatedToday) {
+      if (!t.dueDate || t.dueDate === todayStr) {
         counts.today++;
-      }
-      if (t.dueDate && t.dueDate > todayStr) {
+      } else if (t.dueDate < todayStr) {
+        counts.overdue++;
+      } else if (t.dueDate > todayStr) {
         counts.upcoming++;
       }
       if (t.dueDate === selectedTaskDate) {
@@ -1334,10 +1364,11 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
         continue;
       }
       counts.all++;
-      if (isScheduleItemOnDate(s, todayStr) || ((!s.repeatType || s.repeatType === 'none') && Boolean(s.date) && s.date <= todayStr)) {
+      if (isScheduleItemOnDate(s, todayStr)) {
         counts.today++;
-      }
-      if (s.date && s.date > todayStr) {
+      } else if ((!s.repeatType || s.repeatType === 'none') && Boolean(s.date) && s.date < todayStr) {
+        counts.overdue++;
+      } else if (s.date && s.date > todayStr) {
         counts.upcoming++;
       }
       if (isScheduleItemOnDate(s, selectedTaskDate)) {
@@ -1363,7 +1394,7 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
     selectedTaskDate,
   ]);
 
-  const countForFilter = (tab: 'today' | 'upcoming' | 'all' | 'completed' | 'date' | 'archived') => filterCounts[tab];
+  const countForFilter = (tab: 'today' | 'overdue' | 'upcoming' | 'all' | 'completed' | 'date' | 'archived') => filterCounts[tab];
 
   // Count active tasks for a specific list or smart list
   const countForList = (listId: string) => {
@@ -1620,6 +1651,88 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
     });
   }, [displayedFilteredTasks, filteredScheduleItems, recentlyCreatedTaskId]);
 
+  // Overdue items shown cleanly in their own collapsible section at the top of Today (TickTick/Todoist pattern)
+  const overdueListEntries = useMemo<UnifiedTaskListEntry[]>(() => {
+    const overdueTasks = tasks
+      .filter(t => matchesFilterTab(t, { overrideFilter: 'overdue' }))
+      .map((task, idx) => {
+        const explicit = typeof task.weight === 'number' && task.weight > 0 ? task.weight : typeof task.rank === 'number' && task.rank > 0 ? task.rank : typeof task.order === 'number' && task.order > 0 ? task.order : 0;
+        const displayRank = explicit > 0 ? explicit : (taskGlobalRankMap.get(task.id) ?? (idx + 1));
+        return { kind: 'task' as const, id: task.id, task: { ...task, _displayRank: displayRank } };
+      });
+    const overdueEvents: UnifiedTaskListEntry[] = standaloneScheduleItems
+      .filter(s => matchesScheduleTab(s, 'overdue'))
+      .map(event => ({ kind: 'event', id: event.id, event }));
+    return [...overdueTasks, ...overdueEvents].sort((a, b) => {
+      const tierDiff = getUnifiedPriorityTier(a) - getUnifiedPriorityTier(b);
+      if (tierDiff !== 0) return tierDiff;
+      if (a.kind === 'task' && b.kind === 'task') {
+        return compareTasksByDoPlanPassSkip(a.task, b.task);
+      }
+      const dateA = a.kind === 'task' ? (a.task.dueDate || '') : (a.event.date || '');
+      const dateB = b.kind === 'task' ? (b.task.dueDate || '') : (b.event.date || '');
+      return dateA.localeCompare(dateB);
+    });
+  }, [
+    tasks,
+    standaloneScheduleItems,
+    taskGlobalRankMap,
+    matchesScheduleTab,
+    todayStr,
+    selectedCategory,
+    selectedPriority,
+    selectedGoal,
+    selectedProject,
+    selectedStageFilter,
+    taskTypeFilter,
+    searchQuery,
+    selectedTag,
+    selectedListId,
+    completingTaskIds,
+  ]);
+
+  const handleBulkRescheduleOverdue = useCallback((target: 'today' | 'tomorrow' | 'next_week') => {
+    if (overdueListEntries.length === 0) return;
+    const targetDateObj = new Date();
+    if (target === 'tomorrow') {
+      targetDateObj.setDate(targetDateObj.getDate() + 1);
+    } else if (target === 'next_week') {
+      targetDateObj.setDate(targetDateObj.getDate() + 7);
+    }
+    const targetDateStr = formatLocalDate(targetDateObj);
+    const label = target === 'today' ? 'Today' : target === 'tomorrow' ? 'Tomorrow' : 'Next Week';
+
+    let movedCount = 0;
+    overdueListEntries.forEach(entry => {
+      if (entry.kind === 'task') {
+        const { _displayRank: _ignored, ...cleanTask } = entry.task;
+        updateTask({ ...cleanTask, dueDate: targetDateStr });
+        movedCount++;
+      } else {
+        updateScheduleItem({ ...entry.event, date: targetDateStr });
+        movedCount++;
+      }
+    });
+
+    try {
+      soundEngine?.playSuccessChime?.();
+      haptics.toggle();
+    } catch {}
+    pushNotification(
+      'Overdue Rescheduled',
+      `Moved ${movedCount} overdue ${movedCount === 1 ? 'item' : 'items'} to ${label}.`,
+      'task'
+    );
+  }, [overdueListEntries, updateTask, updateScheduleItem, soundEngine, pushNotification]);
+
+  const todayDisplayHeader = useMemo(() => {
+    try {
+      return new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    } catch {
+      return todayStr;
+    }
+  }, [todayStr]);
+
   // Completed tasks matching current context filters (memoized, excluding archived)
   const completedTasks = useMemo(() => {
     return tasks
@@ -1738,11 +1851,11 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
             id="btn-open-add-task"
             type="button"
             onClick={() => (viewMode === 'events' ? openAddEvent() : openAddTask())}
-            className="p-1.5 sm:px-3 sm:py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-xs font-bold transition shadow-2xs shrink-0 cursor-pointer flex items-center gap-1 whitespace-nowrap"
+            className="h-8 w-8 rounded-lg bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white transition shadow-2xs shrink-0 cursor-pointer flex items-center justify-center"
             title={viewMode === 'events' ? 'Add Scheduled Timeline Block' : 'Add New Task'}
+            aria-label={viewMode === 'events' ? 'Add Scheduled Timeline Block' : 'Add New Task'}
           >
             <Plus className="w-4 h-4 stroke-[2.5]" />
-            <span className="hidden sm:inline">{viewMode === 'events' ? 'Add Block' : 'Add Task'}</span>
           </button>
         </div>
       </div>
@@ -1802,6 +1915,24 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
                   <span className={filter === 'today' ? 'inline' : 'hidden sm:inline'}>Today</span>
                   <span className="opacity-80 font-mono text-[10.5px]">{countForFilter('today')}</span>
                 </button>
+
+                {/* Overdue (Dedicated tab whenever overdue items exist) */}
+                {(countForFilter('overdue') > 0 || filter === 'overdue') && (
+                  <button
+                    type="button"
+                    onClick={() => setFilter('overdue')}
+                    title={`Overdue (${countForFilter('overdue')})`}
+                    className={`inline-flex items-center gap-1.5 px-2.5 h-7 rounded-xl text-[11px] sm:text-xs font-semibold whitespace-nowrap shrink-0 transition-all cursor-pointer ${
+                      filter === 'overdue'
+                        ? 'bg-rose-600 text-white shadow-2xs'
+                        : 'bg-rose-50/90 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-900/60 border border-rose-200/70 dark:border-rose-800/60'
+                    }`}
+                  >
+                    <OverdueIcon className={`w-3.5 h-3.5 shrink-0 ${filter === 'overdue' ? 'text-white' : 'text-rose-500'}`} />
+                    <span className={filter === 'overdue' ? 'inline' : 'hidden sm:inline'}>Overdue</span>
+                    <span className="font-mono text-[10.5px] font-bold">{countForFilter('overdue')}</span>
+                  </button>
+                )}
 
                 {/* Upcoming */}
                 <button
@@ -2140,12 +2271,7 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
 
       {/* Date Carousel Strip when By Date filter is active in Tasks list */}
       {viewMode === 'list' && filter === 'date' && (
-        <motion.div
-          initial={{ opacity: 0, height: 0 }}
-          animate={{ opacity: 1, height: 'auto' }}
-          exit={{ opacity: 0, height: 0 }}
-          transition={{ type: "spring", stiffness: 400, damping: 30 }}
-        >
+        <div className="animate-view-enter">
           <ScrollableCompactDateStrip
             selectedDateStr={selectedTaskDate}
             onSelectDate={setSelectedTaskDate}
@@ -2155,7 +2281,7 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
             defaultTheme="cobalt"
             className="my-1"
           />
-        </motion.div>
+        </div>
       )}
 
       {/* Unified One-for-All Timeline View (Clubs Spine + Structured + 24h Grid into one responsive workspace) */}
@@ -2166,60 +2292,39 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
       )}
 
       {/* Tasks List View (Includes Tasks + Time-Bounded Blocks/Events) */}
-      {viewMode === 'list' && (
-        <div className="space-y-2.5">
-          {displayedListEntries.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 p-10 text-center text-slate-400 bg-white dark:bg-slate-900">
-              <CheckSquare className="w-8 h-8 mx-auto mb-2 text-slate-300 dark:text-slate-700" />
-              <p className="text-sm font-medium text-slate-600 dark:text-slate-300">
-                {searchQuery
-                  ? `No tasks or time blocks found matching "${searchQuery}".`
-                  : 'No tasks or time blocks found matching this filter.'}
-              </p>
-              {searchQuery && (
-                <button
-                  type="button"
-                  onClick={() => setSearchQuery('')}
-                  className="mt-3 inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 border border-indigo-200/50 dark:border-indigo-800/50 transition cursor-pointer"
-                >
-                  <X className="w-3.5 h-3.5" />
-                  <span>Clear Search</span>
-                </button>
-              )}
-            </div>
-          ) : (
-            /* UNIFIED TASK LIST VIEW: Petal Material 3 Expressive Grouped Containment + Clean 2-Column Alignment */
-            <div
-              key={`detailed-${filter}-${selectedTaskDate}`}
-              className="animate-view-enter space-y-[3px]"
-            >
-              {displayedListEntries.map((entry, idx) => {
-                const formatCompactTime12h = (tStr?: string) => {
-                  if (!tStr) return '';
-                  const [hS, mS] = tStr.split(':');
-                  const h = parseInt(hS, 10);
-                  if (isNaN(h)) return tStr;
-                  const period = h >= 12 ? 'pm' : 'am';
-                  const h12 = h % 12 === 0 ? 12 : h % 12;
-                  return `${h12}:${mS || '00'}${period}`;
-                };
+      {viewMode === 'list' && (() => {
+        const renderEntriesGroup = (groupEntries: UnifiedTaskListEntry[], groupKey: string) => (
+          <div
+            key={groupKey}
+            className="animate-view-enter space-y-[3px]"
+          >
+            {groupEntries.map((entry, idx) => {
+              const formatCompactTime12h = (tStr?: string) => {
+                if (!tStr) return '';
+                const [hS, mS] = tStr.split(':');
+                const h = parseInt(hS, 10);
+                if (isNaN(h)) return tStr;
+                const period = h >= 12 ? 'pm' : 'am';
+                const h12 = h % 12 === 0 ? 12 : h % 12;
+                return `${h12}:${mS || '00'}${period}`;
+              };
 
-                // Petal Material 3 Expressive Grouped Containment geometry
-                const petalPos = getPetalPosition(idx, displayedListEntries.length);
-                const prevExpanded = idx > 0 && !!expandedSubtasks[displayedListEntries[idx - 1].id];
-                const nextExpanded = idx < displayedListEntries.length - 1 && !!expandedSubtasks[displayedListEntries[idx + 1].id];
-                const isExpanded = !!expandedSubtasks[entry.id];
-                const groupRadiusClass = isExpanded
-                  ? 'rounded-[20px] my-1.5 shadow-sm ring-1 ring-indigo-500/20 dark:ring-indigo-400/20'
-                  : petalPos === 'SINGLE'
-                  ? 'rounded-[20px]'
-                  : petalPos === 'TOP'
-                  ? `rounded-t-[20px] ${nextExpanded ? 'rounded-b-[16px]' : 'rounded-b-[6px]'}`
-                  : petalPos === 'BOTTOM'
-                  ? `${prevExpanded ? 'rounded-t-[16px]' : 'rounded-t-[6px]'} rounded-b-[20px]`
-                  : `${prevExpanded ? 'rounded-t-[16px]' : 'rounded-t-[6px]'} ${nextExpanded ? 'rounded-b-[16px]' : 'rounded-b-[6px]'}`;
+              // Petal Material 3 Expressive Grouped Containment geometry
+              const petalPos = getPetalPosition(idx, groupEntries.length);
+              const prevExpanded = idx > 0 && !!expandedSubtasks[groupEntries[idx - 1].id];
+              const nextExpanded = idx < groupEntries.length - 1 && !!expandedSubtasks[groupEntries[idx + 1].id];
+              const isExpanded = !!expandedSubtasks[entry.id];
+              const groupRadiusClass = isExpanded
+                ? 'rounded-[20px] my-1.5 shadow-sm ring-1 ring-indigo-500/20 dark:ring-indigo-400/20'
+                : petalPos === 'SINGLE'
+                ? 'rounded-[20px]'
+                : petalPos === 'TOP'
+                ? `rounded-t-[20px] ${nextExpanded ? 'rounded-b-[16px]' : 'rounded-b-[6px]'}`
+                : petalPos === 'BOTTOM'
+                ? `${prevExpanded ? 'rounded-t-[16px]' : 'rounded-t-[6px]'} rounded-b-[20px]`
+                : `${prevExpanded ? 'rounded-t-[16px]' : 'rounded-t-[6px]'} ${nextExpanded ? 'rounded-b-[16px]' : 'rounded-b-[6px]'}`;
 
-                if (entry.kind === 'event') {
+              if (entry.kind === 'event') {
                   const sched = entry.event;
                   const schedAnimKey = `sched_${sched.id}`;
                   const isCompletingSched = completingScheduleIds.has(sched.id);
@@ -2278,9 +2383,9 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
                           : 'border-slate-200/85 dark:border-slate-800/85 bg-white dark:bg-slate-900 hover:border-slate-300 dark:hover:border-slate-700'
                       }`}
                     >
-                      <div className="flex items-start gap-2.5 w-full min-w-0">
-                        {/* Generous 40px touch/click zone centered on 20px Priority Check Circle */}
-                        <div className="relative flex items-center justify-center w-[20px] h-[20px] shrink-0">
+                      <div className="flex items-center gap-2.5 w-full min-w-0">
+                        {/* Generous 46px touch/click zone centered on 26px Priority Check Circle */}
+                        <div className="relative flex items-center justify-center w-[26px] h-[26px] shrink-0">
                           {celebratingTaskId === schedAnimKey && (
                             <CheckmarkCelebration
                               activeKey={taskCelebrationKey}
@@ -2291,8 +2396,8 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
                           )}
                           <motion.button
                             type="button"
-                            whileTap={{ scale: 0.86 }}
-                            animate={animatingTaskId === schedAnimKey ? { scale: [1, 1.24, 0.92, 1] } : {}}
+                            whileTap={{ scale: 0.88 }}
+                            animate={animatingTaskId === schedAnimKey ? { scale: [1, 1.2, 0.94, 1] } : {}}
                             transition={{ duration: 0.34, ease: 'easeOut' }}
                             onPointerDown={e => e.stopPropagation()}
                             onMouseDown={e => e.stopPropagation()}
@@ -2306,7 +2411,7 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
                             aria-label={isVisuallyDone ? 'Mark incomplete' : 'Mark complete'}
                           >
                             <span
-                              className={`w-[20px] h-[20px] rounded-full flex items-center justify-center transition-all duration-150 ${getTaskCheckboxPriorityClass({ priority: sched.priority, completed: sched.completed }, isVisuallyDone)}`}
+                              className={`w-[26px] h-[26px] rounded-full flex items-center justify-center transition-all duration-150 ${getTaskCheckboxPriorityClass({ priority: sched.priority, completed: sched.completed }, isVisuallyDone)}`}
                             >
                               {isVisuallyDone ? (
                                 <AnimatedCheckIcon
@@ -2564,11 +2669,11 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
                     )}
 
                     {/* Two-Line Clean Task Layout:
-                        Line 1: [40px tap target / 20px Check Circle] + [Task Title] + [Expand Chevron]
-                        Line 2 (Bottom Separate Line): [Date & Time] + [Alarm Bell] + [Repeat Symbol] + [Subtask Counter 1/3] */}
-                    <div className="flex items-start gap-2.5 w-full min-w-0">
-                      {/* Left Zone: Generous 40px tap target around crisp 20px Priority Check Circle */}
-                      <div className="flex items-center gap-1.5 shrink-0 h-[20px]">
+                        Left: Balanced 26px Check Circle (46px tap target) centered vertically across title + metadata
+                        Center: [Task Title] + [Date & Time / Alarm / Repeat / Subtask Counter] */}
+                    <div className="flex items-center gap-2.5 w-full min-w-0">
+                      {/* Left Zone: Generous 46px tap target around uniform 26px Priority Check Circle (Tasks page only) */}
+                      <div className="flex items-center gap-1.5 shrink-0">
                         {isBulkSelectMode && (
                           <input
                             type="checkbox"
@@ -2579,7 +2684,7 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
                           />
                         )}
 
-                        <div className="relative flex items-center justify-center w-[20px] h-[20px] shrink-0">
+                        <div className="relative flex items-center justify-center w-[26px] h-[26px] shrink-0">
                           {celebratingTaskId === task.id && (
                             <CheckmarkCelebration
                               activeKey={taskCelebrationKey}
@@ -2590,8 +2695,8 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
                           )}
                           <motion.button
                             type="button"
-                            whileTap={{ scale: 0.86 }}
-                            animate={animatingTaskId === task.id ? { scale: [1, 1.26, 0.92, 1] } : {}}
+                            whileTap={{ scale: 0.88 }}
+                            animate={animatingTaskId === task.id ? { scale: [1, 1.2, 0.94, 1] } : {}}
                             transition={{ duration: 0.36, ease: 'easeOut' }}
                             onPointerDown={e => e.stopPropagation()}
                             onMouseDown={e => e.stopPropagation()}
@@ -2605,7 +2710,7 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
                             aria-label={isVisuallyDone ? 'Mark task incomplete' : 'Mark task complete'}
                           >
                             <span
-                              className={`w-[20px] h-[20px] rounded-full flex items-center justify-center transition-all duration-150 ${getTaskCheckboxPriorityClass(task, isVisuallyDone)}`}
+                              className={`w-[26px] h-[26px] rounded-full flex items-center justify-center transition-all duration-150 ${getTaskCheckboxPriorityClass(task, isVisuallyDone)}`}
                             >
                               {isVisuallyDone ? (
                                 <AnimatedCheckIcon
@@ -3093,7 +3198,158 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
                 );
               })}
             </div>
-          )}
+          );
+
+        const isTodayEmpty = displayedListEntries.length === 0 && (filter !== 'today' || overdueListEntries.length === 0);
+
+        return (
+          <div className="space-y-3">
+            {isTodayEmpty ? (
+              <div className="rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 p-10 text-center text-slate-400 bg-white dark:bg-slate-900">
+                <CheckSquare className="w-8 h-8 mx-auto mb-2 text-slate-300 dark:text-slate-700" />
+                <p className="text-sm font-medium text-slate-600 dark:text-slate-300">
+                  {searchQuery
+                    ? `No tasks or time blocks found matching "${searchQuery}".`
+                    : filter === 'overdue'
+                    ? 'Zero overdue tasks — you are all caught up!'
+                    : 'No tasks or time blocks found matching this filter.'}
+                </p>
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="mt-3 inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 border border-indigo-200/50 dark:border-indigo-800/50 transition cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    <span>Clear Search</span>
+                  </button>
+                )}
+              </div>
+            ) : filter === 'today' ? (
+              <div className="space-y-3">
+                {/* 1. Separate, Collapsible Overdue Section with 1-Click Reschedule (TickTick / Todoist standard) */}
+                {overdueListEntries.length > 0 && (
+                  <div className="space-y-1.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2 px-2.5 py-1.5 rounded-2xl bg-rose-50/90 dark:bg-rose-950/35 border border-rose-200/80 dark:border-rose-900/60">
+                      <button
+                        type="button"
+                        onClick={toggleOverdueSection}
+                        className="inline-flex items-center gap-1.5 text-xs font-bold text-rose-700 dark:text-rose-300 cursor-pointer select-none"
+                      >
+                        <ChevronRight
+                          className={`w-3.5 h-3.5 transition-transform duration-200 ${isOverdueSectionOpen ? 'rotate-90' : ''}`}
+                        />
+                        <OverdueIcon className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                        <span>Overdue</span>
+                        <span className="px-1.5 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-mono font-bold leading-none">
+                          {overdueListEntries.length}
+                        </span>
+                      </button>
+
+                      <div className="flex items-center gap-1 flex-wrap">
+                        <span className="text-[10.5px] font-semibold text-rose-600/80 dark:text-rose-400/80 mr-0.5 hidden sm:inline">
+                          Reschedule all:
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleBulkRescheduleOverdue('today')}
+                          className="px-2 py-1 rounded-lg bg-white dark:bg-zinc-900 hover:bg-rose-600 hover:text-white text-rose-700 dark:text-rose-300 border border-rose-200/80 dark:border-rose-800/70 text-[11px] font-semibold transition cursor-pointer active:scale-95"
+                          title="Move all overdue items to Today"
+                        >
+                          → Today
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleBulkRescheduleOverdue('tomorrow')}
+                          className="px-2 py-1 rounded-lg bg-white dark:bg-zinc-900 hover:bg-slate-800 hover:text-white dark:hover:bg-white dark:hover:text-slate-900 text-slate-700 dark:text-slate-200 border border-slate-200/80 dark:border-zinc-700 text-[11px] font-semibold transition cursor-pointer active:scale-95"
+                          title="Postpone all overdue items to Tomorrow"
+                        >
+                          Tomorrow
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleBulkRescheduleOverdue('next_week')}
+                          className="px-2 py-1 rounded-lg bg-white dark:bg-zinc-900 hover:bg-slate-800 hover:text-white dark:hover:bg-white dark:hover:text-slate-900 text-slate-700 dark:text-slate-200 border border-slate-200/80 dark:border-zinc-700 text-[11px] font-semibold transition cursor-pointer active:scale-95"
+                          title="Move all overdue items to Next Week"
+                        >
+                          +7d
+                        </button>
+                      </div>
+                    </div>
+
+                    <SmoothCollapse isOpen={isOverdueSectionOpen}>
+                      {renderEntriesGroup(overdueListEntries, `overdue-in-today-${todayStr}`)}
+                    </SmoothCollapse>
+                  </div>
+                )}
+
+                {/* 2. Today Section (Strictly Today's Tasks & Time Blocks) */}
+                <div className="space-y-1.5">
+                  {overdueListEntries.length > 0 && (
+                    <div className="flex items-center justify-between px-2 pt-0.5">
+                      <div className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-200">
+                        <Sun className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                        <span>Today</span>
+                        <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500">
+                          · {todayDisplayHeader}
+                        </span>
+                      </div>
+                      <span className="text-[11px] font-mono font-semibold text-slate-500 dark:text-slate-400">
+                        {displayedListEntries.length}
+                      </span>
+                    </div>
+                  )}
+
+                  {displayedListEntries.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 px-5 py-6 text-center bg-white/80 dark:bg-slate-900/70">
+                      <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                        Nothing else scheduled for today.
+                      </p>
+                      <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">
+                        Use <span className="font-semibold text-rose-600 dark:text-rose-400">→ Today</span> above to pull overdue items into today’s plan, or tap + to add a task.
+                      </p>
+                    </div>
+                  ) : (
+                    renderEntriesGroup(displayedListEntries, `detailed-today-${todayStr}`)
+                  )}
+                </div>
+              </div>
+            ) : filter === 'overdue' ? (
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-2xl bg-rose-50/90 dark:bg-rose-950/35 border border-rose-200/80 dark:border-rose-900/60">
+                  <div className="inline-flex items-center gap-1.5 text-xs font-bold text-rose-700 dark:text-rose-300">
+                    <OverdueIcon className="w-4 h-4 text-rose-500 shrink-0" />
+                    <span>{displayedListEntries.length} Overdue {displayedListEntries.length === 1 ? 'Item' : 'Items'}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => handleBulkRescheduleOverdue('today')}
+                      className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-semibold transition cursor-pointer active:scale-95"
+                    >
+                      Move all to Today
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleBulkRescheduleOverdue('tomorrow')}
+                      className="px-2.5 py-1 rounded-lg bg-white dark:bg-zinc-900 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-zinc-700 text-[11px] font-semibold transition cursor-pointer active:scale-95"
+                    >
+                      Tomorrow
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleBulkRescheduleOverdue('next_week')}
+                      className="px-2.5 py-1 rounded-lg bg-white dark:bg-zinc-900 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-zinc-700 text-[11px] font-semibold transition cursor-pointer active:scale-95"
+                    >
+                      Next Week
+                    </button>
+                  </div>
+                </div>
+                {renderEntriesGroup(displayedListEntries, `detailed-overdue-${todayStr}`)}
+              </div>
+            ) : (
+              renderEntriesGroup(displayedListEntries, `detailed-${filter}-${selectedTaskDate}`)
+            )}
 
           {/* Google Tasks / TickTick Collapsible Completed Tasks & Blocks Drawer */}
           {filter !== 'completed' && filter !== 'archived' && (completedTasks.length + completedScheduleItems.length) > 0 && (
@@ -3118,10 +3374,10 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
                   {completedTasks.map(cTask => (
                     <div
                       key={cTask.id}
-                      className="flex items-center justify-between gap-2 px-2.5 py-1.5 hover:bg-white dark:hover:bg-slate-800/70 transition group"
+                      className="flex items-center justify-between gap-2 px-2.5 py-2 hover:bg-white dark:hover:bg-slate-800/70 transition group"
                     >
-                      <div className="flex items-center gap-2 min-w-0 flex-1">
-                        <div className="relative w-[18px] h-[18px] shrink-0">
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                        <div className="relative w-6 h-6 shrink-0 flex items-center justify-center">
                           <button
                             type="button"
                             onPointerDown={e => e.stopPropagation()}
@@ -3129,10 +3385,11 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
                             onTouchStart={e => e.stopPropagation()}
                             onClick={() => toggleTask(cTask.id)}
                             title="Click to restore task"
-                            className="absolute -inset-2 flex items-center justify-center rounded-full cursor-pointer touch-manipulation hover:bg-emerald-500/10 transition"
+                            aria-label="Mark task incomplete"
+                            className="absolute -inset-2.5 flex items-center justify-center rounded-full cursor-pointer touch-manipulation z-10 hover:bg-emerald-500/12 active:scale-90 transition"
                           >
-                            <span className="w-[18px] h-[18px] rounded-full bg-emerald-500/90 border border-emerald-500 text-white flex items-center justify-center hover:bg-emerald-600 transition">
-                              <Check className="w-3 h-3 stroke-[3]" />
+                            <span className="w-6 h-6 rounded-full bg-emerald-500/90 border border-emerald-500 text-white flex items-center justify-center hover:bg-emerald-600 transition">
+                              <Check className="w-3.5 h-3.5 stroke-[3]" />
                             </span>
                           </button>
                         </div>
@@ -3150,7 +3407,7 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
                         <button
                           type="button"
                           onClick={() => handleToggleArchiveTask(cTask)}
-                          className="p-1 rounded-md text-slate-300 dark:text-slate-600 hover:text-indigo-500 dark:hover:text-indigo-400 transition cursor-pointer"
+                          className="p-1.5 rounded-md text-slate-300 dark:text-slate-600 hover:text-indigo-500 dark:hover:text-indigo-400 transition cursor-pointer"
                           title="Archive task"
                         >
                           <Archive className="w-3.5 h-3.5" />
@@ -3158,7 +3415,7 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
                         <button
                           type="button"
                           onClick={() => deleteTask(cTask.id)}
-                          className="p-1 rounded-md text-slate-300 dark:text-slate-600 hover:text-rose-500 dark:hover:text-rose-400 transition cursor-pointer"
+                          className="p-1.5 rounded-md text-slate-300 dark:text-slate-600 hover:text-rose-500 dark:hover:text-rose-400 transition cursor-pointer"
                           title="Delete task"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -3169,10 +3426,10 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
                   {completedScheduleItems.map(cSched => (
                     <div
                       key={`comp_sched_${cSched.id}`}
-                      className="flex items-center justify-between gap-2 px-2.5 py-1.5 hover:bg-white dark:hover:bg-slate-800/70 transition group"
+                      className="flex items-center justify-between gap-2 px-2.5 py-2 hover:bg-white dark:hover:bg-slate-800/70 transition group"
                     >
-                      <div className="flex items-center gap-2 min-w-0 flex-1">
-                        <div className="relative w-[18px] h-[18px] shrink-0">
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                        <div className="relative w-6 h-6 shrink-0 flex items-center justify-center">
                           <button
                             type="button"
                             onPointerDown={e => e.stopPropagation()}
@@ -3180,10 +3437,11 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
                             onTouchStart={e => e.stopPropagation()}
                             onClick={() => toggleScheduleItem(cSched.id)}
                             title="Click to restore time block"
-                            className="absolute -inset-2 flex items-center justify-center rounded-full cursor-pointer touch-manipulation hover:bg-emerald-500/10 transition"
+                            aria-label="Mark time block incomplete"
+                            className="absolute -inset-2.5 flex items-center justify-center rounded-full cursor-pointer touch-manipulation z-10 hover:bg-emerald-500/12 active:scale-90 transition"
                           >
-                            <span className="w-[18px] h-[18px] rounded-full bg-emerald-500/90 border border-emerald-500 text-white flex items-center justify-center hover:bg-emerald-600 transition">
-                              <Check className="w-3 h-3 stroke-[3]" />
+                            <span className="w-6 h-6 rounded-full bg-emerald-500/90 border border-emerald-500 text-white flex items-center justify-center hover:bg-emerald-600 transition">
+                              <Check className="w-3.5 h-3.5 stroke-[3]" />
                             </span>
                           </button>
                         </div>
@@ -3204,7 +3462,7 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
                         <button
                           type="button"
                           onClick={() => deleteScheduleItem(cSched.id)}
-                          className="p-1 rounded-md text-slate-300 dark:text-slate-600 hover:text-rose-500 dark:hover:text-rose-400 transition cursor-pointer"
+                          className="p-1.5 rounded-md text-slate-300 dark:text-slate-600 hover:text-rose-500 dark:hover:text-rose-400 transition cursor-pointer"
                           title="Delete time block"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -3216,8 +3474,9 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
               </SmoothCollapse>
             </div>
           )}
-        </div>
-      )}
+          </div>
+        );
+      })()}
 
       {/* Eisenhower Priority Matrix (2x2 Grid & Board) */}
       {viewMode === 'matrix' && (
@@ -3244,6 +3503,7 @@ export const TaskManager: React.FC<{ initialViewMode?: 'list' | 'events' | 'kanb
             selectedTaskDate={selectedTaskDate}
             onSelectTaskDate={setSelectedTaskDate}
             todayCount={countForFilter('today')}
+            overdueCount={countForFilter('overdue')}
             upcomingCount={countForFilter('upcoming')}
             allCount={countForFilter('all')}
             dateCount={countForFilter('date')}

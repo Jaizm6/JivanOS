@@ -37,7 +37,32 @@ import {
   UserProfile,
   WorkflowStage,
 } from '../types';
-import { CURATED_QUOTES, QuoteItem } from '../data/quotes';
+import {
+  CURATED_QUOTES,
+  DEFAULT_QUOTE_CATEGORIES,
+  QuoteCategory,
+  QuoteItem,
+} from '../data/quotes';
+import {
+  applyQuoteSyncData,
+  buildQuotesFromStorage,
+  buildQuoteSyncData,
+  canonicalizeQuoteSyncData,
+  ensureQuoteMetaMigrated,
+  isProhibitedQuote,
+  loadQuoteMeta,
+  loadStoredQuoteCategories,
+  mergeQuoteSyncData,
+  QUOTE_DELETED_KEY,
+  QUOTE_EDITED_KEY,
+  QUOTE_FAVORITES_KEY,
+  readDeletedQuoteIdsFromStorage,
+  saveQuoteMeta,
+  saveStoredQuoteCategories,
+} from '../utils/quoteSync';
+import { contentHashSync, loadQuoteWasm } from '../utils/quoteWasm';
+import { isCustomQuote } from '../utils/quoteText';
+import { EXTRA_PALETTE_KEYS } from '../components/quotes/quoteColors';
 import {
   defaultWidgets,
   initialAppLock,
@@ -169,6 +194,7 @@ interface AppContextType {
   updateMedication: (med: Medication) => void;
   deleteMedication: (id: string) => void;
   logDose: (medicationId: string, scheduledTime: string, status: 'taken' | 'skipped' | 'snoozed') => void;
+  unlogDose: (medicationId: string, scheduledTime: string, dateStr?: string) => void;
   refillPills: (medicationId: string, quantity: number) => void;
 
   // Hydration
@@ -258,6 +284,7 @@ interface AppContextType {
   updateBill: (bill: Bill) => void;
   deleteBill: (id: string) => void;
   markBillPaid: (id: string, amount?: number) => void;
+  unmarkBillPaid: (id: string) => void;
 
   // Habits (HabitTick inspired)
   habits: Habit[];
@@ -282,13 +309,22 @@ interface AppContextType {
 
   // Quotes Repository
   quotes: QuoteItem[];
+  deletedQuoteIds: string[];
   addQuote: (quote: Omit<QuoteItem, 'id'>) => void;
+  addQuotes: (items: Omit<QuoteItem, 'id'>[]) => QuoteItem[];
   updateQuote: (quote: QuoteItem) => void;
   deleteQuote: (id: string) => void;
   resetQuotesToDefault: () => void;
   favoriteQuoteIds: string[];
   toggleFavoriteQuote: (id: string) => void;
   isQuoteFavorited: (id: string) => boolean;
+  quoteCategories: QuoteCategory[];
+  quoteCategoriesRaw: QuoteCategory[];
+  addQuoteCategory: (name: string, color?: string) => QuoteCategory;
+  updateQuoteCategory: (id: string, patch: { name?: string; color?: string }) => void;
+  deleteQuoteCategory: (id: string) => void;
+  resetQuoteCategoriesToDefault: () => void;
+  getCategoryForQuote: (quote: Pick<QuoteItem, 'category'>) => QuoteCategory;
 
   // Task Workflow Stages (Customizable Kanban columns)
   workflowStages: WorkflowStage[];
@@ -1057,12 +1093,186 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }),
       }));
     try {
+      const mergedFlag = localStorage.getItem(`${LOCAL_STORAGE_KEY}_routines_merged_to_habits_v1`);
+      if (mergedFlag === 'true') {
+        return [];
+      }
       const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_routines`);
       return normalizeRoutines(saved ? JSON.parse(saved) : initialRoutines);
     } catch {
       return normalizeRoutines(initialRoutines);
     }
   });
+
+  // Pure helper: converts any Routine entries into first-class Habits tagged with the routine name
+  // and registers matching AppTags with their signature colors (deduplicated & lossless).
+  const mergeRoutinesIntoHabitsAndTags = useCallback(
+    (
+      baseHabits: Habit[],
+      baseTags: AppTag[],
+      sourceRoutines: Routine[]
+    ): { mergedHabits: Habit[]; mergedTags: AppTag[]; didMerge: boolean } => {
+      if (!Array.isArray(sourceRoutines) || sourceRoutines.length === 0) {
+        return { mergedHabits: baseHabits, mergedTags: baseTags, didMerge: false };
+      }
+
+      const todayKey = formatLocalDate();
+      const nextHabits: Habit[] = baseHabits.map(h => ({ ...h, tags: [...(h.tags || [])] }));
+      const nextTags: AppTag[] = [...baseTags];
+
+      const getRoutineColor = (r: Routine): string => {
+        if (r.color) return r.color;
+        const lower = (r.name || '').toLowerCase();
+        if (r.timeOfDay === 'morning' || lower.includes('morning')) return '#f59e0b';
+        if (r.timeOfDay === 'evening' || lower.includes('evening')) return '#6366f1';
+        if (lower.includes('sunday') || lower.includes('self-care') || lower.includes('self care')) {
+          return '#ec4899';
+        }
+        return '#14b8a6';
+      };
+
+      let maxOrder = nextHabits.reduce((max, h, idx) => Math.max(max, h.order ?? idx), -1);
+      let didMerge = false;
+
+      sourceRoutines.forEach(routine => {
+        const tagName = (routine.name || '').trim();
+        if (!tagName) return;
+        const tagKey = tagName.toLowerCase();
+        const routineColor = getRoutineColor(routine);
+
+        // Ensure routine exists as a first-class AppTag
+        if (!nextTags.some(t => (t.name || '').trim().toLowerCase() === tagKey)) {
+          nextTags.push({
+            id: `tag-routine-${tagKey.replace(/[^a-z0-9]+/g, '-')}`,
+            name: tagName,
+            color: routineColor,
+            description: `${tagName} habits`,
+            createdAt: new Date().toISOString(),
+          });
+          didMerge = true;
+        }
+
+        const timeOfDay: Habit['targetTimeOfDay'] =
+          routine.timeOfDay === 'morning'
+            ? 'morning'
+            : routine.timeOfDay === 'afternoon'
+            ? 'afternoon'
+            : routine.timeOfDay === 'evening'
+            ? 'evening'
+            : 'anytime';
+
+        (routine.items || []).forEach(item => {
+          const itemTitle = (item.title || '').trim();
+          if (!itemTitle) return;
+          const itemTitleLower = itemTitle.toLowerCase();
+
+          const itemHistory: Record<string, boolean> =
+            item.completionHistory && Object.keys(item.completionHistory).length > 0
+              ? { ...item.completionHistory }
+              : item.completed
+              ? { [todayKey]: true }
+              : {};
+
+          const existingIdx = nextHabits.findIndex(
+            h =>
+              h.id === item.id ||
+              (h.name || '').trim().toLowerCase() === itemTitleLower
+          );
+
+          if (existingIdx >= 0) {
+            const existing = nextHabits[existingIdx];
+            const existingTags = existing.tags || [];
+            const hasTag = existingTags.some(t => t.trim().toLowerCase() === tagKey);
+            const mergedHistory = { ...itemHistory, ...(existing.completionHistory || {}) };
+            const { currentStreak, bestStreak } = calculateHabitStreak(mergedHistory);
+            nextHabits[existingIdx] = {
+              ...existing,
+              tags: hasTag ? existingTags : [tagName, ...existingTags],
+              reminderTime: existing.reminderTime || item.scheduledTime || item.reminderTime,
+              durationMinutes: existing.durationMinutes ?? item.durationMinutes,
+              timerMinutes: existing.timerMinutes ?? item.timerMinutes ?? item.durationMinutes,
+              completionHistory: mergedHistory,
+              currentStreak: Math.max(existing.currentStreak || 0, currentStreak),
+              bestStreak: Math.max(existing.bestStreak || 0, bestStreak),
+            };
+            didMerge = true;
+          } else {
+            maxOrder += 1;
+            const { currentStreak, bestStreak } = calculateHabitStreak(itemHistory);
+            const itemTags = [
+              tagName,
+              ...(item.tags || []).filter(t => t.trim().toLowerCase() !== tagKey),
+            ];
+            const derivedType: Habit['habitType'] =
+              item.habitType || (item.durationMinutes || item.timerMinutes ? 'timer' : 'boolean');
+
+            nextHabits.push({
+              id: item.id || `hab_routine_${Date.now()}_${maxOrder}`,
+              name: itemTitle,
+              icon: item.icon || routine.icon || '✨',
+              category: 'routine',
+              frequency: item.frequency || 'daily',
+              targetDaysPerWeek: item.customDays?.length || 7,
+              targetTimeOfDay: timeOfDay,
+              reminderTime: item.scheduledTime || item.reminderTime,
+              reminderType: item.reminderType || (item.scheduledTime ? 'notification' : 'none'),
+              timerMinutes: item.timerMinutes ?? item.durationMinutes,
+              durationMinutes: item.durationMinutes ?? item.timerMinutes,
+              currentStreak: item.currentStreak ?? currentStreak,
+              bestStreak: item.bestStreak ?? bestStreak,
+              completionHistory: itemHistory,
+              color: item.color || routineColor,
+              accentColor: item.accentColor || item.color || routineColor,
+              fontColor: item.fontColor,
+              isBold: item.isBold,
+              cardTheme: item.cardTheme,
+              notes: item.notes,
+              archived: item.archived,
+              archivedAt: item.archivedAt,
+              createdAt: todayKey,
+              tags: itemTags,
+              habitType: derivedType,
+              targetCount: item.targetCount,
+              counterValue: item.counterValue,
+              unit: item.unit,
+              incrementStep: item.incrementStep,
+              subSteps: item.subSteps,
+              customDays: item.customDays,
+              order: maxOrder,
+            });
+            didMerge = true;
+          }
+        });
+      });
+
+      return { mergedHabits: nextHabits, mergedTags: nextTags, didMerge };
+    },
+    []
+  );
+
+  // One-time idempotent migration: unify all Routines into tagged Habits on the main Habits page
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(`${LOCAL_STORAGE_KEY}_routines_merged_to_habits_v1`) === 'true') {
+        return;
+      }
+      if (routines.length > 0) {
+        const { mergedHabits, mergedTags, didMerge } = mergeRoutinesIntoHabitsAndTags(
+          habits,
+          tags,
+          routines
+        );
+        if (didMerge) {
+          setHabits(mergedHabits);
+          setTags(mergedTags);
+        }
+        setRoutines([]);
+      }
+      localStorage.setItem(`${LOCAL_STORAGE_KEY}_routines_merged_to_habits_v1`, 'true');
+    } catch {}
+    // Run once on initial mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [widgets, setWidgets] = useState<DashboardWidgetConfig[]>(() => {
     try {
@@ -2709,6 +2919,64 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
+  const unlogDose = (medicationId: string, scheduledTime: string, dateStr?: string) => {
+    const targetMed = medications.find(m => m.id === medicationId);
+    if (!targetMed) return;
+    const targetDate = dateStr || new Date().toISOString().split('T')[0];
+
+    const idsToRemove = new Set<string>();
+    let takenRemovedCount = 0;
+
+    if (scheduledTime === 'ALL_TODAY') {
+      doseLogs.forEach(log => {
+        if (log.medicationId === medicationId && log.loggedAt.startsWith(targetDate)) {
+          idsToRemove.add(log.id);
+          if (log.status === 'taken') takenRemovedCount += 1;
+        }
+      });
+    } else if (scheduledTime === 'PRN') {
+      const latestLog = doseLogs.find(
+        log => log.medicationId === medicationId && log.loggedAt.startsWith(targetDate)
+      );
+      if (latestLog) {
+        idsToRemove.add(latestLog.id);
+        if (latestLog.status === 'taken') takenRemovedCount = 1;
+      }
+    } else {
+      doseLogs.forEach(log => {
+        if (
+          log.medicationId === medicationId &&
+          log.scheduledTime === scheduledTime &&
+          log.loggedAt.startsWith(targetDate)
+        ) {
+          idsToRemove.add(log.id);
+          if (log.status === 'taken') takenRemovedCount += 1;
+        }
+      });
+    }
+
+    if (idsToRemove.size === 0) return;
+
+    setDoseLogs(prev => prev.filter(log => !idsToRemove.has(log.id)));
+
+    if (takenRemovedCount > 0) {
+      setMedications(prev =>
+        prev.map(m =>
+          m.id === medicationId
+            ? { ...m, remainingPills: m.remainingPills + takenRemovedCount }
+            : m
+        )
+      );
+    }
+
+    soundEngine.playClick();
+    pushNotification(
+      'Dose Unticked',
+      `Reverted ${targetMed.name}${takenRemovedCount > 0 ? ` (+${takenRemovedCount} pill${takenRemovedCount > 1 ? 's' : ''} restored)` : ''}.`,
+      'medication'
+    );
+  };
+
   const refillPills = (medicationId: string, quantity: number) => {
     setMedications(prev =>
       prev.map(m =>
@@ -2776,28 +3044,36 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const totalToday = Math.max(0, updatedLogs.reduce((acc, curr) => acc + (curr.amountMl || 0), 0));
       const isGoalMet = totalToday >= prev.targetMl;
 
-      const todayStr = new Date().toISOString().split('T')[0];
+      const todayStr = formatLocalDate();
       setHabits(habitsPrev =>
         habitsPrev.map(h => {
-          const isWaterHabit = h.syncHydration && (h.name.toLowerCase().includes('water') || h.name.toLowerCase().includes('hydration') || (h.unit && ['ml', 'l', 'litre', 'litres', 'glasses', 'gl'].some(u => h.unit?.toLowerCase().includes(u))));
+          const isWaterHabit =
+            Boolean(h.syncHydration) ||
+            h.id === 'hab_1' ||
+            h.name.toLowerCase().includes('water') ||
+            h.name.toLowerCase().includes('hydration');
           if (isWaterHabit) {
             const history = h.completionHistory || {};
             const hUnit = (h.unit || prev.preferredUnit || 'ml').toLowerCase();
             const isLitre = hUnit === 'l' || hUnit === 'litre' || hUnit === 'litres';
             const isGlasses = hUnit === 'glasses' || hUnit === 'glass' || hUnit === 'gl';
-            const counterVal = isLitre 
+            const counterVal = isLitre
               ? Math.max(0, Math.round((totalToday / 1000) * 100) / 100)
               : isGlasses
                 ? Math.max(0, Math.round(totalToday / 250))
                 : Math.max(0, totalToday);
+            const nextHistory = {
+              ...history,
+              [todayStr]: isGoalMet,
+            };
+            const { currentStreak, bestStreak } = calculateHabitStreak(nextHistory);
 
             return {
               ...h,
               counterValue: counterVal,
-              completionHistory: {
-                ...history,
-                [todayStr]: isGoalMet,
-              },
+              completionHistory: nextHistory,
+              currentStreak,
+              bestStreak: Math.max(h.bestStreak || 0, bestStreak),
             };
           }
           return h;
@@ -3738,7 +4014,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             ...g,
             milestones: updatedMilestones,
             progress: newProgress,
-            status: newProgress === 100 ? 'completed' : g.status,
+            status:
+              newProgress === 100
+                ? 'completed'
+                : g.status === 'completed'
+                ? 'on_track'
+                : g.status,
           };
         }
         return g;
@@ -3789,6 +4070,26 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         return b;
       })
     );
+  };
+
+  const unmarkBillPaid = (id: string) => {
+    const targetBill = bills.find(b => b.id === id);
+    if (!targetBill || !targetBill.isPaid) return;
+    setBills(prev =>
+      prev.map(b => {
+        if (b.id === id) {
+          return {
+            ...b,
+            isPaid: false,
+            paidDate: undefined,
+            paymentHistory: (b.paymentHistory || []).slice(1),
+          };
+        }
+        return b;
+      })
+    );
+    soundEngine.playClick();
+    pushNotification('Bill Marked Unpaid', `${targetBill.title} reverted to pending.`, 'bills');
   };
 
   // Pomodoro Handlers
@@ -4068,12 +4369,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         targetHabit.id === 'hab_1';
 
       if (isWater) {
-        const todayKey = new Date().toISOString().split('T')[0];
+        const todayKey = formatLocalDate();
         if (dateStr === todayKey) {
-          const isCurrentlyDone = !!targetHabit.completionHistory?.[dateStr];
+          const totalToday = Math.max(0, (hydration.todayLogs || []).reduce((acc, c) => acc + (c.amountMl || 0), 0));
+          const targetMl = hydration.targetMl || 3000;
+          const isCurrentlyDone = !!targetHabit.completionHistory?.[dateStr] || totalToday >= targetMl;
           if (!isCurrentlyDone) {
-            const totalToday = Math.max(0, (hydration.todayLogs || []).reduce((acc, c) => acc + (c.amountMl || 0), 0));
-            const targetMl = hydration.targetMl || 3000;
             if (totalToday < targetMl) {
               addWater(targetMl - totalToday, 'ml');
               return;
@@ -4083,6 +4384,26 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               ...prev,
               todayLogs: [],
             }));
+            setHabits(habitsPrev =>
+              habitsPrev.map(h => {
+                const isWaterHabit =
+                  h.id === habitId ||
+                  Boolean(h.syncHydration) ||
+                  h.id === 'hab_1' ||
+                  h.name.toLowerCase().includes('water') ||
+                  h.name.toLowerCase().includes('hydration');
+                if (!isWaterHabit) return h;
+                const nextHistory = { ...(h.completionHistory || {}), [todayKey]: false };
+                const { currentStreak, bestStreak } = calculateHabitStreak(nextHistory);
+                return {
+                  ...h,
+                  counterValue: 0,
+                  completionHistory: nextHistory,
+                  currentStreak,
+                  bestStreak: Math.max(h.bestStreak || 0, bestStreak),
+                };
+              })
+            );
             return;
           }
         }
@@ -4373,7 +4694,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           const isDone = h.habitType === 'quit'
             ? (h.targetCount !== undefined ? newVal <= h.targetCount : true)
             : (h.targetCount && h.targetCount > 0 ? newVal >= h.targetCount : false);
-          const todayKey = new Date().toISOString().split('T')[0];
+          const todayKey = formatLocalDate();
           const updatedHistory = { ...h.completionHistory, [todayKey]: isDone };
           const { currentStreak, bestStreak } = calculateHabitStreak(updatedHistory);
 
@@ -4648,101 +4969,177 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
-  // Helper to ensure prohibited authors or religious terms never slip in through old caches
-  const isProhibitedQuote = (q: QuoteItem): boolean => {
-    const author = (q.author || '').toLowerCase().trim();
-    const text = (q.text || '').toLowerCase();
-    const source = (q.source || '').toLowerCase();
-    if (/abdul\s*kalam/i.test(author)) return false;
-    if (
-      /\b(mother\s*teresa|ali\s+ibn|ali\s+bin|imam\s+ali|hazrat\s+ali|abi\s+talib|nahj|abu\s+bakr|umar\s+ibn|uthman|rumi|kahlil\s+gibran|khalil\s+gibran|saleh|ahmed\s+yassin|muhammad\s+iqbal|omar\s+khayyam|avicenna|ibn\s+sina|al-ghazali|ghazali)\b/i.test(
-        author
-      )
-    ) {
-      return true;
-    }
-    if (
-      /\b(nahj\s+al-balagha|nahjul\s+balagha|quran|hadith|sunnah)\b/i.test(source) ||
-      /\b(nahj\s+al-balagha|nahjul\s+balagha|quran|hadith|mother\s*teresa)\b/i.test(text)
-    ) {
-      return true;
-    }
-    return false;
-  };
+  // Run one-time quote metadata timestamp migration on first mount
+  useEffect(() => {
+    ensureQuoteMetaMigrated();
+  }, []);
 
   // Quotes Repository State & Handlers
   const [quotes, setQuotes] = useState<QuoteItem[]>(() => {
-    try {
-      // Purge old stale keys so old cached quotes are removed from the browser
-      try {
-        localStorage.removeItem('omnilife_quotes_v3');
-        localStorage.removeItem('omnilife_quotes_v2');
-        localStorage.removeItem('omnilife_quotes');
-      } catch {
-        // ignore
-      }
-
-      // Check for user-created custom quotes
-      let userCustomQuotes: QuoteItem[] = [];
-      const savedCustom = localStorage.getItem('omnilife_user_custom_quotes_v5');
-      if (savedCustom) {
-        try {
-          const parsed = JSON.parse(savedCustom);
-          if (Array.isArray(parsed)) {
-            userCustomQuotes = parsed.filter(q => !isProhibitedQuote(q));
-          }
-        } catch {
-          // ignore
-        }
-      }
-
-      // Check for edited curated quote overrides
-      const editedQuotesMap = new Map<string, QuoteItem>();
-      const savedEdited = localStorage.getItem('omnilife_edited_quotes_v5');
-      if (savedEdited) {
-        try {
-          const parsedEdits = JSON.parse(savedEdited);
-          if (Array.isArray(parsedEdits)) {
-            parsedEdits.forEach((eq: QuoteItem) => {
-              if (eq && eq.id && !isProhibitedQuote(eq)) {
-                editedQuotesMap.set(eq.id, eq);
-              }
-            });
-          }
-        } catch {
-          // ignore
-        }
-      }
-
-      // Check for deleted quote IDs
-      const deletedQuoteIds = new Set<string>();
-      const savedDeleted = localStorage.getItem('omnilife_deleted_quote_ids_v5');
-      if (savedDeleted) {
-        try {
-          const parsedDel = JSON.parse(savedDeleted);
-          if (Array.isArray(parsedDel)) {
-            parsedDel.forEach(id => deletedQuoteIds.add(id));
-          }
-        } catch {
-          // ignore
-        }
-      }
-
-      const activeCurated = CURATED_QUOTES.filter(
-        q => !isProhibitedQuote(q) && !deletedQuoteIds.has(q.id)
-      ).map(q => editedQuotesMap.get(q.id) || q);
-
-      return [...userCustomQuotes, ...activeCurated];
-    } catch (e) {
-      console.error(e);
-      return CURATED_QUOTES.filter(q => !isProhibitedQuote(q));
-    }
+    ensureQuoteMetaMigrated();
+    return buildQuotesFromStorage();
   });
+
+  const [deletedQuoteIds, setDeletedQuoteIds] = useState<string[]>(() =>
+    readDeletedQuoteIdsFromStorage()
+  );
+
+  // Editable Quote Categories (including deleted tombstones for future/current sync)
+  const [quoteCategoriesRaw, setQuoteCategoriesRaw] = useState<QuoteCategory[]>(() =>
+    loadStoredQuoteCategories()
+  );
+
+  useEffect(() => {
+    saveStoredQuoteCategories(quoteCategoriesRaw);
+  }, [quoteCategoriesRaw]);
+
+  const quoteCategories = useMemo(
+    () =>
+      quoteCategoriesRaw
+        .filter(c => !c.deletedAt)
+        .sort((a, b) => a.order - b.order),
+    [quoteCategoriesRaw]
+  );
+
+  const quoteCategoryById = useMemo(() => {
+    const map = new Map<string, QuoteCategory>();
+    for (const c of quoteCategories) {
+      map.set(c.id, c);
+    }
+    return map;
+  }, [quoteCategories]);
+
+  const wisdomCategory = useMemo(
+    () =>
+      quoteCategoryById.get('wisdom') ||
+      quoteCategories[0] ||
+      DEFAULT_QUOTE_CATEGORIES[0],
+    [quoteCategoryById, quoteCategories]
+  );
+
+  const getCategoryForQuote = useCallback(
+    (quote: Pick<QuoteItem, 'category'>): QuoteCategory => {
+      if (quote && quote.category) {
+        const found = quoteCategoryById.get(quote.category);
+        if (found) return found;
+      }
+      return wisdomCategory;
+    },
+    [quoteCategoryById, wisdomCategory]
+  );
+
+  const validateCategoryName = (rawName: string, excludeId?: string): string => {
+    const trimmed = (rawName || '').trim();
+    if (!trimmed) {
+      throw new Error('Category name cannot be empty.');
+    }
+    if (trimmed.length > 24) {
+      throw new Error('Category name must be 24 characters or fewer.');
+    }
+    const lower = trimmed.toLowerCase();
+    const conflict = quoteCategoriesRaw.find(
+      c => !c.deletedAt && c.id !== excludeId && c.name.trim().toLowerCase() === lower
+    );
+    if (conflict) {
+      throw new Error(`A category named "${conflict.name}" already exists.`);
+    }
+    return trimmed;
+  };
+
+  const addQuoteCategory = (name: string, color?: string): QuoteCategory => {
+    const validName = validateCategoryName(name);
+    const usedColors = new Set(
+      quoteCategoriesRaw.filter(c => !c.deletedAt).map(c => c.color.toLowerCase())
+    );
+    const chosenColor =
+      color && color.trim()
+        ? color.trim().toLowerCase()
+        : EXTRA_PALETTE_KEYS.find(k => !usedColors.has(k)) || 'slate';
+
+    const maxOrder = quoteCategoriesRaw.reduce(
+      (max, c) => (c.order > max ? c.order : max),
+      -1
+    );
+    const now = new Date().toISOString();
+    const rand4 = Math.random().toString(36).substring(2, 6).padEnd(4, '0');
+    const newCat: QuoteCategory = {
+      id: `cat_${Date.now()}_${rand4}`,
+      name: validName,
+      color: chosenColor,
+      order: maxOrder + 1,
+      isDefault: false,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    setQuoteCategoriesRaw(prev => {
+      const next = [...prev, newCat];
+      saveStoredQuoteCategories(next);
+      return next;
+    });
+
+    return newCat;
+  };
+
+  const updateQuoteCategory = (
+    id: string,
+    patch: { name?: string; color?: string }
+  ) => {
+    const validName =
+      patch.name !== undefined ? validateCategoryName(patch.name, id) : undefined;
+    const now = new Date().toISOString();
+    setQuoteCategoriesRaw(prev => {
+      const next = prev.map(cat => {
+        if (cat.id !== id) return cat;
+        return {
+          ...cat,
+          ...(validName !== undefined ? { name: validName } : {}),
+          ...(patch.color !== undefined ? { color: patch.color } : {}),
+          updatedAt: now,
+        };
+      });
+      saveStoredQuoteCategories(next);
+      return next;
+    });
+  };
+
+  const deleteQuoteCategory = (id: string) => {
+    if (id === 'wisdom') {
+      throw new Error('The Wisdom category cannot be deleted.');
+    }
+    const now = new Date().toISOString();
+    setQuoteCategoriesRaw(prev => {
+      const next = prev.map(cat =>
+        cat.id === id ? { ...cat, deletedAt: now, updatedAt: now } : cat
+      );
+      saveStoredQuoteCategories(next);
+      return next;
+    });
+  };
+
+  const resetQuoteCategoriesToDefault = () => {
+    const now = new Date().toISOString();
+    const defaultMap = new Map(DEFAULT_QUOTE_CATEGORIES.map(c => [c.id, c]));
+    setQuoteCategoriesRaw(prev => {
+      const customCats = prev.filter(c => !defaultMap.has(c.id));
+      const restoredDefaults = DEFAULT_QUOTE_CATEGORIES.map(def => {
+        const existing = prev.find(c => c.id === def.id);
+        return {
+          ...def,
+          createdAt: existing?.createdAt || def.createdAt,
+          updatedAt: now,
+        };
+      });
+      const next = [...restoredDefaults, ...customCats];
+      saveStoredQuoteCategories(next);
+      return next;
+    });
+  };
 
   // Favorite / Liked Quotes State
   const [favoriteQuoteIds, setFavoriteQuoteIds] = useState<string[]>(() => {
     try {
-      const saved = localStorage.getItem('omnilife_favorite_quotes');
+      const saved = localStorage.getItem(QUOTE_FAVORITES_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) return parsed;
@@ -4753,26 +5150,37 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return [];
   });
 
-  const toggleFavoriteQuote = (id: string) => {
+  const favoriteQuoteIdSet = useMemo(() => new Set(favoriteQuoteIds), [favoriteQuoteIds]);
+
+  const toggleFavoriteQuote = useCallback((id: string) => {
+    const now = new Date().toISOString();
     setFavoriteQuoteIds(prev => {
       const isFav = prev.includes(id);
+      const nextOn = !isFav;
       const updated = isFav ? prev.filter(item => item !== id) : [id, ...prev];
       try {
-        localStorage.setItem('omnilife_favorite_quotes', JSON.stringify(updated));
+        localStorage.setItem(QUOTE_FAVORITES_KEY, JSON.stringify(updated));
+        localStorage.setItem(`${LOCAL_STORAGE_KEY}_favorite_quotes`, JSON.stringify(updated));
+        const meta = loadQuoteMeta();
+        meta.favorites[id] = { on: nextOn, at: now };
+        saveQuoteMeta(meta);
       } catch (e) {
         console.error(e);
       }
       soundEngine.playSuccessChime();
       return updated;
     });
-  };
+  }, []);
 
-  const isQuoteFavorited = (id: string) => favoriteQuoteIds.includes(id);
+  const isQuoteFavorited = useCallback(
+    (id: string) => favoriteQuoteIdSet.has(id),
+    [favoriteQuoteIdSet]
+  );
 
   // Sync user custom quotes to storage
   useEffect(() => {
     try {
-      const customOnes = quotes.filter(q => q.isCustom || q.id.startsWith('q_custom_'));
+      const customOnes = quotes.filter(q => isCustomQuote(q));
       localStorage.setItem('omnilife_user_custom_quotes_v5', JSON.stringify(customOnes));
     } catch (e) {
       console.error(e);
@@ -4780,26 +5188,79 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [quotes]);
 
   const addQuote = (quoteData: Omit<QuoteItem, 'id'>) => {
+    const now = new Date().toISOString();
+    const id = `q_custom_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const newQuote: QuoteItem = {
       ...quoteData,
-      id: `q_custom_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      id,
       isCustom: true,
-      createdAt: new Date().toISOString(),
+      createdAt: now,
+      updatedAt: now,
     };
+    try {
+      const meta = loadQuoteMeta();
+      meta.updated[id] = now;
+      delete meta.deleted[id];
+      saveQuoteMeta(meta);
+    } catch (e) {
+      console.error(e);
+    }
     setQuotes(prev => [newQuote, ...prev]);
     soundEngine.playSuccessChime();
     pushNotification('Quote Added', `Added quote by "${newQuote.author}" to your personal library.`, 'system');
   };
 
-  const updateQuote = (quote: QuoteItem) => {
-    setQuotes(prev => prev.map(q => (q.id === quote.id ? quote : q)));
+  const addQuotes = (items: Omit<QuoteItem, 'id'>[]): QuoteItem[] => {
+    if (!Array.isArray(items) || items.length === 0) return [];
+    const baseTs = Date.now();
+    const now = new Date().toISOString();
+    const created: QuoteItem[] = items.map((item, idx) => {
+      const rand4 = Math.random().toString(36).substring(2, 6).padEnd(4, '0');
+      return {
+        ...item,
+        id: `q_custom_${baseTs}_${idx}_${rand4}`,
+        isCustom: true,
+        createdAt: now,
+        updatedAt: now,
+      };
+    });
+
     try {
-      if (!quote.isCustom && !quote.id.startsWith('q_custom_')) {
-        const savedEdited = localStorage.getItem('omnilife_edited_quotes_v5');
+      const meta = loadQuoteMeta();
+      for (const q of created) {
+        meta.updated[q.id] = now;
+        delete meta.deleted[q.id];
+      }
+      saveQuoteMeta(meta);
+    } catch (e) {
+      console.error(e);
+    }
+
+    setQuotes(prev => [...created, ...prev]);
+    soundEngine.playSuccessChime();
+    pushNotification(
+      'Quotes Imported',
+      `${created.length} ${created.length === 1 ? 'quote' : 'quotes'} imported`,
+      'system'
+    );
+    return created;
+  };
+
+  const updateQuote = (quote: QuoteItem) => {
+    const now = new Date().toISOString();
+    const stamped: QuoteItem = { ...quote, updatedAt: now };
+    setQuotes(prev => prev.map(q => (q.id === stamped.id ? stamped : q)));
+    try {
+      const meta = loadQuoteMeta();
+      meta.updated[stamped.id] = now;
+      saveQuoteMeta(meta);
+
+      if (!isCustomQuote(stamped)) {
+        const savedEdited = localStorage.getItem(QUOTE_EDITED_KEY);
         const arr: QuoteItem[] = savedEdited ? JSON.parse(savedEdited) : [];
-        const validArr = Array.isArray(arr) ? arr.filter(item => item.id !== quote.id) : [];
-        validArr.push(quote);
-        localStorage.setItem('omnilife_edited_quotes_v5', JSON.stringify(validArr));
+        const validArr = Array.isArray(arr) ? arr.filter(item => item.id !== stamped.id) : [];
+        validArr.push(stamped);
+        localStorage.setItem(QUOTE_EDITED_KEY, JSON.stringify(validArr));
       }
     } catch (e) {
       console.error(e);
@@ -4807,13 +5268,31 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const deleteQuote = (id: string) => {
+    const now = new Date().toISOString();
     setQuotes(prev => prev.filter(q => q.id !== id));
+    setDeletedQuoteIds(prev => (prev.includes(id) ? prev : [...prev, id]));
+    setFavoriteQuoteIds(prev => {
+      if (!prev.includes(id)) return prev;
+      const updated = prev.filter(item => item !== id);
+      try {
+        localStorage.setItem(QUOTE_FAVORITES_KEY, JSON.stringify(updated));
+        localStorage.setItem(`${LOCAL_STORAGE_KEY}_favorite_quotes`, JSON.stringify(updated));
+      } catch (e) {
+        console.error(e);
+      }
+      return updated;
+    });
     try {
-      const savedDeleted = localStorage.getItem('omnilife_deleted_quote_ids_v5');
+      const meta = loadQuoteMeta();
+      meta.deleted[id] = now;
+      meta.favorites[id] = { on: false, at: now };
+      saveQuoteMeta(meta);
+
+      const savedDeleted = localStorage.getItem(QUOTE_DELETED_KEY);
       const arr = savedDeleted ? JSON.parse(savedDeleted) : [];
       if (Array.isArray(arr) && !arr.includes(id)) {
         arr.push(id);
-        localStorage.setItem('omnilife_deleted_quote_ids_v5', JSON.stringify(arr));
+        localStorage.setItem(QUOTE_DELETED_KEY, JSON.stringify(arr));
       }
     } catch (e) {
       console.error(e);
@@ -4822,11 +5301,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const resetQuotesToDefault = () => {
     try {
-      localStorage.removeItem('omnilife_deleted_quote_ids_v5');
-      localStorage.removeItem('omnilife_edited_quotes_v5');
+      localStorage.removeItem(QUOTE_DELETED_KEY);
+      localStorage.removeItem(QUOTE_EDITED_KEY);
     } catch {
       // ignore
     }
+    setDeletedQuoteIds([]);
     setQuotes(CURATED_QUOTES.filter(q => !isProhibitedQuote(q)));
   };
 
@@ -5408,6 +5888,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         themeStyle,
         accentTone,
         favoriteQuoteIds,
+        quoteLibraryHash: contentHashSync(canonicalizeQuoteSyncData(buildQuoteSyncData())),
         deletedIds,
       });
     } catch {
@@ -5415,8 +5896,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
-  // Cloud Sync & Backups (Includes Personal Profile Details +Tombstones)
+  // Cloud Sync & Backups (Includes Personal Profile Details + Tombstones + Quote Library)
   const compilePayload = () => {
+    // Lazily warm WASM module on first sync/backup export (silent TS fallback if missing)
+    loadQuoteWasm().catch(() => {});
+    const quoteLibrary = buildQuoteSyncData();
     return JSON.stringify({
       version: 2,
       profile: joplinSyncSettings.syncPersonalDetails
@@ -5446,6 +5930,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       themeStyle,
       accentTone,
       favoriteQuoteIds,
+      quoteLibrary,
       deletedIds,
       exportedAt: new Date().toISOString(),
     });
@@ -6019,13 +6504,24 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setHydration(data.hydration);
         try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_hydration`, JSON.stringify(data.hydration)); } catch {}
       }
-      if (data.habits) {
-        setHabits(data.habits);
-        try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_habits`, JSON.stringify(data.habits)); } catch {}
-      }
-      if (data.routines) {
-        setRoutines(data.routines);
-        try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_routines`, JSON.stringify(data.routines)); } catch {}
+      if (data.habits || data.routines) {
+        const baseHabits: Habit[] = Array.isArray(data.habits) ? data.habits : habits;
+        const baseTags: AppTag[] = Array.isArray(data.tags) ? data.tags : tags;
+        const incomingRoutines: Routine[] = Array.isArray(data.routines) ? data.routines : [];
+        const { mergedHabits, mergedTags } = mergeRoutinesIntoHabitsAndTags(
+          baseHabits,
+          baseTags,
+          incomingRoutines
+        );
+        setHabits(mergedHabits);
+        setTags(mergedTags);
+        setRoutines([]);
+        try {
+          localStorage.setItem(`${LOCAL_STORAGE_KEY}_habits`, JSON.stringify(mergedHabits));
+          localStorage.setItem(`${LOCAL_STORAGE_KEY}_tags`, JSON.stringify(mergedTags));
+          localStorage.setItem(`${LOCAL_STORAGE_KEY}_routines`, JSON.stringify([]));
+          localStorage.setItem(`${LOCAL_STORAGE_KEY}_routines_merged_to_habits_v1`, 'true');
+        } catch {}
       }
       if (data.widgets) {
         setWidgets(data.widgets);
@@ -6090,18 +6586,33 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setAccentToneState(data.accentTone);
         try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_accent_tone`, data.accentTone); } catch {}
       }
-      if (Array.isArray(data.favoriteQuoteIds)) {
+      if (data.quoteLibrary && typeof data.quoteLibrary === 'object') {
+        isApplyingRemoteSyncRef.current = true;
+        const mergedQuoteLib = mergeQuoteSyncData(buildQuoteSyncData(), data.quoteLibrary);
+        const applied = applyQuoteSyncData(mergedQuoteLib);
+        setQuotes(applied.quotes);
+        setFavoriteQuoteIds(applied.favoriteQuoteIds);
+        setQuoteCategoriesRaw(applied.categoriesRaw);
+        setDeletedQuoteIds(applied.deletedIds);
+      } else if (Array.isArray(data.favoriteQuoteIds)) {
         setFavoriteQuoteIds(data.favoriteQuoteIds);
-        try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_favorite_quotes`, JSON.stringify(data.favoriteQuoteIds)); } catch {}
+        try {
+          localStorage.setItem(`${LOCAL_STORAGE_KEY}_favorite_quotes`, JSON.stringify(data.favoriteQuoteIds));
+          localStorage.setItem(QUOTE_FAVORITES_KEY, JSON.stringify(data.favoriteQuoteIds));
+        } catch {}
       }
 
       setTimeout(() => {
-        lastSyncedPayloadHashRef.current = getDataHash();
-      }, 100);
+        const refreshedHash = getDataHash();
+        lastSyncedPayloadHashRef.current = refreshedHash;
+        lastAutoSnapshotHashRef.current = refreshedHash;
+        isApplyingRemoteSyncRef.current = false;
+      }, 150);
 
       return true;
     } catch (e) {
       console.error('Error importing backup JSON:', e);
+      isApplyingRemoteSyncRef.current = false;
       return false;
     }
   };
@@ -6166,13 +6677,22 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setAppLock(nextAppLock);
       try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_applock`, JSON.stringify(nextAppLock)); } catch {}
 
-      const nextHabits: Habit[] = Array.isArray(data.habits) ? data.habits : [];
+      const rawNextHabits: Habit[] = Array.isArray(data.habits) ? data.habits : [];
+      const rawNextRoutines: Routine[] = Array.isArray(data.routines) ? data.routines : [];
+      const rawNextTags: AppTag[] = Array.isArray(data.tags) ? data.tags : [];
+      const { mergedHabits: nextHabits, mergedTags: nextTags } = mergeRoutinesIntoHabitsAndTags(
+        rawNextHabits,
+        rawNextTags,
+        rawNextRoutines
+      );
       setHabits(nextHabits);
       try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_habits`, JSON.stringify(nextHabits)); } catch {}
 
-      const nextRoutines: Routine[] = Array.isArray(data.routines) ? data.routines : [];
-      setRoutines(nextRoutines);
-      try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_routines`, JSON.stringify(nextRoutines)); } catch {}
+      setRoutines([]);
+      try {
+        localStorage.setItem(`${LOCAL_STORAGE_KEY}_routines`, JSON.stringify([]));
+        localStorage.setItem(`${LOCAL_STORAGE_KEY}_routines_merged_to_habits_v1`, 'true');
+      } catch {}
 
       const nextWidgets: DashboardWidgetConfig[] = Array.isArray(data.widgets)
         ? data.widgets
@@ -6191,8 +6711,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         : initialListGroups;
       setListGroups(nextListGroups);
       try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_list_groups`, JSON.stringify(nextListGroups)); } catch {}
-
-      const nextTags: AppTag[] = Array.isArray(data.tags) ? data.tags : [];
       setTags(nextTags);
       try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_tags`, JSON.stringify(nextTags)); } catch {}
 
@@ -6257,14 +6775,23 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         } catch {}
       }
 
-      const nextFavQuotes: string[] = Array.isArray(data.favoriteQuoteIds)
-        ? data.favoriteQuoteIds
-        : [];
-      setFavoriteQuoteIds(nextFavQuotes);
-      try {
-        localStorage.setItem(`${LOCAL_STORAGE_KEY}_favorite_quotes`, JSON.stringify(nextFavQuotes));
-        localStorage.setItem('omnilife_favorite_quotes', JSON.stringify(nextFavQuotes));
-      } catch {}
+      if (data.quoteLibrary && typeof data.quoteLibrary === 'object') {
+        const applied = applyQuoteSyncData(data.quoteLibrary);
+        setQuotes(applied.quotes);
+        setFavoriteQuoteIds(applied.favoriteQuoteIds);
+        setQuoteCategoriesRaw(applied.categoriesRaw);
+        setDeletedQuoteIds(applied.deletedIds);
+      } else {
+        // Old backup without quoteLibrary: do not touch local quotes; only handle favoriteQuoteIds as before
+        const nextFavQuotes: string[] = Array.isArray(data.favoriteQuoteIds)
+          ? data.favoriteQuoteIds
+          : [];
+        setFavoriteQuoteIds(nextFavQuotes);
+        try {
+          localStorage.setItem(`${LOCAL_STORAGE_KEY}_favorite_quotes`, JSON.stringify(nextFavQuotes));
+          localStorage.setItem(QUOTE_FAVORITES_KEY, JSON.stringify(nextFavQuotes));
+        } catch {}
+      }
 
       setTimeout(() => {
         const refreshedHash = getDataHash();
@@ -6342,6 +6869,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     inboxItems,
     workflowStages,
     currency,
+    quotes,
+    deletedQuoteIds,
+    favoriteQuoteIds,
+    quoteCategoriesRaw,
     deletedIds,
     joplinSyncSettings.syncOnChange,
   ]);
@@ -6463,7 +6994,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     inboxItems,
     workflowStages,
     widgets,
+    quotes,
+    deletedQuoteIds,
     favoriteQuoteIds,
+    quoteCategoriesRaw,
     appLock,
     currency,
     theme,
@@ -6548,6 +7082,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         updateMedication,
         deleteMedication,
         logDose,
+        unlogDose,
         refillPills,
         hydration,
         addWater,
@@ -6614,6 +7149,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         updateBill,
         deleteBill,
         markBillPaid,
+        unmarkBillPaid,
         pomodoro,
         taskTimers,
         pomodoroLogs,
@@ -6649,13 +7185,22 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         reorderRoutineItems,
         updateRoutineItemSubSteps,
         quotes,
+        deletedQuoteIds,
         addQuote,
+        addQuotes,
         updateQuote,
         deleteQuote,
         resetQuotesToDefault,
         favoriteQuoteIds,
         toggleFavoriteQuote,
         isQuoteFavorited,
+        quoteCategories,
+        quoteCategoriesRaw,
+        addQuoteCategory,
+        updateQuoteCategory,
+        deleteQuoteCategory,
+        resetQuoteCategoriesToDefault,
+        getCategoryForQuote,
         workflowStages,
         setWorkflowStages,
         addWorkflowStage,

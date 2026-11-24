@@ -15,6 +15,10 @@
 import { JoplinSyncSettings, SyncDriveConfig, SyncDriveId, UserProfile } from '../types';
 import { encryptText, decryptText } from './crypto';
 import {
+  deriveFavoriteIdsFromQuoteSyncData,
+  mergeQuoteSyncData,
+} from './quoteSync';
+import {
   saveUserDataToFirestore,
   getUserDataFromFirestore,
   getInMemoryGDriveToken,
@@ -404,6 +408,16 @@ export function mergeSyncPayloads(
     );
   }
 
+  const hasQuoteLibrary = Boolean(localObj.quoteLibrary || remoteObj.quoteLibrary);
+  const mergedQuoteLibrary = hasQuoteLibrary
+    ? mergeQuoteSyncData(localObj.quoteLibrary, remoteObj.quoteLibrary)
+    : undefined;
+  const mergedFavoriteQuoteIds = mergedQuoteLibrary
+    ? deriveFavoriteIdsFromQuoteSyncData(mergedQuoteLibrary)
+    : Array.from(
+        new Set([...(localObj.favoriteQuoteIds || []), ...(remoteObj.favoriteQuoteIds || [])])
+      );
+
   return {
     ...localObj,
     ...remoteObj,
@@ -431,9 +445,8 @@ export function mergeSyncPayloads(
     theme: preferRemoteScalar ? remoteObj.theme || localObj.theme : localObj.theme || remoteObj.theme,
     themeStyle: preferRemoteScalar ? remoteObj.themeStyle || localObj.themeStyle : localObj.themeStyle || remoteObj.themeStyle,
     accentTone: preferRemoteScalar ? remoteObj.accentTone || localObj.accentTone : localObj.accentTone || remoteObj.accentTone,
-    favoriteQuoteIds: Array.from(
-      new Set([...(localObj.favoriteQuoteIds || []), ...(remoteObj.favoriteQuoteIds || [])])
-    ),
+    favoriteQuoteIds: mergedFavoriteQuoteIds,
+    ...(mergedQuoteLibrary ? { quoteLibrary: mergedQuoteLibrary } : {}),
     deletedIds: Array.from(deletedSet).slice(-500),
     exportedAt: new Date().toISOString(),
   };

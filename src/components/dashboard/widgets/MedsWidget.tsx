@@ -4,7 +4,7 @@ import { useApp } from '../../../context/AppContext';
 import { MedIconRenderer } from '../../medications/MedicationFormModal';
 
 export const MedsWidget: React.FC = () => {
-  const { medications, doseLogs, logDose, setActiveTab } = useApp();
+  const { medications, doseLogs, logDose, unlogDose, setActiveTab } = useApp();
 
   const todayStr = new Date().toISOString().split('T')[0];
 
@@ -101,12 +101,24 @@ export const MedsWidget: React.FC = () => {
               {/* Action Buttons */}
               <div className="flex items-center gap-1 shrink-0">
                 {status === 'taken' ? (
-                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600 text-white text-xs font-semibold">
+                  <button
+                    type="button"
+                    onClick={() => unlogDose(med.id, sched.time, todayStr)}
+                    title="Taken — click to untick"
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-semibold transition cursor-pointer"
+                  >
                     <Check className="w-3.5 h-3.5" />
                     Taken
-                  </span>
+                  </button>
                 ) : status === 'skipped' ? (
-                  <span className="text-xs text-slate-400 px-2 py-1 font-medium">Skipped</span>
+                  <button
+                    type="button"
+                    onClick={() => unlogDose(med.id, sched.time, todayStr)}
+                    title="Skipped — click to reset"
+                    className="text-xs text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 px-2 py-1 rounded-lg hover:bg-slate-200/70 dark:hover:bg-slate-700 font-medium transition cursor-pointer"
+                  >
+                    Skipped
+                  </button>
                 ) : (
                   <>
                     <button

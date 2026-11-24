@@ -1,12 +1,9 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   Quote,
   Search,
   Plus,
-  Edit2,
   Trash2,
-  Copy,
-  Share2,
   Check,
   Sparkles,
   BookOpen,
@@ -23,48 +20,61 @@ import {
   Bell,
   BellRing,
   Volume2,
+  Palette,
+  Gauge,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { QuoteItem } from '../../data/quotes';
+import { CURATED_QUOTES, QuoteItem } from '../../data/quotes';
 import { notificationService } from '../../utils/notifications';
 import {
   UnifiedFormModal,
   FormHeroTitleCard,
   UnifiedSubModal,
 } from '../common/FormPrimitives';
+import { M3SegmentedGroup } from '../common/PetalExpressive';
+import { QuoteCard } from './QuoteCard';
+import { QuoteHeroCard } from './QuoteHeroCard';
+import { CategoryManagerModal } from './CategoryManagerModal';
+import { getPaletteByKey } from './quoteColors';
+import { buildQuoteNumberMap } from '../../utils/quoteNumbers';
+import { formatQuoteForShare, isCustomQuote, toSentenceCase } from '../../utils/quoteText';
 import {
-  PetalShapeBadge,
-  M3SegmentedGroup,
-  getHabitExpressiveShape,
-  getPetalGroupRadiusClass,
-} from '../common/PetalExpressive';
+  MAX_IMPORT_FILE_BYTES,
+  QuoteImportPreview,
+} from '../../utils/quoteImport';
+import {
+  loadQuoteWasm,
+  parseAndDeduplicateImportFast,
+} from '../../utils/quoteWasm';
+import { runQuoteBenchmarks } from '../../utils/perfBench';
+import { showAndroidToast } from '../common/AndroidToast';
+import {
+  QUOTE_REMINDER_ENABLED_KEY,
+  QUOTE_REMINDER_EVENING_KEY,
+  QUOTE_REMINDER_MORNING_KEY,
+  QUOTE_REMINDER_PREFS_EVENT,
+} from './QuoteReminderService';
 
-type CategoryFilter = 'all' | 'discipline' | 'mindset' | 'focus' | 'stoicism' | 'health' | 'wisdom' | 'habits';
+type CategoryFilter = string;
 type SourceFilter = 'all' | 'favorites' | 'custom';
 type SearchScope = 'all' | 'body' | 'author' | 'source';
 
-const QUOTE_CATEGORIES: QuoteItem['category'][] = [
-  'wisdom',
-  'discipline',
-  'mindset',
-  'focus',
-  'stoicism',
-  'health',
-  'habits',
-];
+const BUILT_IN_QUOTE_IDS = CURATED_QUOTES.map(q => q.id);
 
 export const QuotesManager: React.FC = () => {
   const {
     quotes,
+    deletedQuoteIds,
     addQuote,
+    addQuotes,
     updateQuote,
     deleteQuote,
     soundEngine,
     favoriteQuoteIds,
     toggleFavoriteQuote,
-    isQuoteFavorited,
+    quoteCategories,
+    getCategoryForQuote,
     theme,
-    pushNotification,
   } = useApp();
 
   const isDark =
@@ -72,6 +82,7 @@ export const QuotesManager: React.FC = () => {
     (typeof document !== 'undefined' && document.documentElement.classList.contains('dark'));
 
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [searchScope, setSearchScope] = useState<SearchScope>('all');
   const [selectedCategory, setSelectedCategory] = useState<CategoryFilter>('all');
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
@@ -79,6 +90,63 @@ export const QuotesManager: React.FC = () => {
   const itemsPerPage = 24;
 
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [openMenuKey, setOpenMenuKey] = useState<string | null>(null);
+  const [showCategoryManager, setShowCategoryManager] = useState(false);
+
+  // Debounce search input by 200ms
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Single document-level listener for whichever card/hero popover menu is currently open
+  useEffect(() => {
+    if (!openMenuKey) return;
+
+    const handlePointerDown = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest(`[data-quote-menu-root="${openMenuKey}"]`)) {
+        return;
+      }
+      setOpenMenuKey(null);
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOpenMenuKey(null);
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('touchstart', handlePointerDown, { passive: true });
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('touchstart', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [openMenuKey]);
+
+  const handleToggleMenu = useCallback((menuKey: string) => {
+    setOpenMenuKey(prev => (prev === menuKey ? null : menuKey));
+  }, []);
+
+  const handleCloseMenu = useCallback(() => {
+    setOpenMenuKey(null);
+  }, []);
+
+  // Hero offset synced with QuoteBanner.tsx via localStorage
+  const [quoteOffset, setQuoteOffset] = useState<number>(() => {
+    try {
+      const savedOffset = localStorage.getItem('omni_quote_pair_offset');
+      const parsed = savedOffset ? parseInt(savedOffset, 10) : 0;
+      return Number.isFinite(parsed) ? parsed : 0;
+    } catch {
+      return 0;
+    }
+  });
 
   // Focused quote opened from WisdomQuote banner
   const [focusedQuoteId, setFocusedQuoteId] = useState<string | null>(() => {
@@ -90,8 +158,8 @@ export const QuotesManager: React.FC = () => {
   });
 
   useEffect(() => {
-    const handleFocusQuote = (e: any) => {
-      const id = e?.detail?.quoteId;
+    const handleFocusQuote = (e: Event) => {
+      const id = (e as CustomEvent<{ quoteId?: string }>)?.detail?.quoteId;
       if (id) {
         setFocusedQuoteId(id);
       }
@@ -100,37 +168,91 @@ export const QuotesManager: React.FC = () => {
     return () => window.removeEventListener('omni_focus_quote', handleFocusQuote);
   }, []);
 
-  const clearFocusedQuote = () => {
+  const clearFocusedQuote = useCallback(() => {
     setFocusedQuoteId(null);
     try {
       localStorage.removeItem('omni_focused_quote_id');
-    } catch {}
-  };
+    } catch {
+      // ignore
+    }
+  }, []);
 
   const focusedQuote = useMemo(() => {
     if (!focusedQuoteId) return null;
     return quotes.find(q => q.id === focusedQuoteId) || null;
   }, [quotes, focusedQuoteId]);
 
+  const dayOfYear = useMemo(() => {
+    const now = new Date();
+    const start = new Date(now.getFullYear(), 0, 0);
+    return Math.floor((now.getTime() - start.getTime()) / 86400000);
+  }, []);
+
+  const heroQuote = useMemo<QuoteItem | null>(() => {
+    if (quotes.length === 0) return null;
+    if (focusedQuote) return focusedQuote;
+    const total = quotes.length;
+    const idx = (((dayOfYear + quoteOffset) % total) + total) % total;
+    return quotes[idx] || quotes[0];
+  }, [quotes, focusedQuote, dayOfYear, quoteOffset]);
+
+  const stepHeroQuote = useCallback(
+    (delta: -1 | 1) => {
+      const total = quotes.length;
+      if (total === 0) return;
+
+      if (focusedQuote) {
+        const curIdx = quotes.findIndex(q => q.id === focusedQuote.id);
+        const baseIdx = curIdx >= 0 ? curIdx : 0;
+        const nextIdx = (((baseIdx + delta) % total) + total) % total;
+        const nextOffset = nextIdx - dayOfYear;
+        setQuoteOffset(nextOffset);
+        try {
+          localStorage.setItem('omni_quote_pair_offset', String(nextOffset));
+        } catch {
+          // ignore
+        }
+        clearFocusedQuote();
+        return;
+      }
+
+      setQuoteOffset(prev => {
+        const next = prev + delta;
+        try {
+          localStorage.setItem('omni_quote_pair_offset', String(next));
+        } catch {
+          // ignore
+        }
+        return next;
+      });
+    },
+    [quotes, focusedQuote, dayOfYear, clearFocusedQuote]
+  );
+
   // Modals & Confirmation States
   const [showAddModal, setShowAddModal] = useState(false);
   const [showBulkImportModal, setShowBulkImportModal] = useState(false);
   const [bulkImportText, setBulkImportText] = useState('');
+  const [bulkImportFilename, setBulkImportFilename] = useState<string | undefined>(undefined);
+  const [bulkImportPreview, setBulkImportPreview] = useState<QuoteImportPreview | null>(null);
+  const [bulkImportError, setBulkImportError] = useState<string | null>(null);
+  const [isParsingImport, setIsParsingImport] = useState(false);
   const [editingQuote, setEditingQuote] = useState<QuoteItem | null>(null);
   const [deletingQuote, setDeletingQuote] = useState<QuoteItem | null>(null);
   const [showReminderSettings, setShowReminderSettings] = useState(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState(false);
+  const [isBenchmarkRunning, setIsBenchmarkRunning] = useState(false);
 
-  const triggerVibration = (pattern: number = 20) => {
+  const triggerVibration = useCallback((pattern: number = 20) => {
     if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
       navigator.vibrate(pattern);
     }
-  };
+  }, []);
 
-  // Global Quote Reminder Preferences (Persisted in localStorage)
+  // Global Quote Reminder Preferences (Persisted in localStorage; firing runs in QuoteReminderService)
   const [isReminderEnabled, setIsReminderEnabled] = useState<boolean>(() => {
     try {
-      return localStorage.getItem('omni_quote_reminder_enabled') === 'true';
+      return localStorage.getItem(QUOTE_REMINDER_ENABLED_KEY) === 'true';
     } catch {
       return false;
     }
@@ -138,7 +260,7 @@ export const QuotesManager: React.FC = () => {
 
   const [morningReminderTime, setMorningReminderTime] = useState<string>(() => {
     try {
-      return localStorage.getItem('omni_quote_reminder_morning') || '08:00';
+      return localStorage.getItem(QUOTE_REMINDER_MORNING_KEY) || '08:00';
     } catch {
       return '08:00';
     }
@@ -146,7 +268,7 @@ export const QuotesManager: React.FC = () => {
 
   const [eveningReminderTime, setEveningReminderTime] = useState<string>(() => {
     try {
-      return localStorage.getItem('omni_quote_reminder_evening') || '20:00';
+      return localStorage.getItem(QUOTE_REMINDER_EVENING_KEY) || '20:00';
     } catch {
       return '20:00';
     }
@@ -174,11 +296,6 @@ export const QuotesManager: React.FC = () => {
     }
   };
 
-  const toSentenceCase = (text: string) => {
-    if (!text) return text;
-    return text.charAt(0).toUpperCase() + text.slice(1);
-  };
-
   const handleTestNotification = async () => {
     if (quotes.length === 0) return;
     const randomIndex = Math.floor(Math.random() * quotes.length);
@@ -197,61 +314,20 @@ export const QuotesManager: React.FC = () => {
     });
   };
 
-  useEffect(() => {
-    if (!isReminderEnabled) return;
-
-    let lastFiredKey = '';
-
-    const checkAndTriggerReminder = () => {
-      const now = new Date();
-      const hours = String(now.getHours()).padStart(2, '0');
-      const mins = String(now.getMinutes()).padStart(2, '0');
-      const currentTimeStr = `${hours}:${mins}`;
-      const minuteKey = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}_${currentTimeStr}`;
-
-      if (lastFiredKey === minuteKey) return;
-
-      let label = '';
-      if (currentTimeStr === morningReminderTime) {
-        label = 'Morning Wisdom';
-      } else if (currentTimeStr === eveningReminderTime) {
-        label = 'Evening Wisdom';
-      }
-
-      if (label && quotes.length > 0) {
-        lastFiredKey = minuteKey;
-        const randomIndex = Math.floor(Math.random() * quotes.length);
-        const selectedQuote = quotes[randomIndex] || quotes[0];
-        const formattedQuoteText = toSentenceCase(selectedQuote.text);
-
-        notificationService.notify(`🌅 ${label}`, {
-          body: `"${formattedQuoteText}" — ${selectedQuote.author}`,
-          sound: 'task',
-          tag: `quote_reminder_${minuteKey}`,
-        });
-      }
-    };
-
-    const unsubscribe = notificationService.subscribeTick(checkAndTriggerReminder);
-    checkAndTriggerReminder();
-
-    return () => {
-      unsubscribe();
-    };
-  }, [isReminderEnabled, morningReminderTime, eveningReminderTime, quotes]);
-
   const handleSaveReminderPreferences = (enabled: boolean, morning: string, evening: string) => {
     setIsReminderEnabled(enabled);
     setMorningReminderTime(morning);
     setEveningReminderTime(evening);
 
     try {
-      localStorage.setItem('omni_quote_reminder_enabled', String(enabled));
-      localStorage.setItem('omni_quote_reminder_morning', morning);
-      localStorage.setItem('omni_quote_reminder_evening', evening);
+      localStorage.setItem(QUOTE_REMINDER_ENABLED_KEY, String(enabled));
+      localStorage.setItem(QUOTE_REMINDER_MORNING_KEY, morning);
+      localStorage.setItem(QUOTE_REMINDER_EVENING_KEY, evening);
     } catch (e) {
       console.error('Failed to save quote reminder preferences to localStorage', e);
     }
+
+    window.dispatchEvent(new Event(QUOTE_REMINDER_PREFS_EVENT));
 
     soundEngine.playSuccessChime();
     setSaveSuccessMsg(true);
@@ -261,72 +337,193 @@ export const QuotesManager: React.FC = () => {
     }, 800);
   };
 
+  const handleRunBenchmarks = () => {
+    if (isBenchmarkRunning) return;
+    setIsBenchmarkRunning(true);
+    window.setTimeout(() => {
+      try {
+        const result = runQuoteBenchmarks(quotes, quoteCategories);
+        showAndroidToast(result.summary, 4200);
+      } catch (err) {
+        showAndroidToast(
+          err instanceof Error ? err.message : 'Benchmark failed',
+          3000
+        );
+      } finally {
+        setIsBenchmarkRunning(false);
+      }
+    }, 30);
+  };
+
   // Form fields
   const [formText, setFormText] = useState('');
   const [formAuthor, setFormAuthor] = useState('');
-  const [formCategory, setFormCategory] = useState<QuoteItem['category']>('wisdom');
+  const [formCategory, setFormCategory] = useState<string>('wisdom');
   const [formSource, setFormSource] = useState('');
 
-  const categories: { id: CategoryFilter; label: string }[] = [
-    { id: 'all', label: 'All Categories' },
-    { id: 'wisdom', label: 'Wisdom' },
-    { id: 'discipline', label: 'Discipline' },
-    { id: 'mindset', label: 'Mindset' },
-    { id: 'focus', label: 'Focus' },
-    { id: 'stoicism', label: 'Stoicism' },
-    { id: 'health', label: 'Health' },
-    { id: 'habits', label: 'Habits' },
-  ];
+  // Lazily warm WASM when bulk import modal opens
+  useEffect(() => {
+    if (showBulkImportModal) {
+      loadQuoteWasm().catch(() => {});
+    }
+  }, [showBulkImportModal]);
 
-  const isUserQuote = (q: QuoteItem) => {
-    return Boolean(
-      q.isCustom || q.id.startsWith('q_custom_') || (q.id.startsWith('q_') && q.id.length > 10)
-    );
-  };
+  // Parse bulk import preview off the main thread whenever text/filename changes
+  useEffect(() => {
+    if (!showBulkImportModal) return;
+    if (!bulkImportText.trim()) {
+      setBulkImportPreview(null);
+      setIsParsingImport(false);
+      return;
+    }
 
-  const customQuotesCount = useMemo(() => quotes.filter(isUserQuote).length, [quotes]);
+    let cancelled = false;
+    setIsParsingImport(true);
+    setBulkImportError(null);
 
-  const quoteIndexMap = useMemo(() => {
-    const map = new Map<string, number>();
-    quotes.forEach((q, idx) => {
-      map.set(q.id, idx + 1);
-    });
-    return map;
+    const timer = window.setTimeout(() => {
+      parseAndDeduplicateImportFast(
+        bulkImportText,
+        bulkImportFilename,
+        quotes,
+        quoteCategories
+      )
+        .then(preview => {
+          if (cancelled) return;
+          if (preview.error) {
+            setBulkImportError(preview.error);
+            setBulkImportPreview(null);
+          } else {
+            setBulkImportPreview(preview);
+          }
+          setIsParsingImport(false);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setBulkImportError('Could not read the import text.');
+          setBulkImportPreview(null);
+          setIsParsingImport(false);
+        });
+    }, 150);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [showBulkImportModal, bulkImportText, bulkImportFilename, quotes, quoteCategories]);
+
+  // Compute O(1) Set for favourites, counts, stable numbering, and pre-lowercased search index ONCE
+  const favoriteQuoteSet = useMemo(() => new Set(favoriteQuoteIds), [favoriteQuoteIds]);
+
+  const quoteIdSet = useMemo(() => {
+    const set = new Set<string>();
+    for (let i = 0; i < quotes.length; i++) {
+      set.add(quotes[i].id);
+    }
+    return set;
   }, [quotes]);
 
-  const favoriteQuotesCount = useMemo(() => favoriteQuoteIds.length, [favoriteQuoteIds]);
+  // Count only favourites that still exist in the live quotes list
+  const favoriteQuotesCount = useMemo(() => {
+    let count = 0;
+    for (let i = 0; i < favoriteQuoteIds.length; i++) {
+      if (quoteIdSet.has(favoriteQuoteIds[i])) count++;
+    }
+    return count;
+  }, [favoriteQuoteIds, quoteIdSet]);
+
+  const customQuotesCount = useMemo(() => {
+    let count = 0;
+    for (let i = 0; i < quotes.length; i++) {
+      if (isCustomQuote(quotes[i])) count++;
+    }
+    return count;
+  }, [quotes]);
+
+  // Stable deterministic quote numbering (built-in 1..2822, custom 2823+ ranked by creation timestamp)
+  const quoteNumberMap = useMemo(() => {
+    const customIds: string[] = [];
+    for (let i = 0; i < quotes.length; i++) {
+      const id = quotes[i].id;
+      if (id.startsWith('q_custom_')) {
+        customIds.push(id);
+      }
+    }
+    return buildQuoteNumberMap(BUILT_IN_QUOTE_IDS, customIds, deletedQuoteIds);
+  }, [quotes, deletedQuoteIds]);
+
+  // Category counts computed once for CategoryManagerModal
+  const categoryQuoteCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (let i = 0; i < quotes.length; i++) {
+      const resolvedId = getCategoryForQuote(quotes[i]).id;
+      counts.set(resolvedId, (counts.get(resolvedId) || 0) + 1);
+    }
+    return counts;
+  }, [quotes, getCategoryForQuote]);
+
+  // Pre-lowercased search index computed once per quotes list change
+  const searchIndex = useMemo(() => {
+    return quotes.map(q => ({
+      quote: q,
+      isCustom: isCustomQuote(q),
+      textLower: (q.text || '').toLowerCase(),
+      authorLower: (q.author || '').toLowerCase(),
+      sourceLower: (q.source || '').toLowerCase(),
+    }));
+  }, [quotes]);
 
   const filteredQuotes = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
+    const query = debouncedSearchQuery.trim().toLowerCase();
+    const out: QuoteItem[] = [];
 
-    return quotes.filter(q => {
-      if (sourceFilter === 'custom' && !isUserQuote(q)) {
-        return false;
+    for (let i = 0; i < searchIndex.length; i++) {
+      const entry = searchIndex[i];
+      const q = entry.quote;
+
+      if (sourceFilter === 'custom' && !entry.isCustom) {
+        continue;
       }
-      if (sourceFilter === 'favorites' && !favoriteQuoteIds.includes(q.id)) {
-        return false;
+      if (sourceFilter === 'favorites' && !favoriteQuoteSet.has(q.id)) {
+        continue;
       }
 
-      const matchCat = selectedCategory === 'all' || q.category === selectedCategory;
-      if (!matchCat) return false;
-
-      if (!query) return true;
-
-      if (searchScope === 'body') {
-        return q.text.toLowerCase().includes(query);
-      } else if (searchScope === 'author') {
-        return q.author.toLowerCase().includes(query);
-      } else if (searchScope === 'source') {
-        return Boolean(q.source && q.source.toLowerCase().includes(query));
-      } else {
-        return (
-          q.text.toLowerCase().includes(query) ||
-          q.author.toLowerCase().includes(query) ||
-          Boolean(q.source && q.source.toLowerCase().includes(query))
-        );
+      if (selectedCategory !== 'all') {
+        const resolvedCat = getCategoryForQuote(q);
+        if (resolvedCat.id !== selectedCategory) continue;
       }
-    });
-  }, [quotes, selectedCategory, searchQuery, searchScope, sourceFilter, favoriteQuoteIds]);
+
+      if (query) {
+        if (searchScope === 'body') {
+          if (!entry.textLower.includes(query)) continue;
+        } else if (searchScope === 'author') {
+          if (!entry.authorLower.includes(query)) continue;
+        } else if (searchScope === 'source') {
+          if (!entry.sourceLower.includes(query)) continue;
+        } else {
+          if (
+            !entry.textLower.includes(query) &&
+            !entry.authorLower.includes(query) &&
+            !entry.sourceLower.includes(query)
+          ) {
+            continue;
+          }
+        }
+      }
+
+      out.push(q);
+    }
+
+    return out;
+  }, [
+    searchIndex,
+    selectedCategory,
+    debouncedSearchQuery,
+    searchScope,
+    sourceFilter,
+    favoriteQuoteSet,
+    getCategoryForQuote,
+  ]);
 
   const totalPages = Math.ceil(filteredQuotes.length / itemsPerPage) || 1;
   const paginatedQuotes = useMemo(() => {
@@ -334,31 +531,68 @@ export const QuotesManager: React.FC = () => {
     return filteredQuotes.slice(start, start + itemsPerPage);
   }, [filteredQuotes, currentPage, itemsPerPage]);
 
-  const handleShare = async (id: string, text: string, author: string) => {
-    const shareText = `"${text}" — ${author}`;
-
-    if (navigator.share) {
-      try {
-        await navigator.share({ text: shareText });
-        return;
-      } catch {
-        // Fallback to copy
-      }
+  // Clamp current page if filtered count shrinks
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
     }
+  }, [currentPage, totalPages]);
 
-    await navigator.clipboard.writeText(shareText);
-    setCopiedId(id);
-    soundEngine.playSuccessChime();
-    setTimeout(() => setCopiedId(null), 1800);
-  };
+  const handleShare = useCallback(
+    async (id: string, text: string, author: string, source?: string) => {
+      const shareText = formatQuoteForShare({ text, author, source });
 
-  const handleCopy = async (id: string, text: string, author: string, source?: string) => {
-    const copyText = `"${text}" — ${author}${source ? ` (${source})` : ''}`;
-    await navigator.clipboard.writeText(copyText);
-    setCopiedId(id);
-    soundEngine.playSuccessChime();
-    setTimeout(() => setCopiedId(null), 1800);
-  };
+      if (navigator.share) {
+        try {
+          await navigator.share({ text: shareText });
+          return;
+        } catch {
+          // Fallback to copy
+        }
+      }
+
+      await navigator.clipboard.writeText(shareText);
+      setCopiedId(id);
+      soundEngine.playSuccessChime();
+      setTimeout(() => setCopiedId(null), 1800);
+    },
+    [soundEngine]
+  );
+
+  const handleCopy = useCallback(
+    async (id: string, text: string, author: string, source?: string) => {
+      const copyText = formatQuoteForShare({ text, author, source });
+      await navigator.clipboard.writeText(copyText);
+      setCopiedId(id);
+      soundEngine.playSuccessChime();
+      setTimeout(() => setCopiedId(null), 1800);
+    },
+    [soundEngine]
+  );
+
+  const handleFavoriteCard = useCallback(
+    (id: string) => {
+      triggerVibration();
+      toggleFavoriteQuote(id);
+    },
+    [triggerVibration, toggleFavoriteQuote]
+  );
+
+  const handleCopyCard = useCallback(
+    (q: QuoteItem) => {
+      triggerVibration();
+      handleCopy(q.id, q.text, q.author, q.source);
+    },
+    [triggerVibration, handleCopy]
+  );
+
+  const handleShareCard = useCallback(
+    (q: QuoteItem) => {
+      triggerVibration();
+      handleShare(q.id, q.text, q.author, q.source);
+    },
+    [triggerVibration, handleShare]
+  );
 
   const handleExportJSON = () => {
     const dataStr =
@@ -383,13 +617,24 @@ export const QuotesManager: React.FC = () => {
     setShowAddModal(true);
   };
 
-  const openEditModal = (q: QuoteItem) => {
-    setEditingQuote(q);
-    setFormText(q.text);
-    setFormAuthor(q.author);
-    setFormCategory(q.category);
-    setFormSource(q.source || '');
-  };
+  const openEditModal = useCallback(
+    (q: QuoteItem) => {
+      setEditingQuote(q);
+      setFormText(q.text);
+      setFormAuthor(q.author);
+      setFormCategory(getCategoryForQuote(q).id);
+      setFormSource(q.source || '');
+    },
+    [getCategoryForQuote]
+  );
+
+  const handleRequestDeleteCard = useCallback(
+    (q: QuoteItem) => {
+      triggerVibration();
+      setDeletingQuote(q);
+    },
+    [triggerVibration]
+  );
 
   const handleSubmitAdd = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -398,7 +643,7 @@ export const QuotesManager: React.FC = () => {
     addQuote({
       text: formText.trim(),
       author: formAuthor.trim(),
-      category: formCategory,
+      category: formCategory || 'wisdom',
       source: formSource.trim() || undefined,
     });
     soundEngine.playSuccessChime();
@@ -413,7 +658,7 @@ export const QuotesManager: React.FC = () => {
       ...editingQuote,
       text: formText.trim(),
       author: formAuthor.trim(),
-      category: formCategory,
+      category: formCategory || 'wisdom',
       source: formSource.trim() || undefined,
     });
     soundEngine.playSuccessChime();
@@ -430,53 +675,48 @@ export const QuotesManager: React.FC = () => {
     setDeletingQuote(null);
   };
 
+  // Kept for backward compatibility; quote cards now use quoteColors.ts + quoteCategories
   const getCategoryTheme = (cat: string) => {
     switch (cat) {
       case 'habits':
         return {
           text: 'text-emerald-600 dark:text-emerald-400',
-          dot: 'bg-emerald-500',
           hex: '#10b981',
         };
       case 'discipline':
         return {
           text: 'text-rose-600 dark:text-rose-400',
-          dot: 'bg-rose-500',
           hex: '#f43f5e',
         };
       case 'stoicism':
         return {
           text: 'text-purple-600 dark:text-purple-400',
-          dot: 'bg-purple-500',
           hex: '#a855f7',
         };
       case 'focus':
         return {
           text: 'text-sky-600 dark:text-sky-400',
-          dot: 'bg-sky-500',
           hex: '#0ea5e9',
         };
       case 'health':
         return {
           text: 'text-teal-600 dark:text-teal-400',
-          dot: 'bg-teal-500',
           hex: '#14b8a6',
         };
       case 'mindset':
         return {
           text: 'text-indigo-600 dark:text-indigo-400',
-          dot: 'bg-indigo-500',
           hex: '#6366f1',
         };
       case 'wisdom':
       default:
         return {
           text: 'text-amber-600 dark:text-amber-400',
-          dot: 'bg-amber-500',
           hex: '#f59e0b',
         };
     }
   };
+  void getCategoryTheme;
 
   const cycleSearchScope = () => {
     const scopes: SearchScope[] = ['all', 'body', 'author', 'source'];
@@ -485,107 +725,69 @@ export const QuotesManager: React.FC = () => {
     setCurrentPage(1);
   };
 
+  const handleBulkFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    if (file.size > MAX_IMPORT_FILE_BYTES) {
+      setBulkImportError('File is larger than 2 MB. Please split it into a smaller file.');
+      setBulkImportPreview(null);
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = event => {
+      const content = typeof event.target?.result === 'string' ? event.target.result : '';
+      if (!content) {
+        setBulkImportError('File is empty or could not be read.');
+        return;
+      }
+      setBulkImportError(null);
+      setBulkImportFilename(file.name);
+      setBulkImportText(content);
+    };
+    reader.onerror = () => {
+      setBulkImportError('Failed to read the selected file.');
+    };
+    reader.readAsText(file);
+  };
+
+  const handleConfirmBulkImport = () => {
+    if (!bulkImportPreview || bulkImportPreview.items.length === 0) return;
+    addQuotes(bulkImportPreview.items);
+    setBulkImportText('');
+    setBulkImportFilename(undefined);
+    setBulkImportPreview(null);
+    setBulkImportError(null);
+    setShowBulkImportModal(false);
+  };
+
+  const heroCategory = heroQuote ? getCategoryForQuote(heroQuote) : null;
+
   return (
     <div className="space-y-1.5 flex-1 flex flex-col min-h-full pb-24 sm:pb-10 w-full min-w-0 animate-in fade-in duration-200">
-      {/* Focused Quote Spotlight (when opened via 3-dot or tap from WisdomQuote Banner) */}
-      {focusedQuote && (
-        <div
-          data-m3-tonal-card="true"
-          data-tonal-tone="neutral"
-          className="relative w-full min-w-0 overflow-hidden rounded-[16px] ring-1 ring-indigo-500/35 p-2 sm:p-2.5 space-y-1 animate-view-enter"
-        >
-          <div className="flex items-center justify-between gap-2 min-w-0">
-            <div className="flex items-center gap-1.5 min-w-0">
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-indigo-600 text-white text-[9.5px] font-bold shrink-0">
-                <Sparkles className="w-2.5 h-2.5" />
-                <span>Selected</span>
-              </span>
-              <span className="text-[10.5px] font-semibold text-slate-500 dark:text-zinc-400 tabular-nums shrink-0">
-                #{quoteIndexMap.get(focusedQuote.id) || 1}
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={clearFocusedQuote}
-              className="w-6 h-6 rounded-full flex items-center justify-center text-slate-500 hover:text-slate-800 dark:hover:text-zinc-100 hover:bg-slate-100 dark:hover:bg-zinc-800 transition cursor-pointer shrink-0"
-              title="Dismiss focused quote"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          <p className="text-slate-900 dark:text-white font-semibold leading-[1.35] text-[12.5px] sm:text-[13px] break-words">
-            “{toSentenceCase(focusedQuote.text)}”
-          </p>
-
-          <div className="flex flex-wrap items-center justify-between gap-1.5 pt-1 border-t border-slate-200/75 dark:border-zinc-800/70">
-            <div className="flex items-center gap-1 text-[11px] text-slate-700 dark:text-zinc-300 min-w-0 flex-wrap">
-              <span className="font-bold text-indigo-600 dark:text-indigo-400 truncate">
-                — {focusedQuote.author}
-              </span>
-              {focusedQuote.source && (
-                <span className="text-slate-500 dark:text-zinc-400 text-[10.5px] break-words">
-                  ({focusedQuote.source})
-                </span>
-              )}
-              <span aria-hidden="true" className="opacity-45">·</span>
-              <span className={`text-[10.5px] font-semibold capitalize shrink-0 ${getCategoryTheme(focusedQuote.category).text}`}>
-                {focusedQuote.category}
-              </span>
-            </div>
-
-            <div className="flex items-center gap-1 shrink-0">
-              <button
-                type="button"
-                onClick={() => openEditModal(focusedQuote)}
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white text-[10.5px] font-bold transition cursor-pointer shadow-2xs whitespace-nowrap"
-              >
-                <Edit2 className="w-2.5 h-2.5" />
-                <span>Edit</span>
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  handleCopy(
-                    focusedQuote.id,
-                    focusedQuote.text,
-                    focusedQuote.author,
-                    focusedQuote.source
-                  )
-                }
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#f3f6fc] dark:bg-zinc-800 border border-slate-200/80 dark:border-zinc-700 text-slate-700 dark:text-zinc-200 text-[10.5px] font-semibold hover:bg-slate-200/70 dark:hover:bg-zinc-700 transition cursor-pointer whitespace-nowrap"
-              >
-                {copiedId === focusedQuote.id ? (
-                  <>
-                    <Check className="w-2.5 h-2.5 text-emerald-500" />
-                    <span>Copied</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-2.5 h-2.5" />
-                    <span>Copy</span>
-                  </>
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={() => toggleFavoriteQuote(focusedQuote.id)}
-                className={`w-6 h-6 rounded-full flex items-center justify-center border transition cursor-pointer ${
-                  isQuoteFavorited(focusedQuote.id)
-                    ? 'bg-rose-100 dark:bg-rose-950/60 border-rose-200 dark:border-rose-800 text-rose-600'
-                    : 'bg-[#f3f6fc] dark:bg-zinc-800 border-slate-200/80 dark:border-zinc-700 text-slate-500 hover:text-rose-500'
-                }`}
-                title="Save Quote"
-              >
-                <Heart
-                  className={`w-3 h-3 ${
-                    isQuoteFavorited(focusedQuote.id) ? 'fill-rose-500 text-rose-500' : ''
-                  }`}
-                />
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* Large Featured Hero Quote Card (Always shown above control card with 8px gap below) */}
+      {heroQuote && heroCategory && (
+        <QuoteHeroCard
+          quote={heroQuote}
+          number={quoteNumberMap.get(heroQuote.id)}
+          categoryName={heroCategory.name}
+          colorKey={heroCategory.color}
+          isFavorite={favoriteQuoteSet.has(heroQuote.id)}
+          isCopied={copiedId === heroQuote.id}
+          isDark={isDark}
+          isMenuOpen={openMenuKey === `hero:${heroQuote.id}`}
+          onToggleMenu={handleToggleMenu}
+          onCloseMenu={handleCloseMenu}
+          onPrev={() => stepHeroQuote(-1)}
+          onNext={() => stepHeroQuote(1)}
+          onFavorite={handleFavoriteCard}
+          onCopy={handleCopyCard}
+          onShare={handleShareCard}
+          onEdit={openEditModal}
+          onDelete={handleRequestDeleteCard}
+        />
       )}
 
       {/* Material 3 Expressive Compact Control Card */}
@@ -594,7 +796,7 @@ export const QuotesManager: React.FC = () => {
         data-tonal-tone="neutral"
         className="w-full min-w-0 max-w-full overflow-hidden p-1.5 sm:p-2 rounded-[18px] space-y-1"
       >
-        {/* Row 1: Compact Search Pill + Reminders / Style / Compact Colored + Button */}
+        {/* Row 1: Compact Search Pill + Reminders / Import / Export / + Button */}
         <div className="flex items-center gap-1.5 w-full min-w-0">
           <div className="relative flex-1 min-w-0">
             <Search className="w-3.5 h-3.5 text-slate-500 dark:text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -614,6 +816,7 @@ export const QuotesManager: React.FC = () => {
                   type="button"
                   onClick={() => {
                     setSearchQuery('');
+                    setDebouncedSearchQuery('');
                     setCurrentPage(1);
                   }}
                   className="p-1 rounded-full text-slate-500 hover:text-slate-800 dark:hover:text-zinc-200 cursor-pointer"
@@ -682,7 +885,7 @@ export const QuotesManager: React.FC = () => {
           </button>
         </div>
 
-        {/* Row 2: M3 Expressive Segmented Source Filter + Topic Chips */}
+        {/* Row 2: M3 Expressive Segmented Source Filter + Dynamic Topic Chips + Manage Categories */}
         <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 min-w-0">
           <M3SegmentedGroup<SourceFilter>
             value={sourceFilter}
@@ -720,9 +923,25 @@ export const QuotesManager: React.FC = () => {
             ]}
           />
 
-          {/* Horizontally Scrollable M3 Topic Chips */}
+          {/* Horizontally Scrollable Dynamic M3 Topic Chips */}
           <div className="flex items-center gap-1 overflow-x-auto no-scrollbar min-w-0 flex-1">
-            {categories.map(cat => {
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedCategory('all');
+                setCurrentPage(1);
+              }}
+              className={`h-7 px-2.5 text-[11px] font-bold transition-all shrink-0 cursor-pointer whitespace-nowrap inline-flex items-center gap-1 border ${
+                selectedCategory === 'all'
+                  ? 'rounded-full bg-indigo-50 dark:bg-indigo-950/70 text-indigo-600 dark:text-indigo-300 border-indigo-500/40 dark:border-indigo-400/40 shadow-2xs'
+                  : 'rounded-[11px] bg-[#f3f6fc] dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 border-slate-200/80 dark:border-zinc-700/80 hover:bg-slate-200/70 dark:hover:bg-zinc-800'
+              }`}
+            >
+              {selectedCategory === 'all' && <Check className="w-3 h-3 stroke-[2.75] shrink-0" />}
+              <span>All Topics</span>
+            </button>
+
+            {quoteCategories.map(cat => {
               const active = selectedCategory === cat.id;
               return (
                 <button
@@ -739,10 +958,19 @@ export const QuotesManager: React.FC = () => {
                   }`}
                 >
                   {active && <Check className="w-3 h-3 stroke-[2.75] shrink-0" />}
-                  <span>{cat.id === 'all' ? 'All Topics' : cat.label}</span>
+                  <span>{cat.name}</span>
                 </button>
               );
             })}
+
+            <button
+              type="button"
+              onClick={() => setShowCategoryManager(true)}
+              className="h-7 px-2.5 text-[11px] font-bold transition-all shrink-0 cursor-pointer whitespace-nowrap inline-flex items-center gap-1 border rounded-[11px] bg-[#f3f6fc] dark:bg-zinc-900 text-indigo-600 dark:text-indigo-300 border-indigo-200/80 dark:border-indigo-800/70 hover:bg-indigo-50 dark:hover:bg-indigo-950/50"
+            >
+              <Palette className="w-3 h-3 shrink-0" />
+              <span>Manage categories</span>
+            </button>
           </div>
         </div>
       </div>
@@ -789,7 +1017,7 @@ export const QuotesManager: React.FC = () => {
         )}
       </div>
 
-      {/* Quotes List / Grid */}
+      {/* Quotes Adaptive Dense Grid */}
       {paginatedQuotes.length === 0 ? (
         sourceFilter === 'favorites' && favoriteQuotesCount === 0 ? (
           <div
@@ -862,155 +1090,28 @@ export const QuotesManager: React.FC = () => {
           </div>
         )
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-[3px] sm:gap-1.5 w-full min-w-0">
-          {paginatedQuotes.map((q, idx) => {
-            const isCopied = copiedId === q.id;
-            const isFav = isQuoteFavorited(q.id);
-            const catTheme = getCategoryTheme(q.category);
-            const quoteNum = quoteIndexMap.get(q.id) || 1;
-            const isFocused = focusedQuoteId === q.id;
-            const badgeShape = getHabitExpressiveShape(q.category, idx);
-            const petalRadius = getPetalGroupRadiusClass(idx, paginatedQuotes.length, true);
-
+        <div className="grid grid-cols-2 sm:grid-cols-3 2xl:grid-cols-4 gap-[10px] [grid-auto-flow:dense] w-full min-w-0">
+          {paginatedQuotes.map(q => {
+            const resolvedCat = getCategoryForQuote(q);
             return (
-              <article
+              <QuoteCard
                 key={q.id}
-                data-m3-tonal-card="true"
-                data-tonal-tone="neutral"
-                style={{
-                  borderLeftWidth: '2.5px',
-                  borderLeftColor: catTheme.hex,
-                }}
-                className={`group relative w-full min-w-0 overflow-hidden flex flex-col justify-between p-2.5 sm:p-3.5 lg:p-4 ${petalRadius} sm:rounded-[20px] lg:rounded-[22px] gap-1.5 sm:gap-2.5 transition-all duration-200 text-left hover:shadow-xs ${
-                  isFocused ? 'ring-2 ring-indigo-500' : ''
-                }`}
-              >
-                {/* Compact Material 3 Expressive Header: Petal Badge + Category & Unclipped Source + Index */}
-                <div className="flex items-center justify-between gap-1.5 min-w-0">
-                  <div className="flex items-center gap-2 min-w-0 flex-1">
-                    <PetalShapeBadge
-                      shape={badgeShape}
-                      sizeClass="w-6 h-6 sm:w-7 sm:h-7"
-                      fillColor={`${catTheme.hex}${isDark ? '26' : '18'}`}
-                      strokeColor={`${catTheme.hex}${isDark ? '60' : '42'}`}
-                    >
-                      <Quote
-                        className="w-2.5 h-2.5 sm:w-3 sm:h-3"
-                        style={{ color: catTheme.hex }}
-                      />
-                    </PetalShapeBadge>
-                    <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0 min-w-0 flex-1 pr-1 leading-tight">
-                      <span className={`text-[10.5px] sm:text-[11px] font-bold capitalize tracking-tight shrink-0 ${catTheme.text}`}>
-                        {q.category}
-                      </span>
-                      {q.source && (
-                        <>
-                          <span aria-hidden="true" className="text-slate-300 dark:text-zinc-600 text-[10.5px] shrink-0">·</span>
-                          <span
-                            className="text-[10.5px] sm:text-[11px] font-medium text-slate-500 dark:text-zinc-400 break-words leading-tight"
-                            title={q.source}
-                          >
-                            {q.source}
-                          </span>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                  <span className="text-[10.5px] font-mono font-bold text-slate-400 dark:text-zinc-500 tabular-nums shrink-0">
-                    #{quoteNum}
-                  </span>
-                </div>
-
-                {/* Editorial Quote Body (Compact on phone, expressive on PC) */}
-                <p className="text-[13.5px] font-medium text-slate-900 dark:text-zinc-50 leading-[1.38] sm:leading-[1.46] break-words px-0.5">
-                  “{toSentenceCase(q.text)}”
-                </p>
-
-                {/* Slim Material 3 Tonal Action & Attribution Strip */}
-                <div className="flex items-center justify-between gap-1.5 px-2.5 py-1 sm:py-1.5 rounded-[12px] bg-[#f4f7fc] dark:bg-zinc-900/90 border border-slate-200/60 dark:border-zinc-800/80 min-w-0 w-full">
-                  <span className="text-[11px] sm:text-[11.5px] font-bold text-slate-800 dark:text-zinc-200 truncate min-w-0 flex-1">
-                    — {q.author}
-                  </span>
-
-                  <div className="flex items-center gap-0.5 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        triggerVibration();
-                        toggleFavoriteQuote(q.id);
-                      }}
-                      className={`h-6 px-1.5 rounded-full flex items-center justify-center transition-all duration-200 cursor-pointer ${
-                        isFav
-                          ? 'text-rose-600 dark:text-rose-400 bg-rose-500/15 font-bold'
-                          : 'w-6 px-0 text-slate-500 dark:text-zinc-400 hover:bg-white dark:hover:bg-zinc-800 hover:text-rose-600'
-                      }`}
-                      title={isFav ? 'Remove from Saved' : 'Save Quote'}
-                    >
-                      <Heart
-                        className={`w-3 h-3 ${
-                          isFav ? 'fill-rose-500 text-rose-500' : ''
-                        }`}
-                      />
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        triggerVibration();
-                        handleCopy(q.id, q.text, q.author, q.source);
-                      }}
-                      className={`w-6 h-6 rounded-full flex items-center justify-center transition-all duration-200 cursor-pointer ${
-                        isCopied
-                          ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-                          : 'text-slate-500 dark:text-zinc-400 hover:bg-white dark:hover:bg-zinc-800 hover:text-indigo-600 dark:hover:text-indigo-400'
-                      }`}
-                      title="Copy Quote"
-                    >
-                      {isCopied ? (
-                        <Check className="w-3 h-3 stroke-[2.5]" />
-                      ) : (
-                        <Copy className="w-3 h-3" />
-                      )}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        triggerVibration();
-                        handleShare(q.id, q.text, q.author);
-                      }}
-                      className="w-6 h-6 rounded-full flex items-center justify-center text-slate-500 dark:text-zinc-400 hover:bg-white dark:hover:bg-zinc-800 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors cursor-pointer"
-                      title="Share Quote"
-                    >
-                      <Share2 className="w-3 h-3" />
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        triggerVibration();
-                        openEditModal(q);
-                      }}
-                      className="w-6 h-6 rounded-full flex items-center justify-center text-slate-500 dark:text-zinc-400 hover:bg-white dark:hover:bg-zinc-800 hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer"
-                      title="Edit Quote"
-                    >
-                      <Edit2 className="w-3 h-3" />
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        triggerVibration();
-                        setDeletingQuote(q);
-                      }}
-                      className="w-6 h-6 rounded-full flex items-center justify-center text-slate-500 dark:text-zinc-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 hover:text-rose-600 dark:hover:text-rose-400 transition-colors cursor-pointer"
-                      title="Delete Quote"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
-                  </div>
-                </div>
-              </article>
+                quote={q}
+                number={quoteNumberMap.get(q.id)}
+                categoryName={resolvedCat.name}
+                colorKey={resolvedCat.color}
+                isFavorite={favoriteQuoteSet.has(q.id)}
+                isCopied={copiedId === q.id}
+                isDark={isDark}
+                isMenuOpen={openMenuKey === `card:${q.id}`}
+                onToggleMenu={handleToggleMenu}
+                onCloseMenu={handleCloseMenu}
+                onFavorite={handleFavoriteCard}
+                onCopy={handleCopyCard}
+                onShare={handleShareCard}
+                onEdit={openEditModal}
+                onDelete={handleRequestDeleteCard}
+              />
             );
           })}
         </div>
@@ -1054,6 +1155,20 @@ export const QuotesManager: React.FC = () => {
           </button>
         </div>
       )}
+
+      {/* Category Manager Modal */}
+      <CategoryManagerModal
+        isOpen={showCategoryManager}
+        onClose={() => setShowCategoryManager(false)}
+        isDark={isDark}
+        categoryQuoteCounts={categoryQuoteCounts}
+        onCategoryDeleted={deletedId => {
+          if (selectedCategory === deletedId) {
+            setSelectedCategory('all');
+            setCurrentPage(1);
+          }
+        }}
+      />
 
       {/* Unified Add / Edit Quote Modal (Single-Screen, Fast & Clean) */}
       <UnifiedFormModal
@@ -1147,27 +1262,43 @@ export const QuotesManager: React.FC = () => {
           }
         />
 
-        {/* Direct Inline Category Picker */}
+        {/* Dynamic Live Category Picker (with colour dot + name) */}
         <div className="bg-white dark:bg-[#18181e] p-3.5 rounded-[22px] ring-1 ring-black/[0.045] dark:ring-white/[0.07] space-y-2">
           <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-zinc-400">
             <Sparkles size={12} className="text-indigo-500" />
             <span>Wisdom Category</span>
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {QUOTE_CATEGORIES.map(cat => (
-              <button
-                key={cat}
-                type="button"
-                onClick={() => setFormCategory(cat)}
-                className={`px-3 py-1.5 text-xs font-bold capitalize transition cursor-pointer ${
-                  formCategory === cat
-                    ? 'rounded-full bg-indigo-600 text-white shadow-2xs'
-                    : 'rounded-[12px] bg-[#f3f6fc] dark:bg-[#111116] text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200/70 dark:hover:bg-zinc-800'
-                }`}
-              >
-                {cat}
-              </button>
-            ))}
+            {quoteCategories.map(cat => {
+              const p = getPaletteByKey(cat.color);
+              const selected = formCategory === cat.id;
+              return (
+                <button
+                  key={cat.id}
+                  type="button"
+                  onClick={() => setFormCategory(cat.id)}
+                  className={`px-3 py-1.5 text-xs font-bold transition cursor-pointer inline-flex items-center gap-1.5 ${
+                    selected
+                      ? 'rounded-full bg-indigo-600 text-white shadow-2xs'
+                      : 'rounded-[12px] bg-[#f3f6fc] dark:bg-[#111116] text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800'
+                  }`}
+                >
+                  <span
+                    className="w-2.5 h-2.5 rounded-full shrink-0"
+                    style={{
+                      backgroundColor: isDark ? p.bgDark : p.bg,
+                      border: selected
+                        ? '1px solid rgba(255,255,255,0.65)'
+                        : isDark
+                        ? '1px solid rgba(255,255,255,0.25)'
+                        : '1px solid rgba(0,0,0,0.2)',
+                    }}
+                    aria-hidden="true"
+                  />
+                  <span>{cat.name}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
       </UnifiedFormModal>
@@ -1336,13 +1467,33 @@ export const QuotesManager: React.FC = () => {
             <span>Test Alert</span>
           </button>
         </div>
+
+        {/* Hidden developer-only benchmark trigger */}
+        <details className="px-1 pt-1">
+          <summary className="text-[10.5px] text-zinc-400 dark:text-zinc-500 cursor-pointer select-none">
+            Developer diagnostics
+          </summary>
+          <div className="mt-2">
+            <button
+              type="button"
+              disabled={isBenchmarkRunning}
+              onClick={handleRunBenchmarks}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 text-[11px] font-semibold transition cursor-pointer disabled:opacity-50"
+            >
+              <Gauge className="w-3.5 h-3.5" />
+              <span>{isBenchmarkRunning ? 'Running benchmark…' : 'Run quote benchmark'}</span>
+            </button>
+          </div>
+        </details>
       </UnifiedFormModal>
 
-
-      {/* Unified Bulk Import Modal */}
+      {/* Unified Bulk Import Modal (Real CSV / JSON / TXT with Preview & Deduplication) */}
       <UnifiedFormModal
         isOpen={showBulkImportModal}
-        onClose={() => setShowBulkImportModal(false)}
+        onClose={() => {
+          setShowBulkImportModal(false);
+          setBulkImportError(null);
+        }}
         title="Bulk Import Quotes"
         accentColor="#4f46e5"
         headerIcon={
@@ -1354,33 +1505,29 @@ export const QuotesManager: React.FC = () => {
           <div className="flex items-center justify-end gap-2">
             <button
               type="button"
-              onClick={() => setShowBulkImportModal(false)}
+              onClick={() => {
+                setShowBulkImportModal(false);
+                setBulkImportError(null);
+              }}
               className="px-4 py-2 rounded-full text-xs font-bold text-zinc-600 dark:text-zinc-400 hover:bg-[#eff2f9] dark:hover:bg-zinc-800 transition cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="button"
-              disabled={!bulkImportText.trim()}
-              onClick={() => {
-                const lines = bulkImportText.split('\n');
-                lines.forEach(line => {
-                  const parts = line.split(' - ');
-                  if (parts.length >= 2) {
-                    addQuote({
-                      text: parts[0].trim().replace(/^"|"$/g, ''),
-                      author: parts[1].trim(),
-                      category: 'wisdom',
-                    });
-                  }
-                });
-                setBulkImportText('');
-                setShowBulkImportModal(false);
-                soundEngine.playSuccessChime();
-              }}
+              disabled={
+                isParsingImport ||
+                !bulkImportPreview ||
+                bulkImportPreview.items.length === 0
+              }
+              onClick={handleConfirmBulkImport}
               className="px-5 py-2 rounded-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold transition cursor-pointer"
             >
-              Import Quotes
+              {bulkImportPreview && bulkImportPreview.items.length > 0
+                ? `Import ${bulkImportPreview.items.length.toLocaleString()} ${
+                    bulkImportPreview.items.length === 1 ? 'quote' : 'quotes'
+                  }`
+                : 'Import Quotes'}
             </button>
           </div>
         }
@@ -1388,56 +1535,69 @@ export const QuotesManager: React.FC = () => {
         <div className="bg-white dark:bg-[#18181e] p-3.5 rounded-[22px] ring-1 ring-black/[0.05] dark:ring-white/[0.08] space-y-2.5">
           <div className="flex items-center justify-between gap-2">
             <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
-              Paste quotes (Quote - Author per line)
+              Paste quotes or upload CSV / JSON / TXT
             </span>
             <label className="px-3 py-1 rounded-full bg-[#f3f6fc] dark:bg-zinc-800 text-xs font-bold text-indigo-600 dark:text-indigo-400 cursor-pointer shrink-0">
-              <span>Upload JSON/TXT</span>
+              <span>Upload CSV/JSON/TXT</span>
               <input
                 type="file"
                 accept=".csv,.json,.txt"
                 className="hidden"
-                onChange={e => {
-                  const file = e.target.files?.[0];
-                  if (!file) return;
-                  const reader = new FileReader();
-                  reader.onload = event => {
-                    const content = event.target?.result as string;
-                    if (!content) return;
-                    if (file.name.endsWith('.json')) {
-                      try {
-                        const parsed = JSON.parse(content);
-                        if (Array.isArray(parsed)) {
-                          parsed.forEach(q => {
-                            if (q.text && q.author) {
-                              addQuote({
-                                text: q.text,
-                                author: q.author,
-                                category: q.category || 'wisdom',
-                                source: q.source,
-                              });
-                            }
-                          });
-                          setShowBulkImportModal(false);
-                          soundEngine.playSuccessChime();
-                        }
-                      } catch {
-                        pushNotification('Import Error', 'Invalid JSON file format.', 'quote');
-                      }
-                    } else {
-                      setBulkImportText(content);
-                    }
-                  };
-                  reader.readAsText(file);
-                }}
+                onChange={handleBulkFileChange}
               />
             </label>
           </div>
+
           <textarea
             value={bulkImportText}
-            onChange={e => setBulkImportText(e.target.value)}
-            placeholder={'Example:\n"Education is the best friend." - Chanakya'}
-            className="w-full h-40 p-3 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 text-xs font-mono text-zinc-900 dark:text-white focus:outline-none"
+            onChange={e => {
+              setBulkImportFilename(undefined);
+              setBulkImportError(null);
+              setBulkImportText(e.target.value);
+            }}
+            placeholder={
+              'Examples:\n"Education is the best friend." - Chanakya | Wisdom | Chanakya Neeti\nQuote,Author,Category,Source\n"Stay focused.",Marcus Aurelius,Stoicism,Meditations'
+            }
+            className="w-full h-36 p-3 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 text-xs font-mono text-zinc-900 dark:text-white focus:outline-none"
           />
+
+          {bulkImportError && (
+            <p className="text-[11.5px] font-semibold text-rose-600 dark:text-rose-400">
+              {bulkImportError}
+            </p>
+          )}
+
+          {isParsingImport && (
+            <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+              Scanning quotes and checking duplicates…
+            </p>
+          )}
+
+          {!isParsingImport && bulkImportPreview && (
+            <div className="p-2.5 rounded-xl bg-[#f3f6fc] dark:bg-[#111116] ring-1 ring-black/[0.05] dark:ring-white/[0.07] space-y-1.5">
+              <p className="text-[11.5px] font-bold text-zinc-800 dark:text-zinc-100 tabular-nums">
+                Found {bulkImportPreview.items.length.toLocaleString()}{' '}
+                {bulkImportPreview.items.length === 1 ? 'quote' : 'quotes'}, skipped{' '}
+                {bulkImportPreview.skippedCount.toLocaleString()} (duplicates or empty)
+              </p>
+
+              {bulkImportPreview.items.length > 0 && (
+                <ul className="space-y-1 max-h-36 overflow-y-auto">
+                  {bulkImportPreview.items.slice(0, 5).map((item, idx) => (
+                    <li
+                      key={idx}
+                      className="text-[11px] text-zinc-600 dark:text-zinc-300 leading-snug border-t border-zinc-200/70 dark:border-zinc-800 pt-1 first:border-t-0 first:pt-0"
+                    >
+                      <span className="font-medium text-zinc-900 dark:text-zinc-100">
+                        “{item.text}”
+                      </span>{' '}
+                      <span className="opacity-80">— {item.author}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
         </div>
       </UnifiedFormModal>
     </div>

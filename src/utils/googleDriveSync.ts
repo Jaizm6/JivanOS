@@ -23,6 +23,10 @@
  */
 
 import {
+  deriveFavoriteIdsFromQuoteSyncData,
+  mergeQuoteSyncData,
+} from './quoteSync';
+import {
   auth,
   connectGoogleDriveWithFirebase,
   getInMemoryGDriveDisplayName,
@@ -800,8 +804,13 @@ export function mergeDriveData(
         : { ...(safeRemote.profile || {}), ...(safeLocal.profile || {}) };
   }
 
-  // Merge favoriteQuoteIds (string set union)
-  if (Array.isArray(safeLocal.favoriteQuoteIds) || Array.isArray(safeRemote.favoriteQuoteIds)) {
+  // Merge quoteLibrary (custom quotes, edits, deletions, timestamped favourites, categories)
+  if (safeLocal.quoteLibrary || safeRemote.quoteLibrary) {
+    const mergedQuoteLibrary = mergeQuoteSyncData(safeLocal.quoteLibrary, safeRemote.quoteLibrary);
+    merged.quoteLibrary = mergedQuoteLibrary;
+    merged.favoriteQuoteIds = deriveFavoriteIdsFromQuoteSyncData(mergedQuoteLibrary);
+  } else if (Array.isArray(safeLocal.favoriteQuoteIds) || Array.isArray(safeRemote.favoriteQuoteIds)) {
+    // Legacy fallback when neither side has quoteLibrary
     const favSet = new Set<string>([
       ...(Array.isArray(safeRemote.favoriteQuoteIds) ? safeRemote.favoriteQuoteIds : []),
       ...(Array.isArray(safeLocal.favoriteQuoteIds) ? safeLocal.favoriteQuoteIds : []),

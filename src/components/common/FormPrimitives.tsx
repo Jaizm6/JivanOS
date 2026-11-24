@@ -19,23 +19,40 @@ import { getAvailableAccentColors } from '../../utils/activityStyles';
 import { useApp } from '../../context/AppContext';
 import { PetalShapeBadge, PetalExpressiveShape } from './PetalExpressive';
 
-// Material 3 Expressive / ColorOS fluid emphasized motion curves
-export const FORM_EASE: [number, number, number, number] = [0.05, 0.7, 0.1, 1.0];
+// Material 3 Expressive snappy emphasized motion curves (zero lag, crisp settled frames)
+export const FORM_EASE: [number, number, number, number] = [0.2, 0.0, 0.0, 1.0];
 export const FORM_EXIT_EASE: [number, number, number, number] = [0.3, 0.0, 0.8, 0.15];
 
 export const FORM_SPRING = {
-  duration: 0.24,
+  duration: 0.17,
   ease: FORM_EASE,
 };
 
 export const FORM_EXIT_TRANSITION = {
-  duration: 0.17,
+  duration: 0.12,
   ease: FORM_EXIT_EASE,
 };
 
 export const SUB_MODAL_SPRING = {
-  duration: 0.2,
+  duration: 0.15,
   ease: FORM_EASE,
+};
+
+/**
+ * Removes GPU transform completely once a Framer Motion sheet settles at rest
+ * so desktop Chromium/Edge renders 100% razor-sharp native subpixel text (zero blur).
+ */
+export const CRISP_TRANSFORM_TEMPLATE = (
+  latest: { x?: string | number; y?: string | number; scale?: string | number },
+  generated: string
+) => {
+  const yNum = typeof latest.y === 'string' ? parseFloat(latest.y) : (latest.y ?? 0);
+  const xNum = typeof latest.x === 'string' ? parseFloat(latest.x) : (latest.x ?? 0);
+  const sNum = typeof latest.scale === 'string' ? parseFloat(latest.scale) : (latest.scale ?? 1);
+  if (Math.abs(yNum) < 0.05 && Math.abs(xNum) < 0.05 && Math.abs(sNum - 1) < 0.001) {
+    return 'none';
+  }
+  return generated;
 };
 
 let activeModalLockCount = 0;
@@ -165,20 +182,19 @@ export const UnifiedFormModal: React.FC<UnifiedFormModalProps> = ({
           <motion.div
             data-unified-modal="true"
             initial={{ opacity: 0 }}
-            animate={{ opacity: 1, transition: { duration: 0.2, ease: FORM_EASE } }}
+            animate={{ opacity: 1, transition: { duration: 0.14, ease: FORM_EASE } }}
             exit={{ opacity: 0, transition: FORM_EXIT_TRANSITION }}
-            style={{ willChange: 'opacity' }}
             className="fixed inset-0 bg-black/55 dark:bg-black/75 touch-none overscroll-none"
             onClick={onClose}
           />
 
-          {/* Separate Composited Sheet / Modal Container */}
+          {/* Separate Composited Sheet / Modal Container (transform clears to 'none' when settled for razor-sharp PC text) */}
           <motion.div
             data-unified-modal="true"
-            initial={{ opacity: 0, y: 22, scale: 0.97 }}
+            initial={{ opacity: 0, y: 14, scale: 0.985 }}
             animate={{ opacity: 1, y: 0, scale: 1, transition: FORM_SPRING }}
-            exit={{ opacity: 0, y: 16, scale: 0.97, transition: FORM_EXIT_TRANSITION }}
-            style={{ willChange: 'transform, opacity' }}
+            exit={{ opacity: 0, y: 10, scale: 0.985, transition: FORM_EXIT_TRANSITION }}
+            transformTemplate={CRISP_TRANSFORM_TEMPLATE}
             onClick={e => e.stopPropagation()}
             className={`relative z-10 w-full ${maxWidthClass} h-[84dvh] max-h-[92dvh] sm:h-[min(650px,86dvh)] sm:max-h-[86dvh] min-h-0 bg-[#f6f8fc] dark:bg-[#0d0d11] text-zinc-900 dark:text-zinc-100 rounded-t-[28px] sm:rounded-[28px] ring-1 ring-black/[0.06] dark:ring-white/[0.08] shadow-2xl flex flex-col overflow-hidden touch-auto`}
           >
@@ -314,19 +330,18 @@ export const UnifiedSubModal: React.FC<UnifiedSubModalProps> = ({
           <motion.div
             data-unified-modal="true"
             initial={{ opacity: 0 }}
-            animate={{ opacity: 1, transition: { duration: 0.18, ease: FORM_EASE } }}
+            animate={{ opacity: 1, transition: { duration: 0.13, ease: FORM_EASE } }}
             exit={{ opacity: 0, transition: FORM_EXIT_TRANSITION }}
-            style={{ willChange: 'opacity' }}
             className="fixed inset-0 bg-black/55 dark:bg-black/75 touch-none overscroll-none"
             onClick={onClose}
           />
 
           <motion.div
             data-unified-modal="true"
-            initial={{ opacity: 0, y: 18, scale: 0.97 }}
+            initial={{ opacity: 0, y: 12, scale: 0.985 }}
             animate={{ opacity: 1, y: 0, scale: 1, transition: SUB_MODAL_SPRING }}
-            exit={{ opacity: 0, y: 14, scale: 0.97, transition: FORM_EXIT_TRANSITION }}
-            style={{ willChange: 'transform, opacity' }}
+            exit={{ opacity: 0, y: 8, scale: 0.985, transition: FORM_EXIT_TRANSITION }}
+            transformTemplate={CRISP_TRANSFORM_TEMPLATE}
             onClick={e => e.stopPropagation()}
             className={`relative z-10 w-full ${maxWidthClass} h-[58dvh] max-h-[86dvh] sm:h-[min(460px,82dvh)] sm:max-h-[82dvh] min-h-0 bg-[#f6f8fc] dark:bg-[#0d0d11] text-zinc-900 dark:text-zinc-100 rounded-t-[28px] sm:rounded-[26px] ring-1 ring-black/[0.06] dark:ring-white/[0.08] shadow-2xl flex flex-col overflow-hidden touch-auto`}
           >

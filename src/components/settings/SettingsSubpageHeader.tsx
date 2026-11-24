@@ -18,7 +18,10 @@ export const SettingsSubpageHeader: React.FC<SettingsSubpageHeaderProps> = ({
   actions,
 }) => {
   return (
-    <header className="flex items-center justify-between gap-2 min-h-[48px] pb-1 w-full min-w-0">
+    <div
+      data-inpage-header="true"
+      className="flex items-center justify-between gap-2 min-h-[44px] pb-0.5 w-full min-w-0"
+    >
       <div className="flex items-center gap-2 min-w-0 flex-1">
         <button
           type="button"
@@ -40,6 +43,6 @@ export const SettingsSubpageHeader: React.FC<SettingsSubpageHeaderProps> = ({
           {actions}
         </div>
       )}
-    </header>
+    </div>
   );
 };

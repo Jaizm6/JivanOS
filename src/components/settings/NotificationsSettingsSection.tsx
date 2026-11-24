@@ -3,7 +3,6 @@ import { ChevronRight } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import {
   AlarmPopupStyle,
-  NotificationPopupStyle,
   soundEngine,
 } from '../../utils/audio';
 import { haptics } from '../../utils/haptics';
@@ -25,9 +24,6 @@ export const NotificationsSettingsSection: React.FC<NotificationsSettingsSection
     pushNotification,
   } = useApp();
 
-  const [notifPopupStyle, setNotifPopupStyle] = useState<NotificationPopupStyle>(() =>
-    soundEngine.getNotificationPopupStyle()
-  );
   const [alarmPopupStyle, setAlarmPopupStyle] = useState<AlarmPopupStyle>(() =>
     soundEngine.getAlarmPopupStyle()
   );
@@ -44,88 +40,7 @@ export const NotificationsSettingsSection: React.FC<NotificationsSettingsSection
 
   return (
     <div className="space-y-4 w-full min-w-0">
-      {/* Group 1: Visual Notification Style Selector (Mini Phone Previews like 00:14) */}
-      <div className="space-y-1.5">
-        <div className="flex items-center justify-between px-3">
-          <span className="text-xs font-medium text-slate-500 dark:text-zinc-400">
-            Notification style
-          </span>
-          <button
-            type="button"
-            onClick={() =>
-              pushNotification(
-                'Sample Task Reminder',
-                'Review your top priorities for today',
-                'task',
-                { sound: 'task' }
-              )
-            }
-            className="text-xs font-semibold text-[#4F46E5] dark:text-indigo-400 hover:underline cursor-pointer"
-          >
-            Preview
-          </button>
-        </div>
-
-        <div className="rounded-[22px] bg-white dark:bg-zinc-900 border border-[#E5E7EB]/80 dark:border-zinc-800/90 p-4">
-          <div className="grid grid-cols-4 gap-2 sm:gap-3">
-            {[
-              { id: 'ticktick_card' as NotificationPopupStyle, label: 'Sheet', pos: 'bottom' },
-              { id: 'dynamic_island' as NotificationPopupStyle, label: 'Pill', pos: 'pill' },
-              { id: 'android_heads_up' as NotificationPopupStyle, label: 'Banner', pos: 'top' },
-              { id: 'compact_card' as NotificationPopupStyle, label: 'Toast', pos: 'compact' },
-            ].map((opt) => {
-              const active = notifPopupStyle === opt.id;
-              return (
-                <button
-                  key={opt.id}
-                  type="button"
-                  onClick={() => {
-                    setNotifPopupStyle(opt.id);
-                    soundEngine.setNotificationPopupStyle(opt.id);
-                    haptics.toggle();
-                  }}
-                  className="flex flex-col items-center gap-1.5 cursor-pointer group"
-                >
-                  <div
-                    className={`w-full max-w-[68px] h-[94px] rounded-[14px] p-1.5 border-2 transition flex flex-col justify-between bg-gradient-to-b from-sky-100/70 via-indigo-50/50 to-slate-100 dark:from-zinc-800 dark:to-zinc-950 ${
-                      active
-                        ? 'border-[#4F46E5] ring-2 ring-[#4F46E5]/20'
-                        : 'border-slate-200 dark:border-zinc-700 opacity-75 group-hover:opacity-100'
-                    }`}
-                  >
-                    {opt.pos === 'pill' ? (
-                      <div className="w-9 h-2.5 rounded-full bg-slate-900 dark:bg-indigo-400 mx-auto mt-0.5" />
-                    ) : opt.pos === 'top' ? (
-                      <div className="w-full h-5 rounded-md bg-white dark:bg-zinc-700 shadow-2xs" />
-                    ) : opt.pos === 'compact' ? (
-                      <div className="w-10 h-3 rounded-full bg-white dark:bg-zinc-700 shadow-2xs mx-auto mt-0.5" />
-                    ) : (
-                      <div />
-                    )}
-
-                    {opt.pos === 'bottom' ? (
-                      <div className="w-full h-7 rounded-lg bg-slate-900 dark:bg-indigo-500/80" />
-                    ) : (
-                      <div className="h-1 w-5 rounded-full bg-slate-300 dark:bg-zinc-700 mx-auto" />
-                    )}
-                  </div>
-                  <span
-                    className={`text-xs truncate ${
-                      active
-                        ? 'font-semibold text-[#4F46E5] dark:text-indigo-400'
-                        : 'font-medium text-slate-600 dark:text-zinc-400'
-                    }`}
-                  >
-                    {opt.label}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-
-      {/* Group 2: Alarm Overlay & Permissions */}
+      {/* Group 1: Alarm Overlay & Permissions */}
       <div className="rounded-[22px] bg-white dark:bg-zinc-900 border border-[#E5E7EB]/80 dark:border-zinc-800/90 overflow-hidden">
         {/* Active Alarm Overlay Segmented Row */}
         <div className="p-4 space-y-2.5">

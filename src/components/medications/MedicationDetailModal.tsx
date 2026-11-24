@@ -22,6 +22,7 @@ import {
   FORM_EASE,
   FORM_SPRING,
   FORM_EXIT_TRANSITION,
+  CRISP_TRANSFORM_TEMPLATE,
   UNIFIED_MODAL_POSITION_CLASS,
   useModalScrollLock,
 } from '../common/FormPrimitives';
@@ -43,8 +44,9 @@ export const MedicationDetailModal: React.FC<MedicationDetailModalProps> = ({
   onDelete,
   onRefill,
 }) => {
-  const { medications, updateMedication, pushNotification } = useApp();
+  const { medications, updateMedication, logDose, unlogDose, pushNotification } = useApp();
   const medication = medications.find(m => m.id === initialMedication.id) || initialMedication;
+  const todayStr = new Date().toISOString().split('T')[0];
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState(false);
 
@@ -79,9 +81,8 @@ export const MedicationDetailModal: React.FC<MedicationDetailModalProps> = ({
       <motion.div
         data-unified-modal="true"
         initial={{ opacity: 0 }}
-        animate={{ opacity: 1, transition: { duration: 0.2, ease: FORM_EASE } }}
+        animate={{ opacity: 1, transition: { duration: 0.14, ease: FORM_EASE } }}
         exit={{ opacity: 0, transition: FORM_EXIT_TRANSITION }}
-        style={{ willChange: 'opacity' }}
         className="fixed inset-0 bg-black/55 dark:bg-black/75 touch-none overscroll-none"
         onClick={onClose}
       />
@@ -89,10 +90,10 @@ export const MedicationDetailModal: React.FC<MedicationDetailModalProps> = ({
       {/* Separate Composited Material 3 Expressive Sheet */}
       <motion.div
         data-unified-modal="true"
-        initial={{ opacity: 0, y: 22, scale: 0.97 }}
+        initial={{ opacity: 0, y: 14, scale: 0.985 }}
         animate={{ opacity: 1, y: 0, scale: 1, transition: FORM_SPRING }}
-        exit={{ opacity: 0, y: 16, scale: 0.97, transition: FORM_EXIT_TRANSITION }}
-        style={{ willChange: 'transform, opacity' }}
+        exit={{ opacity: 0, y: 10, scale: 0.985, transition: FORM_EXIT_TRANSITION }}
+        transformTemplate={CRISP_TRANSFORM_TEMPLATE}
         onClick={e => e.stopPropagation()}
         className="relative z-10 w-full sm:max-w-lg max-h-[90dvh] sm:max-h-[86dvh] min-h-0 bg-[#f6f8fc] dark:bg-[#0d0d11] text-zinc-900 dark:text-zinc-100 rounded-t-[28px] sm:rounded-[28px] ring-1 ring-black/[0.06] dark:ring-white/[0.08] shadow-2xl flex flex-col overflow-hidden touch-auto"
       >
@@ -158,7 +159,7 @@ export const MedicationDetailModal: React.FC<MedicationDetailModalProps> = ({
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-3.5 sm:p-4 space-y-3 custom-scrollbar">
           {/* Inventory Stock Card */}
           <div className="bg-white dark:bg-[#18181e] ring-1 ring-black/[0.045] dark:ring-white/[0.07] rounded-[22px] p-4 space-y-2.5">
-            <div className="flex items-center justify-between text-xs">
+            <div className="flex items-center justify-between gap-2 text-xs">
               <span className="font-bold text-zinc-700 dark:text-zinc-200">Inventory Stock</span>
               <span className="font-mono font-bold text-zinc-900 dark:text-white tabular-nums">
                 {medication.remainingPills} / {medication.totalPills} units
@@ -197,28 +198,70 @@ export const MedicationDetailModal: React.FC<MedicationDetailModalProps> = ({
             <span className="text-[11px] font-bold text-zinc-500 dark:text-zinc-400 px-1 block">
               Scheduled Doses ({medication.schedules.length})
             </span>
-            {medication.schedules.length === 0 ? (
-              <div className="bg-white dark:bg-[#18181e] ring-1 ring-black/[0.045] dark:ring-white/[0.07] rounded-[20px] px-3.5 py-3 text-xs text-zinc-500 dark:text-zinc-400">
-                Take as needed (PRN)
-              </div>
-            ) : (
+            {medication.schedules.length === 0 ? (() => {
+              const prnCountToday = medLogs.filter(
+                d => d.loggedAt.startsWith(todayStr) && d.status === 'taken'
+              ).length;
+              return (
+                <div className="bg-white dark:bg-[#18181e] ring-1 ring-black/[0.045] dark:ring-white/[0.07] rounded-[20px] px-3.5 py-2.5 text-xs text-zinc-500 dark:text-zinc-400 flex items-center justify-between gap-2">
+                  <span>Take as needed (PRN)</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      prnCountToday > 0
+                        ? unlogDose(medication.id, 'PRN', todayStr)
+                        : logDose(medication.id, 'PRN', 'taken')
+                    }
+                    title={prnCountToday > 0 ? 'Tap to untick last dose' : 'Log dose taken'}
+                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold transition-colors cursor-pointer shrink-0 ${
+                      prnCountToday > 0
+                        ? 'bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-600 dark:text-emerald-400'
+                        : 'bg-indigo-600 hover:bg-indigo-500 text-white'
+                    }`}
+                  >
+                    <Check className="w-3 h-3 stroke-[2.75]" />
+                    <span>{prnCountToday > 0 ? `${prnCountToday} Taken` : 'Take'}</span>
+                  </button>
+                </div>
+              );
+            })() : (
               <div className="space-y-[3px]">
                 {medication.schedules.map((sched, idx) => {
                   const radiusCls = getPetalGroupRadiusClass(idx, medication.schedules.length);
+                  const isTakenToday = medLogs.some(
+                    d =>
+                      d.scheduledTime === sched.time &&
+                      d.loggedAt.startsWith(todayStr) &&
+                      d.status === 'taken'
+                  );
                   return (
                     <div
                       key={`${sched.time}-${idx}`}
                       className={`${radiusCls} flex items-center justify-between px-3.5 py-2.5 bg-white dark:bg-[#18181e] ring-1 ring-black/[0.04] dark:ring-white/[0.06] text-xs`}
                     >
                       <span className="font-mono font-bold text-zinc-800 dark:text-zinc-200 flex items-center gap-2 tabular-nums">
-                        <Clock className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                        <Clock className={`w-3.5 h-3.5 shrink-0 ${isTakenToday ? 'text-emerald-500' : 'text-indigo-500'}`} />
                         <span>
                           {sched.time} ({sched.label})
                         </span>
                       </span>
-                      <span className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400">
-                        Active
-                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          isTakenToday
+                            ? unlogDose(medication.id, sched.time, todayStr)
+                            : logDose(medication.id, sched.time, 'taken')
+                        }
+                        title={isTakenToday ? 'Tap to untick dose' : 'Log dose taken'}
+                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold transition-colors cursor-pointer shrink-0 ${
+                          isTakenToday
+                            ? 'bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-600 dark:text-emerald-400'
+                            : 'bg-indigo-600 hover:bg-indigo-500 text-white'
+                        }`}
+                      >
+                        <Check className="w-3 h-3 stroke-[2.75]" />
+                        <span>{isTakenToday ? 'Taken' : 'Take'}</span>
+                      </button>
                     </div>
                   );
                 })}
@@ -268,8 +311,8 @@ export const MedicationDetailModal: React.FC<MedicationDetailModalProps> = ({
           </div>
         </div>
 
-        {/* Bottom Sticky Footer (Delete on left, Edit + Primary Refill CTA on right — matches Tasks) */}
-        <div className="shrink-0 bg-white/95 dark:bg-[#141418]/95 border-t border-zinc-200/60 dark:border-zinc-800/70 px-4 py-2.5 pb-[max(0.875rem,env(safe-area-inset-bottom))] flex items-center justify-between gap-2 z-10">
+        {/* Bottom Sticky Footer (Delete on left, Archive + Edit + Refill on right) */}
+        <div className="shrink-0 bg-white/95 dark:bg-[#141418]/95 border-t border-zinc-200/60 dark:border-zinc-800/70 px-3 sm:px-4 py-2.5 pb-[max(0.875rem,env(safe-area-inset-bottom))] flex items-center justify-between gap-1.5 z-10">
           <div>
             {confirmDelete ? (
               <div className="flex items-center gap-1.5">
@@ -279,14 +322,14 @@ export const MedicationDetailModal: React.FC<MedicationDetailModalProps> = ({
                     onDelete(medication.id);
                     onClose();
                   }}
-                  className="px-3.5 py-2 rounded-full bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold cursor-pointer transition-colors"
+                  className="px-3 py-2 rounded-full bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold cursor-pointer transition-colors whitespace-nowrap"
                 >
-                  Confirm Delete
+                  Confirm
                 </button>
                 <button
                   type="button"
                   onClick={() => setConfirmDelete(false)}
-                  className="px-3 py-2 rounded-full bg-[#eff2f9] dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 text-xs font-semibold cursor-pointer"
+                  className="px-2.5 py-2 rounded-full bg-[#eff2f9] dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 text-xs font-semibold cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -295,11 +338,11 @@ export const MedicationDetailModal: React.FC<MedicationDetailModalProps> = ({
               <button
                 type="button"
                 onClick={() => setConfirmDelete(true)}
-                className="px-3.5 py-2 rounded-full font-bold text-xs text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-950/70 transition-colors cursor-pointer flex items-center gap-1.5"
+                className="px-2.5 sm:px-3.5 py-2 rounded-full font-bold text-xs text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-950/70 transition-colors cursor-pointer flex items-center gap-1 whitespace-nowrap"
                 title="Delete Medication"
               >
                 <Trash2 size={13.5} />
-                <span>Delete</span>
+                <span className="hidden sm:inline">Delete</span>
               </button>
             )}
           </div>
@@ -324,7 +367,7 @@ export const MedicationDetailModal: React.FC<MedicationDetailModalProps> = ({
                   setConfirmArchive(true);
                 }
               }}
-              className={`px-3.5 py-2 rounded-full text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+              className={`px-3 py-2 rounded-full text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
                 medication.archived
                   ? 'bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100'
                   : 'bg-[#eff2f9] dark:bg-zinc-800/90 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200/80 dark:hover:bg-zinc-700'
@@ -341,20 +384,22 @@ export const MedicationDetailModal: React.FC<MedicationDetailModalProps> = ({
                 onEdit(medication);
                 onClose();
               }}
-              className="px-3.5 py-2 rounded-full text-xs font-bold bg-[#eff2f9] dark:bg-zinc-800/90 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200/80 dark:hover:bg-zinc-700 transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0"
+              className="px-3 py-2 rounded-full text-xs font-bold bg-[#eff2f9] dark:bg-zinc-800/90 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200/80 dark:hover:bg-zinc-700 transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0"
             >
               <Edit2 size={13} />
               <span>Edit</span>
             </button>
 
-            <button
-              type="button"
-              onClick={() => onRefill(medication.id)}
-              className="px-4 py-2 rounded-full bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white text-xs font-bold shadow-sm transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0"
-            >
-              <RefreshCw size={13} />
-              <span>Refill</span>
-            </button>
+            {!medication.endDate && (
+              <button
+                type="button"
+                onClick={() => onRefill(medication.id)}
+                className="px-3.5 py-2 rounded-full bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white text-xs font-bold shadow-sm transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0"
+              >
+                <RefreshCw size={13} />
+                <span>+ Refill</span>
+              </button>
+            )}
           </div>
         </div>
       </motion.div>

@@ -24,6 +24,7 @@ import {
   FORM_EASE,
   FORM_SPRING,
   FORM_EXIT_TRANSITION,
+  CRISP_TRANSFORM_TEMPLATE,
   UNIFIED_MODAL_POSITION_CLASS,
   useModalScrollLock,
 } from '../common/FormPrimitives';
@@ -41,7 +42,7 @@ export const BillDetailModal: React.FC<BillDetailModalProps> = ({
   onEdit,
   onDelete,
 }) => {
-  const { bills, markBillPaid, updateBill, pushNotification, currencySymbol } = useApp();
+  const { bills, markBillPaid, unmarkBillPaid, updateBill, pushNotification, currencySymbol } = useApp();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState(false);
 
@@ -74,9 +75,8 @@ export const BillDetailModal: React.FC<BillDetailModalProps> = ({
       <motion.div
         data-unified-modal="true"
         initial={{ opacity: 0 }}
-        animate={{ opacity: 1, transition: { duration: 0.2, ease: FORM_EASE } }}
+        animate={{ opacity: 1, transition: { duration: 0.14, ease: FORM_EASE } }}
         exit={{ opacity: 0, transition: FORM_EXIT_TRANSITION }}
-        style={{ willChange: 'opacity' }}
         className="fixed inset-0 bg-black/55 dark:bg-black/75 touch-none overscroll-none"
         onClick={onClose}
       />
@@ -84,10 +84,10 @@ export const BillDetailModal: React.FC<BillDetailModalProps> = ({
       {/* Separate Composited Material 3 Expressive Sheet */}
       <motion.div
         data-unified-modal="true"
-        initial={{ opacity: 0, y: 22, scale: 0.97 }}
+        initial={{ opacity: 0, y: 14, scale: 0.985 }}
         animate={{ opacity: 1, y: 0, scale: 1, transition: FORM_SPRING }}
-        exit={{ opacity: 0, y: 16, scale: 0.97, transition: FORM_EXIT_TRANSITION }}
-        style={{ willChange: 'transform, opacity' }}
+        exit={{ opacity: 0, y: 10, scale: 0.985, transition: FORM_EXIT_TRANSITION }}
+        transformTemplate={CRISP_TRANSFORM_TEMPLATE}
         onClick={e => e.stopPropagation()}
         className="relative z-10 w-full sm:max-w-lg max-h-[90dvh] sm:max-h-[86dvh] min-h-0 bg-[#f6f8fc] dark:bg-[#0d0d11] text-zinc-900 dark:text-zinc-100 rounded-t-[28px] sm:rounded-[28px] ring-1 ring-black/[0.06] dark:ring-white/[0.08] shadow-2xl flex flex-col overflow-hidden touch-auto"
       >
@@ -378,21 +378,33 @@ export const BillDetailModal: React.FC<BillDetailModalProps> = ({
               <span>Edit</span>
             </button>
 
-            {!bill.isPaid && !bill.archived && (
-              <button
-                type="button"
-                onClick={() => {
-                  markBillPaid(bill.id, bill.amount);
-                  onClose();
-                }}
-                className="px-4 sm:px-4.5 py-2 rounded-full bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white text-xs font-bold shadow-sm transition-all cursor-pointer flex items-center gap-1.5 tabular-nums whitespace-nowrap shrink-0"
-              >
-                <Check size={14} className="stroke-[2.5]" />
-                <span>
-                  Pay {symbol}
-                  {bill.amount.toLocaleString('en-IN')}
-                </span>
-              </button>
+            {!bill.archived && (
+              bill.isPaid ? (
+                <button
+                  type="button"
+                  onClick={() => unmarkBillPaid(bill.id)}
+                  title="Paid — tap to untick"
+                  className="px-4 sm:px-4.5 py-2 rounded-full bg-emerald-500/15 hover:bg-emerald-500/25 active:scale-95 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0"
+                >
+                  <Check size={14} className="stroke-[2.75]" />
+                  <span>Paid</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    markBillPaid(bill.id, bill.amount);
+                    onClose();
+                  }}
+                  className="px-4 sm:px-4.5 py-2 rounded-full bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white text-xs font-bold shadow-sm transition-all cursor-pointer flex items-center gap-1.5 tabular-nums whitespace-nowrap shrink-0"
+                >
+                  <Check size={14} className="stroke-[2.5]" />
+                  <span>
+                    Pay {symbol}
+                    {bill.amount.toLocaleString('en-IN')}
+                  </span>
+                </button>
+              )
             )}
           </div>
         </div>

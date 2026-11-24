@@ -251,10 +251,10 @@ export const UniformTaskCard = React.memo<UniformTaskCardProps>(({
           : ''
       } ${className}`}
     >
-      {/* Primary Row: Checkbox on top + Title */}
-      <div className="flex items-start gap-2.5 min-w-0 w-full">
-        {/* Generous 36px tap area centered on 20px circle */}
-        <div className="relative flex items-center justify-center w-[20px] h-[20px] shrink-0">
+      {/* Primary Row: Vertically Centered 25px Check Circle + Title */}
+      <div className="flex items-center gap-2.5 min-w-0 w-full">
+        {/* Generous 45px tap area centered on 25px circle */}
+        <div className="relative flex items-center justify-center w-[25px] h-[25px] shrink-0">
           <CheckmarkCelebration
             activeKey={isAnimating ? celebrationKey : null}
             badgeText="Done✅"
@@ -263,18 +263,18 @@ export const UniformTaskCard = React.memo<UniformTaskCardProps>(({
           />
           <motion.button
             type="button"
-            whileTap={{ scale: 0.86 }}
-            animate={isSuccessScale ? { scale: [1, 1.25, 1] } : { scale: 1 }}
+            whileTap={{ scale: 0.88 }}
+            animate={isSuccessScale ? { scale: [1, 1.2, 1] } : { scale: 1 }}
             transition={{ duration: 0.34, ease: 'easeOut' }}
             onPointerDown={e => e.stopPropagation()}
             onMouseDown={e => e.stopPropagation()}
             onTouchStart={e => e.stopPropagation()}
             onClick={handleCheckboxClick}
             title={`Eisenhower: ${qStr === 'urgent_important' ? 'DO (Urg & Imp)' : qStr === 'not_urgent_important' ? 'PLAN (Imp)' : qStr === 'urgent_not_important' ? 'PASS (Urg)' : 'SKIP (Neither)'} — Click to toggle completion`}
-            className="absolute -inset-2 flex items-center justify-center rounded-full cursor-pointer touch-manipulation z-10 hover:bg-slate-100/70 dark:hover:bg-slate-800/60 transition-colors"
+            className="absolute -inset-2.5 flex items-center justify-center rounded-full cursor-pointer touch-manipulation z-10 hover:bg-slate-100/70 dark:hover:bg-slate-800/60 transition-colors"
             aria-label={isDone ? 'Mark task incomplete' : 'Mark task complete'}
           >
-            <span className={`w-5 h-5 rounded-full flex items-center justify-center transition-all ${checkboxClasses}`}>
+            <span className={`w-[25px] h-[25px] rounded-full flex items-center justify-center transition-all ${checkboxClasses}`}>
               {(task.completed || isAnimating) && (
                 <AnimatedCheckIcon className="w-3.5 h-3.5 text-white" strokeWidth={3} animate={isAnimating} />
               )}

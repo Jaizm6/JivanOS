@@ -185,7 +185,7 @@ export function validateBackupPayload(rawJson: string): BackupValidationResult {
     'deletedIds',
   ] as const;
 
-  const objectKeys = ['profile', 'hydration', 'appLock'] as const;
+  const objectKeys = ['profile', 'hydration', 'appLock', 'quoteLibrary'] as const;
 
   // Reject if any present core collection has the wrong data type
   for (const key of arrayKeys) {

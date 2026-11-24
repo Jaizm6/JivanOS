@@ -21,7 +21,13 @@ import { LinkTasksModal } from './LinkTasksModal';
 import { LinkEntitiesModal } from './LinkEntitiesModal';
 import { TaskFormModal } from '../tasks/TaskFormModal';
 import { HabitFormModal } from '../habits/HabitFormModal';
-import { PetalShapeBadge, getPetalGroupRadiusClass, SmoothCollapse } from '../common/PetalExpressive';
+import {
+  PetalShapeBadge,
+  getPetalGroupRadiusClass,
+  SmoothCollapse,
+  useIsDesktopMd,
+  distributeIntoTwoColumns,
+} from '../common/PetalExpressive';
 import { getSafeFontColor } from '../../utils/activityStyles';
 import { InlineTagMeta } from '../common/TagVisuals';
 import { ArchiveConfirmModal } from '../common/ArchiveConfirmModal';
@@ -94,6 +100,7 @@ export const GoalsManager: React.FC = () => {
 
   const [filterMode, setFilterMode] = useState<'all' | 'linked' | 'completed' | 'archived'>('all');
   const [pendingArchiveGoal, setPendingArchiveGoal] = useState<Goal | null>(null);
+  const isDesktopMd = useIsDesktopMd();
 
   const todayStr = useMemo(() => {
     const d = new Date();
@@ -300,11 +307,11 @@ export const GoalsManager: React.FC = () => {
           <button
             type="button"
             onClick={() => setShowGoalModal(true)}
-            className="h-8 w-8 sm:w-auto sm:px-3 rounded-lg bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-xs font-bold transition shadow-2xs shrink-0 cursor-pointer flex items-center justify-center gap-1 whitespace-nowrap"
+            className="h-8 w-8 rounded-lg bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white transition shadow-2xs shrink-0 cursor-pointer flex items-center justify-center"
             title="New Goal"
+            aria-label="New Goal"
           >
             <Plus className="w-4 h-4 stroke-[2.5]" />
-            <span className="hidden sm:inline">New Goal</span>
           </button>
         </div>
       </div>
@@ -389,8 +396,8 @@ export const GoalsManager: React.FC = () => {
           </div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-1.5 md:gap-2 items-start">
-          {filteredGoals.map((goal, goalIdx) => {
+        (() => {
+          const renderGoalCard = (goal: Goal, goalIdx: number, colTotal: number) => {
             const metrics = goalMetricsById[goal.id];
             const linkedTasks = metrics?.linkedTasks || [];
             const linkedHabits = metrics?.linkedHabits || [];
@@ -438,10 +445,10 @@ export const GoalsManager: React.FC = () => {
                 key={goal.id}
                 data-m3-tonal-card="true"
                 data-tonal-tone={goal.archived ? 'archived' : isCompleted ? 'done' : 'neutral'}
-                className={`group relative p-2.5 sm:p-3 ${getPetalGroupRadiusClass(goalIdx, filteredGoals.length, false)} md:rounded-[20px] flex flex-col justify-between gap-2`}
+                className={`group relative w-full min-w-0 max-w-full overflow-hidden p-2.5 sm:p-3 ${getPetalGroupRadiusClass(goalIdx, colTotal, false)} flex flex-col justify-between gap-2`}
               >
                 {/* Compact Header: M3 Petal Badge, Title, Metadata & Quick Actions */}
-                <div className="space-y-1.5">
+                <div className="space-y-1.5 min-w-0 w-full">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-start gap-2 min-w-0 flex-1">
                       <PetalShapeBadge
@@ -503,18 +510,16 @@ export const GoalsManager: React.FC = () => {
 
                     {/* Right Actions */}
                     <div className="flex items-center gap-0.5 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => handleToggleArchiveGoal(goal)}
-                        className="w-7 h-7 rounded-full flex items-center justify-center text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
-                        title={goal.archived ? 'Restore Goal' : 'Archive Goal'}
-                      >
-                        {goal.archived ? (
-                          <ArchiveRestore className="w-3.5 h-3.5" />
-                        ) : (
+                      {!goal.archived && (
+                        <button
+                          type="button"
+                          onClick={() => handleToggleArchiveGoal(goal)}
+                          className="w-7 h-7 rounded-full flex items-center justify-center text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+                          title="Archive Goal"
+                        >
                           <Archive className="w-3.5 h-3.5" />
-                        )}
-                      </button>
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => setEditingGoal(goal)}
@@ -532,83 +537,65 @@ export const GoalsManager: React.FC = () => {
                     </p>
                   )}
 
-                  {/* Compact M3 Subcard Progress Strip */}
-                  <div
-                    data-m3-tonal-card="true"
-                    data-tonal-tone="subcard"
-                    className="px-2.5 py-1.5 rounded-[12px] flex items-center gap-2.5"
-                  >
-                    <div className="flex-1 min-w-0 space-y-1">
-                      <div className="flex items-center justify-between gap-2 text-[11px]">
-                        <span className="font-bold text-slate-700 dark:text-zinc-200">
-                          Progress
-                        </span>
-                        <span className="text-[10.5px] font-semibold text-slate-500 dark:text-zinc-400 tabular-nums">
-                          {totalCount > 0 ? `${completedCount}/${totalCount} done` : 'No items'}
-                        </span>
-                      </div>
-                      <div className="relative w-full h-1.5 rounded-full bg-slate-200/90 dark:bg-zinc-800 overflow-hidden">
-                        <div
-                          className="h-full rounded-full transition-[width] duration-300 ease-out"
-                          style={{
-                            width: `${calculatedProgress}%`,
-                            backgroundColor: isCompleted ? '#10b981' : accentColor,
-                          }}
-                        />
-                      </div>
-                    </div>
-                    <span
-                      className="text-xs font-extrabold tabular-nums shrink-0"
-                      style={{ color: isCompleted ? '#10b981' : accentColor }}
-                    >
-                      {calculatedProgress}%
-                    </span>
-                  </div>
                 </div>
 
-                {/* Collapsible Milestones Drawer (Collapsed by default for clean compact mobile/desktop density) */}
-                <div>
+                {/* Unified Compact Milestones + Progress Drawer */}
+                <div className="min-w-0 w-full">
                   <button
                     type="button"
                     onClick={() => toggleGoalExpanded(goal.id)}
-                    className="w-full px-2.5 py-1.5 rounded-[12px] bg-[#f5f7fb] dark:bg-[#171a24] border border-slate-300/80 dark:border-zinc-700/80 hover:border-indigo-300 dark:hover:border-indigo-500/60 flex items-center justify-between gap-2 text-[11px] transition-colors cursor-pointer"
+                    className="w-full min-w-0 px-2.5 py-1.5 rounded-[12px] bg-[#f5f7fb] dark:bg-[#171a24] border border-slate-300/80 dark:border-zinc-700/80 hover:border-indigo-300 dark:hover:border-indigo-500/60 flex flex-col gap-1.5 text-[11px] transition-colors cursor-pointer"
                   >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="font-bold text-slate-700 dark:text-zinc-200">
-                        Milestones
-                      </span>
-                      <span className="text-slate-400 dark:text-zinc-500 font-semibold tabular-nums inline-flex items-center gap-1.5">
-                        <span className="inline-flex items-center gap-0.5">
-                          <CheckSquare className="w-3 h-3 text-indigo-500" />
-                          {linkedTasks.length}
+                    <div className="w-full min-w-0 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="font-bold text-slate-700 dark:text-zinc-200 shrink-0">
+                          Milestones
                         </span>
-                        <span>·</span>
-                        <span className="inline-flex items-center gap-0.5">
-                          <Flame className="w-3 h-3 text-emerald-500" />
-                          {linkedHabits.length}
+                        <span className="text-slate-400 dark:text-zinc-500 font-semibold tabular-nums inline-flex items-center gap-1.5 shrink-0">
+                          <span className="inline-flex items-center gap-0.5">
+                            <CheckSquare className="w-3 h-3 text-indigo-500" />
+                            {linkedTasks.length}
+                          </span>
+                          <span>·</span>
+                          <span className="inline-flex items-center gap-0.5">
+                            <Flame className="w-3 h-3 text-emerald-500" />
+                            {linkedHabits.length}
+                          </span>
                         </span>
-                      </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="text-[10.5px] font-semibold text-slate-500 dark:text-zinc-400 tabular-nums">
+                          {totalCount > 0 ? `${completedCount}/${totalCount}` : '0/0'}
+                        </span>
+                        <span
+                          className="text-[11px] font-extrabold tabular-nums"
+                          style={{ color: isCompleted ? '#10b981' : accentColor }}
+                        >
+                          {calculatedProgress}%
+                        </span>
+                        {isExpanded ? (
+                          <ChevronUp className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                        ) : (
+                          <ChevronDown className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                        )}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1 text-indigo-600 dark:text-indigo-400 font-bold shrink-0">
-                      <span className="tabular-nums">
-                        {totalCount === 0
-                          ? 'Empty'
-                          : isExpanded
-                          ? 'Hide'
-                          : `${remainingCount === 0 ? 'All done' : `${remainingCount} left`}`}
-                      </span>
-                      {isExpanded ? (
-                        <ChevronUp className="w-3.5 h-3.5" />
-                      ) : (
-                        <ChevronDown className="w-3.5 h-3.5" />
-                      )}
+
+                    <div className="relative w-full h-1.5 rounded-full bg-slate-200/90 dark:bg-zinc-800 overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-[width] duration-300 ease-out"
+                        style={{
+                          width: `${calculatedProgress}%`,
+                          backgroundColor: isCompleted ? '#10b981' : accentColor,
+                        }}
+                      />
                     </div>
                   </button>
 
                   <SmoothCollapse isOpen={isExpanded}>
-                    <div className="pt-1.5">
+                    <div className="pt-1.5 min-w-0 w-full">
                       {totalCount > 0 ? (
-                        <div className="space-y-[3px]">
+                        <div className="space-y-[3px] min-w-0 w-full">
                           {allMilestones.map((item, idx) => {
                             const radiusClass = getPetalGroupRadiusClass(
                               idx,
@@ -624,7 +611,7 @@ export const GoalsManager: React.FC = () => {
                             return (
                               <div
                                 key={item.key}
-                                className={`${radiusClass} px-2.5 py-1.5 flex items-center justify-between gap-2 border border-slate-200/80 dark:border-zinc-800/80 transition-colors ${
+                                className={`${radiusClass} w-full min-w-0 max-w-full overflow-hidden px-2.5 py-1.5 flex items-center justify-between gap-2 border border-slate-200/80 dark:border-zinc-800/80 transition-colors ${
                                   item.kind === 'habit'
                                     ? 'bg-emerald-50/55 hover:bg-emerald-50/90 dark:bg-emerald-950/20 dark:hover:bg-emerald-950/35'
                                     : 'bg-[#f5f7fb] hover:bg-[#edf1f9] dark:bg-[#171a24] dark:hover:bg-[#1e2230]'
@@ -740,8 +727,28 @@ export const GoalsManager: React.FC = () => {
                 </div>
               </div>
             );
-          })}
-        </div>
+          };
+
+          if (isDesktopMd && filteredGoals.length > 1) {
+            const [leftGoals, rightGoals] = distributeIntoTwoColumns(filteredGoals);
+            return (
+              <div className="grid grid-cols-2 gap-2.5 items-start w-full min-w-0">
+                <div className="flex flex-col gap-[3px] min-w-0">
+                  {leftGoals.map((g, idx) => renderGoalCard(g, idx, leftGoals.length))}
+                </div>
+                <div className="flex flex-col gap-[3px] min-w-0">
+                  {rightGoals.map((g, idx) => renderGoalCard(g, idx, rightGoals.length))}
+                </div>
+              </div>
+            );
+          }
+
+          return (
+            <div className="flex flex-col gap-[3px] w-full min-w-0">
+              {filteredGoals.map((g, idx) => renderGoalCard(g, idx, filteredGoals.length))}
+            </div>
+          );
+        })()
       )}
 
       {/* Create or Edit Goal Unified Modal */}

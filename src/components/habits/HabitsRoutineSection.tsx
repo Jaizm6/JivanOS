@@ -54,6 +54,7 @@ import {
   FORM_EASE,
   FORM_SPRING,
   FORM_EXIT_TRANSITION,
+  CRISP_TRANSFORM_TEMPLATE,
   UNIFIED_MODAL_POSITION_CLASS,
   useModalScrollLock,
 } from '../common/FormPrimitives';
@@ -1344,18 +1345,17 @@ export const HabitsRoutineSection: React.FC<HabitsRoutineSectionProps> = ({
                 <motion.div
                   data-unified-modal="true"
                   initial={{ opacity: 0 }}
-                  animate={{ opacity: 1, transition: { duration: 0.2, ease: FORM_EASE } }}
+                  animate={{ opacity: 1, transition: { duration: 0.14, ease: FORM_EASE } }}
                   exit={{ opacity: 0, transition: FORM_EXIT_TRANSITION }}
-                  style={{ willChange: 'opacity' }}
                   className="fixed inset-0 bg-black/55 dark:bg-black/75 touch-none overscroll-none"
                   onClick={() => setStepPickerRoutine(null)}
                 />
                 <motion.div
                   data-unified-modal="true"
-                  initial={{ opacity: 0, y: 22, scale: 0.97 }}
+                  initial={{ opacity: 0, y: 12, scale: 0.985 }}
                   animate={{ opacity: 1, y: 0, scale: 1, transition: FORM_SPRING }}
-                  exit={{ opacity: 0, y: 16, scale: 0.97, transition: FORM_EXIT_TRANSITION }}
-                  style={{ willChange: 'transform, opacity' }}
+                  exit={{ opacity: 0, y: 8, scale: 0.985, transition: FORM_EXIT_TRANSITION }}
+                  transformTemplate={CRISP_TRANSFORM_TEMPLATE}
                   onClick={e => e.stopPropagation()}
                   className="relative z-10 w-full max-w-md bg-white dark:bg-[#121217] border border-slate-200/90 dark:border-zinc-800 rounded-t-[26px] sm:rounded-[24px] p-4 shadow-2xl space-y-3 max-h-[82dvh] flex flex-col"
                 >
@@ -1475,19 +1475,18 @@ export const HabitsRoutineSection: React.FC<HabitsRoutineSectionProps> = ({
                 <motion.div
                   data-unified-modal="true"
                   initial={{ opacity: 0 }}
-                  animate={{ opacity: 1, transition: { duration: 0.2, ease: FORM_EASE } }}
+                  animate={{ opacity: 1, transition: { duration: 0.14, ease: FORM_EASE } }}
                   exit={{ opacity: 0, transition: FORM_EXIT_TRANSITION }}
-                  style={{ willChange: 'opacity' }}
                   className="fixed inset-0 bg-black/55 dark:bg-black/75 touch-none overscroll-none"
                   onClick={onCloseCreateRoutine}
                 />
                 <motion.form
                   onSubmit={handleCreateRoutineSubmit}
                   data-unified-modal="true"
-                  initial={{ opacity: 0, y: 22, scale: 0.97 }}
+                  initial={{ opacity: 0, y: 12, scale: 0.985 }}
                   animate={{ opacity: 1, y: 0, scale: 1, transition: FORM_SPRING }}
-                  exit={{ opacity: 0, y: 16, scale: 0.97, transition: FORM_EXIT_TRANSITION }}
-                  style={{ willChange: 'transform, opacity' }}
+                  exit={{ opacity: 0, y: 8, scale: 0.985, transition: FORM_EXIT_TRANSITION }}
+                  transformTemplate={CRISP_TRANSFORM_TEMPLATE}
                   onClick={e => e.stopPropagation()}
                   className="relative z-10 w-full max-w-sm bg-white dark:bg-[#121217] border border-slate-200/90 dark:border-zinc-800 rounded-t-[26px] sm:rounded-[24px] p-4 shadow-2xl space-y-3"
                 >

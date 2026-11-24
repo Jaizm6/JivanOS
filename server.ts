@@ -497,13 +497,89 @@ async function startServer() {
   };
   app.get(['/auth/oauth-callback', '/auth/oauth-callback/', '/auth/callback', '/auth/callback/'], oauthCallbackHandler);
 
+  // Stateless zero-logging Telegram Bot API fallback proxy (strict method allowlist)
+  const ALLOWED_TELEGRAM_METHODS = new Set([
+    'getMe',
+    'getUpdates',
+    'deleteWebhook',
+    'sendMessage',
+    'sendDocument',
+    'pinChatMessage',
+    'getChat',
+    'getFile',
+  ]);
+  app.post('/api/sync/telegram-api', async (req, res) => {
+    const { botToken, method, params, file } = req.body || {};
+    const cleanToken = typeof botToken === 'string' ? botToken.trim() : '';
+    const cleanMethod = typeof method === 'string' ? method.trim() : '';
+    if (
+      !/^\d{5,}:[A-Za-z0-9_-]{20,128}$/.test(cleanToken) ||
+      !ALLOWED_TELEGRAM_METHODS.has(cleanMethod)
+    ) {
+      return res.status(400).json({ ok: false, description: 'Invalid Telegram API request.' });
+    }
+    try {
+      const targetUrl = `https://api.telegram.org/bot${cleanToken}/${cleanMethod}`;
+      let fetchInit: RequestInit;
+      if (cleanMethod === 'sendDocument' && file && typeof file.contentBase64 === 'string') {
+        const fileName =
+          typeof file.name === 'string' && /^[A-Za-z0-9._-]{1,100}$/.test(file.name)
+            ? file.name
+            : 'backup.json';
+        const mimeType =
+          typeof file.mimeType === 'string' && file.mimeType.length <= 80
+            ? file.mimeType
+            : 'application/json';
+        const formData = new FormData();
+        if (params && typeof params === 'object') {
+          for (const [k, v] of Object.entries(params)) {
+            if (v !== undefined && v !== null) {
+              formData.append(k, String(v));
+            }
+          }
+        }
+        const buf = Buffer.from(file.contentBase64, 'base64');
+        formData.append('document', new Blob([buf], { type: mimeType }), fileName);
+        fetchInit = {
+          method: 'POST',
+          body: formData,
+          signal: AbortSignal.timeout(15000),
+        };
+      } else if (params && typeof params === 'object' && Object.keys(params).length > 0) {
+        fetchInit = {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(params),
+          signal: AbortSignal.timeout(12000),
+        };
+      } else {
+        fetchInit = {
+          method: 'GET',
+          signal: AbortSignal.timeout(12000),
+        };
+      }
+
+      const tgRes = await fetch(targetUrl, fetchInit);
+      const text = await tgRes.text();
+      res.status(tgRes.status).type('application/json').send(text);
+    } catch (err: any) {
+      const isTimeout = err?.name === 'TimeoutError' || err?.name === 'AbortError';
+      return res.status(isTimeout ? 504 : 502).json({
+        ok: false,
+        description: isTimeout
+          ? 'Telegram Bot API timed out. Please try again.'
+          : 'Could not reach Telegram Bot API.',
+      });
+    }
+  });
+
   // Stateless zero-logging Telegram Bot file download fallback (browser CORS safety for restore)
   app.post('/api/sync/telegram-file', async (req, res) => {
     const { botToken, filePath } = req.body || {};
     if (
       typeof botToken !== 'string' ||
       typeof filePath !== 'string' ||
-      !/^\d+:[A-Za-z0-9_-]{20,}$/.test(botToken.trim()) ||
+      !/^\d{5,}:[A-Za-z0-9_-]{20,128}$/.test(botToken.trim()) ||
       !/^[A-Za-z0-9_./-]{1,256}$/.test(filePath.trim()) ||
       filePath.includes('..')
     ) {
@@ -511,7 +587,7 @@ async function startServer() {
     }
     try {
       const targetUrl = `https://api.telegram.org/file/bot${botToken.trim()}/${filePath.trim().replace(/^\/+/, '')}`;
-      const tgRes = await fetch(targetUrl);
+      const tgRes = await fetch(targetUrl, { signal: AbortSignal.timeout(15000) });
       if (!tgRes.ok) {
         return res.status(tgRes.status).json({ success: false, error: `Telegram file download failed (HTTP ${tgRes.status}).` });
       }

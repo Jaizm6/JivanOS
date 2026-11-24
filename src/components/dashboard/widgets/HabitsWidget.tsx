@@ -114,10 +114,25 @@ export const HabitsWidget: React.FC = () => {
                 </div>
               </div>
 
-              {/* Streak badge */}
-              <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-orange-100 dark:bg-orange-950/70 text-orange-700 dark:text-orange-400 text-xs font-bold shrink-0">
-                <Flame className="w-3 h-3 fill-current" />
-                <span>{habit.currentStreak} d</span>
+              {/* Clean Streak Display */}
+              <div className="inline-flex items-center gap-1 text-[12.5px] font-semibold tabular-nums leading-none shrink-0">
+                <Flame
+                  strokeWidth={2.15}
+                  className={`w-3.5 h-3.5 fill-none ${
+                    (habit.currentStreak || 0) > 0
+                      ? 'text-amber-500 dark:text-amber-400'
+                      : 'text-slate-400 dark:text-zinc-500'
+                  }`}
+                />
+                <span
+                  className={
+                    (habit.currentStreak || 0) > 0
+                      ? 'text-slate-600 dark:text-zinc-300'
+                      : 'text-slate-400 dark:text-zinc-500'
+                  }
+                >
+                  {habit.currentStreak || 0}
+                </span>
               </div>
             </div>
           );

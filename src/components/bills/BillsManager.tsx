@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   CreditCard,
@@ -37,9 +38,20 @@ import { BillSplitterModal } from './BillSplitterModal';
 import { BillDetailModal } from './BillDetailModal';
 import { BillFormModal } from './BillFormModal';
 import { CardCalendarButton } from '../common/CardReminderCalendarModal';
-import { PetalShapeBadge, getPetalGroupRadiusClass } from '../common/PetalExpressive';
+import {
+  PetalShapeBadge,
+  getPetalGroupRadiusClass,
+  useIsDesktopMd,
+  distributeIntoTwoColumns,
+} from '../common/PetalExpressive';
 import { ArchiveConfirmModal } from '../common/ArchiveConfirmModal';
-import { FORM_EASE, FORM_SPRING, FORM_EXIT_TRANSITION } from '../common/FormPrimitives';
+import {
+  FORM_EASE,
+  FORM_SPRING,
+  FORM_EXIT_TRANSITION,
+  CRISP_TRANSFORM_TEMPLATE,
+  useModalScrollLock,
+} from '../common/FormPrimitives';
 
 export const BillsManager: React.FC = () => {
   const {
@@ -48,11 +60,13 @@ export const BillsManager: React.FC = () => {
     updateBill,
     deleteBill,
     markBillPaid,
+    unmarkBillPaid,
     pushNotification,
     theme,
     currencySymbol,
   } = useApp();
   const isDarkMode = theme === 'dark';
+  const isDesktopMd = useIsDesktopMd();
 
   const [selectedCategory, setSelectedCategory] = useState<BillCategory | 'all'>('all');
   const [filterPaid, setFilterPaid] = useState<'all' | 'unpaid' | 'paid' | 'overdue' | 'soon' | 'archived'>('unpaid');
@@ -75,6 +89,7 @@ export const BillsManager: React.FC = () => {
   // Pay Modal
   const [payingBill, setPayingBill] = useState<Bill | null>(null);
   const [payAmount, setPayAmount] = useState<string>('');
+  useModalScrollLock(Boolean(payingBill));
 
   const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
 
@@ -252,9 +267,7 @@ export const BillsManager: React.FC = () => {
   };
 
   const handleRevertPayment = (b: Bill) => {
-    updateBill({ ...b, isPaid: false, paidDate: undefined });
-    try { soundEngine.playClick(); } catch {}
-    pushNotification('Bill Marked Unpaid', `${b.title} set back to pending`, 'system');
+    unmarkBillPaid(b.id);
   };
 
   const executeToggleArchiveBill = (b: Bill) => {
@@ -409,11 +422,11 @@ export const BillsManager: React.FC = () => {
             id="btn-add-bill"
             type="button"
             onClick={() => openAddModal()}
-            className="h-8 w-8 sm:w-auto sm:px-3 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-xs font-bold rounded-lg shadow-2xs transition shrink-0 cursor-pointer flex items-center justify-center gap-1 whitespace-nowrap"
+            className="h-8 w-8 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white rounded-lg shadow-2xs transition shrink-0 cursor-pointer flex items-center justify-center"
             title="Add New Bill"
+            aria-label="Add New Bill"
           >
             <Plus className="w-4 h-4 stroke-[2.5]" />
-            <span className="hidden sm:inline">Add Bill</span>
           </button>
         </div>
       </div>
@@ -617,10 +630,9 @@ export const BillsManager: React.FC = () => {
       </div>
 
       {/* 5. Material 3 Expressive Bill Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-1.5 md:gap-2">
-        {filteredBills.length === 0 ? (
-          <div
-            data-m3-tonal-card="true"
+      {filteredBills.length === 0 ? (
+        <div
+          data-m3-tonal-card="true"
             data-tonal-tone="neutral"
             className="col-span-full p-7 rounded-[22px] text-center space-y-2 flex flex-col items-center"
           >
@@ -659,22 +671,23 @@ export const BillsManager: React.FC = () => {
             )}
           </div>
         ) : (
-          filteredBills.map((bill, idx) => {
-            const badgeInfo = getDueBadgeInfo(bill);
-            const catMeta = categoryIcons[bill.category] || categoryIcons.other;
-            const accent = bill.color || catMeta.defaultColor;
-            const safeTitleColor = getSafeFontColor(bill.fontColor, isDarkMode);
-            const petalRadius = getPetalGroupRadiusClass(idx, filteredBills.length, false);
-            const tonalTone = bill.archived ? 'archived' : 'neutral';
+          (() => {
+            const renderBillCard = (bill: Bill, idx: number, colTotal: number) => {
+              const badgeInfo = getDueBadgeInfo(bill);
+              const catMeta = categoryIcons[bill.category] || categoryIcons.other;
+              const accent = bill.color || catMeta.defaultColor;
+              const safeTitleColor = getSafeFontColor(bill.fontColor, isDarkMode);
+              const petalRadius = getPetalGroupRadiusClass(idx, colTotal, false);
+              const tonalTone = bill.archived ? 'archived' : 'neutral';
 
-            return (
-              <div
-                key={bill.id}
-                id={`bill-card-${bill.id}`}
-                data-m3-tonal-card="true"
-                data-tonal-tone={tonalTone}
-                className={`group relative p-2.5 sm:p-3 ${petalRadius} md:rounded-[20px] flex flex-col justify-between gap-1.5 transition-colors`}
-              >
+              return (
+                <div
+                  key={bill.id}
+                  id={`bill-card-${bill.id}`}
+                  data-m3-tonal-card="true"
+                  data-tonal-tone={tonalTone}
+                  className={`group relative p-2.5 sm:p-3 ${petalRadius} flex flex-col justify-between gap-1.5 transition-colors`}
+                >
                 {/* Top Row: Petal Badge + Unboxed Details + Hero Tabular Amount */}
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex items-start gap-2 min-w-0 flex-1">
@@ -862,23 +875,16 @@ export const BillsManager: React.FC = () => {
                               <span>Duplicate</span>
                             </button>
 
-                            <button
-                              type="button"
-                              onClick={() => handleToggleArchiveBill(bill)}
-                              className="w-full flex items-center gap-2 px-3 py-2 rounded-[14px] text-slate-700 dark:text-zinc-200 hover:bg-[#f4f7fc] dark:hover:bg-zinc-800 transition-colors text-left cursor-pointer font-medium"
-                            >
-                              {bill.archived ? (
-                                <>
-                                  <ArchiveRestore className="w-3.5 h-3.5 text-emerald-500" />
-                                  <span>Restore Bill</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Archive className="w-3.5 h-3.5 text-amber-500" />
-                                  <span>Archive Bill</span>
-                                </>
-                              )}
-                            </button>
+                            {!bill.archived && (
+                              <button
+                                type="button"
+                                onClick={() => handleToggleArchiveBill(bill)}
+                                className="w-full flex items-center gap-2 px-3 py-2 rounded-[14px] text-slate-700 dark:text-zinc-200 hover:bg-[#f4f7fc] dark:hover:bg-zinc-800 transition-colors text-left cursor-pointer font-medium"
+                              >
+                                <Archive className="w-3.5 h-3.5 text-amber-500" />
+                                <span>Archive Bill</span>
+                              </button>
+                            )}
 
                             <div className="pt-0.5 border-t border-slate-100 dark:border-zinc-800">
                               {confirmDeleteBillId === bill.id ? (
@@ -938,99 +944,123 @@ export const BillsManager: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => handleRevertPayment(bill)}
-                        className="h-7 px-2.5 rounded-full bg-white/80 dark:bg-zinc-900/90 border border-slate-200/70 dark:border-zinc-800 hover:bg-slate-200/70 dark:hover:bg-zinc-800 text-slate-600 dark:text-zinc-300 text-xs font-bold transition-colors cursor-pointer whitespace-nowrap"
-                        title="Mark bill as unpaid"
+                        className="h-7 px-2.5 rounded-full bg-emerald-500/15 hover:bg-emerald-500/25 active:scale-95 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-xs font-bold inline-flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap"
+                        title="Paid — tap to untick"
                       >
-                        Undo
+                        <Check className="w-3.5 h-3.5 stroke-[2.75]" />
+                        <span>Paid</span>
                       </button>
                     )}
                   </div>
                 </div>
+                </div>
+              );
+            };
+
+            if (isDesktopMd && filteredBills.length > 1) {
+              const [leftBills, rightBills] = distributeIntoTwoColumns(filteredBills);
+              return (
+                <div className="grid grid-cols-2 gap-2.5 items-start w-full min-w-0">
+                  <div className="flex flex-col gap-[3px] min-w-0">
+                    {leftBills.map((b, idx) => renderBillCard(b, idx, leftBills.length))}
+                  </div>
+                  <div className="flex flex-col gap-[3px] min-w-0">
+                    {rightBills.map((b, idx) => renderBillCard(b, idx, rightBills.length))}
+                  </div>
+                </div>
+              );
+            }
+
+            return (
+              <div className="flex flex-col gap-[3px] w-full min-w-0">
+                {filteredBills.map((b, idx) => renderBillCard(b, idx, filteredBills.length))}
               </div>
             );
-          })
+          })()
         )}
-      </div>
 
-      {/* Material 3 Expressive Record Payment Modal */}
-      <AnimatePresence>
-        {payingBill && (
-          <div
-            key="bill-pay-modal-root"
-            data-unified-modal="true"
-            className="fixed inset-0 z-[210] flex items-end sm:items-center justify-center p-0 sm:p-4"
-          >
-            <motion.div
-              data-unified-modal="true"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1, transition: { duration: 0.18, ease: FORM_EASE } }}
-              exit={{ opacity: 0, transition: FORM_EXIT_TRANSITION }}
-              style={{ willChange: 'opacity' }}
-              className="fixed inset-0 bg-black/55 dark:bg-black/75 touch-none"
-              onClick={() => setPayingBill(null)}
-            />
-            <motion.div
-              data-unified-modal="true"
-              initial={{ opacity: 0, y: 20, scale: 0.97 }}
-              animate={{ opacity: 1, y: 0, scale: 1, transition: FORM_SPRING }}
-              exit={{ opacity: 0, y: 14, scale: 0.97, transition: FORM_EXIT_TRANSITION }}
-              style={{ willChange: 'transform, opacity' }}
-              onClick={e => e.stopPropagation()}
-              className="relative z-10 w-full sm:max-w-sm bg-white dark:bg-[#0d0d11] rounded-t-[28px] sm:rounded-[28px] ring-1 ring-black/[0.06] dark:ring-white/[0.08] shadow-2xl p-5 sm:p-6 space-y-4"
-            >
-              <div className="flex items-center gap-3">
-                <PetalShapeBadge
-                  shape="cookie12"
-                  sizeClass="w-11 h-11"
-                  fillColor={isDarkMode ? 'rgba(16, 185, 129, 0.2)' : 'rgba(16, 185, 129, 0.12)'}
-                  strokeColor={isDarkMode ? 'rgba(52, 211, 153, 0.35)' : 'rgba(16, 185, 129, 0.25)'}
-                >
-                  <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-                </PetalShapeBadge>
-                <div className="min-w-0">
-                  <h3 className="font-extrabold text-base text-slate-900 dark:text-white truncate">
-                    Record Payment
-                  </h3>
-                  <p className="text-xs text-slate-500 dark:text-zinc-400 truncate">
-                    {payingBill.title}
-                  </p>
-                </div>
-              </div>
-
-              <div className="space-y-2 p-3.5 rounded-[20px] bg-[#f4f7fc] dark:bg-[#141418]">
-                <label className="block text-[11px] font-bold text-slate-500 dark:text-zinc-400">
-                  Amount ({payingBill.currency || currencySymbol || '₹'})
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={payAmount}
-                  onChange={e => setPayAmount(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-[14px] bg-white dark:bg-[#0d0d11] font-mono font-extrabold text-xl text-emerald-600 dark:text-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 tabular-nums"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-1">
-                <button
-                  type="button"
+      {/* Material 3 Expressive Record Payment Modal (Portaled above Bottom Nav Bar) */}
+      {typeof document !== 'undefined' &&
+        createPortal(
+          <AnimatePresence>
+            {payingBill && (
+              <div
+                key="bill-pay-modal-root"
+                data-unified-modal="true"
+                className="fixed inset-0 z-[220] flex items-center justify-center p-4 overscroll-none"
+              >
+                <motion.div
+                  data-unified-modal="true"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1, transition: { duration: 0.14, ease: FORM_EASE } }}
+                  exit={{ opacity: 0, transition: FORM_EXIT_TRANSITION }}
+                  className="fixed inset-0 bg-black/55 dark:bg-black/75 touch-none overscroll-none"
                   onClick={() => setPayingBill(null)}
-                  className="px-4 py-2 rounded-full text-xs font-bold text-slate-600 dark:text-zinc-400 hover:bg-[#eff2f9] dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+                />
+                <motion.div
+                  data-unified-modal="true"
+                  initial={{ opacity: 0, y: 12, scale: 0.985 }}
+                  animate={{ opacity: 1, y: 0, scale: 1, transition: FORM_SPRING }}
+                  exit={{ opacity: 0, y: 8, scale: 0.985, transition: FORM_EXIT_TRANSITION }}
+                  transformTemplate={CRISP_TRANSFORM_TEMPLATE}
+                  onClick={e => e.stopPropagation()}
+                  className="relative z-10 w-full max-w-sm bg-white dark:bg-[#0d0d11] rounded-[28px] ring-1 ring-black/[0.06] dark:ring-white/[0.08] shadow-2xl p-5 sm:p-6 space-y-4"
                 >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleConfirmPayment}
-                  className="px-5 py-2 rounded-full bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
-                >
-                  <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-                  <span>Confirm Paid</span>
-                </button>
+                  <div className="flex items-center gap-3">
+                    <PetalShapeBadge
+                      shape="cookie12"
+                      sizeClass="w-11 h-11"
+                      fillColor={isDarkMode ? 'rgba(16, 185, 129, 0.2)' : 'rgba(16, 185, 129, 0.12)'}
+                      strokeColor={isDarkMode ? 'rgba(52, 211, 153, 0.35)' : 'rgba(16, 185, 129, 0.25)'}
+                    >
+                      <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                    </PetalShapeBadge>
+                    <div className="min-w-0">
+                      <h3 className="font-extrabold text-base text-slate-900 dark:text-white truncate">
+                        Record Payment
+                      </h3>
+                      <p className="text-xs text-slate-500 dark:text-zinc-400 truncate">
+                        {payingBill.title}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 p-3.5 rounded-[20px] bg-[#f4f7fc] dark:bg-[#141418]">
+                    <label className="block text-[11px] font-bold text-slate-500 dark:text-zinc-400">
+                      Amount ({payingBill.currency || currencySymbol || '₹'})
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={payAmount}
+                      onChange={e => setPayAmount(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-[14px] bg-white dark:bg-[#0d0d11] font-mono font-extrabold text-xl text-emerald-600 dark:text-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 tabular-nums"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setPayingBill(null)}
+                      className="px-4 py-2 rounded-full text-xs font-bold text-slate-600 dark:text-zinc-400 hover:bg-[#eff2f9] dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleConfirmPayment}
+                      className="px-5 py-2 rounded-full bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                    >
+                      <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                      <span>Confirm Paid</span>
+                    </button>
+                  </div>
+                </motion.div>
               </div>
-            </motion.div>
-          </div>
+            )}
+          </AnimatePresence>,
+          document.body
         )}
-      </AnimatePresence>
 
       {/* Bill Splitter Modal */}
       {showSplitterModal && (

@@ -1,29 +1,23 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AnimatePresence, LayoutGroup, motion } from 'framer-motion';
 import {
-  ChevronDown,
-  ChevronRight,
-  Download,
-  Globe,
-  HardDrive,
-  History,
-  Lock,
-  RefreshCw,
-  RotateCcw,
-  Server,
-  Share2,
-  Upload,
   AlertTriangle,
+  ChevronDown,
+  Globe,
+  RefreshCw,
+  Server,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { SyncDriveId } from '../../types';
 import { showAndroidToast } from '../common/AndroidToast';
-import { M3Switch } from '../common/PetalExpressive';
 import { JivanOSCloudSection } from '../../sync/ui/JivanOSCloudSection';
 import { GoogleDriveSyncSection } from './GoogleDriveSyncSection';
 import { DropboxSyncSection } from './DropboxSyncSection';
 import { TelegramSyncSection } from '../../sync/ui/TelegramSyncSection';
 import { MEGASyncSection } from '../../sync/ui/MEGASyncSection';
-import { SyncProviderCard } from './SyncProviderCard';
+import { SyncProviderRow } from './SyncProviderRow';
+import { SyncSettingsCard } from './SyncSettingsCard';
+import { LocalBackupCard } from './LocalBackupCard';
 import { SettingsSubpageHeader } from './SettingsSubpageHeader';
 import {
   DRIVE_SYNC_STATE_EVENT,
@@ -68,13 +62,6 @@ const WEBDAV_PRESETS: { label: string; urlTemplate: string }[] = [
   { label: 'Hetzner', urlTemplate: 'https://uXXXXXX.your-storagebox.de' },
 ];
 
-const INTERVAL_SEGMENTS: { label: string; value: 15 | 30 | 60 | 0 }[] = [
-  { label: '15m', value: 15 },
-  { label: '30m', value: 30 },
-  { label: '1h', value: 60 },
-  { label: 'Manual', value: 0 },
-];
-
 export const BackupSyncScreen: React.FC<BackupSyncScreenProps> = ({ onBack }) => {
   const {
     firebaseUser,
@@ -112,7 +99,7 @@ export const BackupSyncScreen: React.FC<BackupSyncScreenProps> = ({ onBack }) =>
   // Header "Sync Now" state (only active when a connected provider exists)
   const [isHeaderSyncing, setIsHeaderSyncing] = useState(false);
 
-  // ── WebDAV / Nextcloud (merged single card) local form state ──
+  // ── WebDAV / Nextcloud (merged single row) local form state ──
   const existingDav = useMemo(() => {
     const w = joplinSyncSettings.drives.webdav;
     const n = joplinSyncSettings.drives.nextcloud;
@@ -136,7 +123,7 @@ export const BackupSyncScreen: React.FC<BackupSyncScreenProps> = ({ onBack }) =>
   );
   const [davError, setDavError] = useState<string | null>(null);
 
-  // ── Advanced S3 / R2 / MinIO (expandable, zero pre-filled defaults) ──
+  // ── Advanced S3 / R2 / MinIO (collapsed by default, zero pre-filled defaults) ──
   const s3Cfg = joplinSyncSettings.drives.s3;
   const isS3Connected = Boolean(
     s3Cfg?.s3Endpoint?.trim() &&
@@ -162,7 +149,7 @@ export const BackupSyncScreen: React.FC<BackupSyncScreenProps> = ({ onBack }) =>
   );
   const [s3Error, setS3Error] = useState<string | null>(null);
 
-  // ── Section 3: Local Backup & Recent Snapshots (last 3 rotating) ──
+  // ── Local Backup & Recent Snapshots (last 3 rotating) ──
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [snapshots, setSnapshots] = useState<LocalSnapshotMeta[]>([]);
   const [isLoadingSnapshots, setIsLoadingSnapshots] = useState(true);
@@ -212,7 +199,6 @@ export const BackupSyncScreen: React.FC<BackupSyncScreenProps> = ({ onBack }) =>
 
   const handleSelectPrimaryProvider = (id: UnifiedProviderId) => {
     if (id === 'telegram' || id === 'mega') {
-      // Telegram and MEGA use their own SyncProvider schedulers; keep joplin primary target cleanly synced
       updateJoplinSyncSettings({ primaryTarget: 'none' });
       showAndroidToast(
         `Primary sync set to ${id === 'mega' ? 'MEGA' : 'Telegram'}`,
@@ -275,7 +261,6 @@ export const BackupSyncScreen: React.FC<BackupSyncScreenProps> = ({ onBack }) =>
       remotePath: '/JivanOS',
       enabled: true,
     });
-    // Clear legacy duplicate nextcloud config so only one WebDAV / Nextcloud entry exists
     updateDriveConfig('nextcloud', {
       serverUrl: '',
       username: '',
@@ -538,18 +523,18 @@ export const BackupSyncScreen: React.FC<BackupSyncScreenProps> = ({ onBack }) =>
       : 0;
 
   return (
-    <div className="px-4 py-2 pb-10 space-y-6 max-w-4xl mx-auto w-full min-w-0 animate-view-enter">
-      {/* Shared Material 3 Expressive Stacked Sub-Screen Header */}
+    <div className="px-4 py-2 pb-10 max-w-4xl mx-auto w-full min-w-0 animate-view-enter">
+      {/* Compact Material 3 Expressive Sub-Screen Header */}
       <SettingsSubpageHeader
         title="Backup & Sync"
         subtitle={
           overview.hasAnyConnected
-            ? `${overview.connectedCount} provider${overview.connectedCount === 1 ? '' : 's'} connected · ${
+            ? `${overview.connectedCount} connected · ${
                 overview.latestSyncedAt
                   ? `Last synced ${formatRelativeSyncTime(overview.latestSyncedAt)}`
-                  : 'Never synced'
+                  : 'Ready to sync'
               }`
-            : 'Connect a cloud provider or export a local backup anytime.'
+            : 'Choose a sync provider or save a local backup.'
         }
         onBack={onBack}
         actions={
@@ -558,9 +543,9 @@ export const BackupSyncScreen: React.FC<BackupSyncScreenProps> = ({ onBack }) =>
               type="button"
               onClick={handleHeaderSyncNow}
               disabled={isHeaderSyncing}
-              className="w-full sm:w-auto min-h-[44px] px-5 py-2 rounded-full bg-[#4F46E5] hover:bg-[#4338CA] active:scale-[0.99] disabled:opacity-60 text-white text-sm font-semibold transition inline-flex items-center justify-center gap-2 cursor-pointer"
+              className="h-9 px-4 rounded-lg bg-[#4F46E5] hover:bg-[#4338CA] active:scale-[0.98] disabled:opacity-60 text-white text-xs font-semibold transition inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
             >
-              <RefreshCw className={`w-4 h-4 ${isHeaderSyncing ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`w-3.5 h-3.5 ${isHeaderSyncing ? 'animate-spin' : ''}`} />
               <span>{isHeaderSyncing ? 'Syncing…' : 'Sync Now'}</span>
             </button>
           ) : undefined
@@ -568,594 +553,333 @@ export const BackupSyncScreen: React.FC<BackupSyncScreenProps> = ({ onBack }) =>
       />
 
       {/* ═══════════════════════════════════════════════════════════
-          SECTION 1 — SYNC PROVIDERS
+          SECTION 1 — SYNC PROVIDERS (Single Compact ColorOS Card, Always Full Width)
          ═══════════════════════════════════════════════════════════ */}
-      <section aria-labelledby="section-sync-providers-heading" className="space-y-3">
-        <div className="space-y-0.5">
-          <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4F46E5] dark:text-indigo-400">
-            Sync Providers
-          </div>
-          <h2
-            id="section-sync-providers-heading"
-            className="text-base font-semibold text-slate-900 dark:text-white"
-          >
-            Cloud &amp; Private Drives
-          </h2>
-        </div>
+      <section aria-labelledby="section-sync-providers-label" className="min-w-0">
+        <h2
+          id="section-sync-providers-label"
+          className="text-[11px] font-semibold uppercase tracking-[0.07em] text-slate-500 dark:text-zinc-400 mt-5 mb-1 px-1"
+        >
+          Sync Providers
+        </h2>
 
-        {/* Single column on mobile (<600dp), two-column adaptive grid on tablet/desktop */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-start">
-          {/* 1. JivanOS Cloud (Firebase) — Premium · ₹99/month */}
-          <div className="md:col-span-2 w-full min-w-0">
-            <JivanOSCloudSection />
-          </div>
+        <LayoutGroup id="backup-sync-providers">
+          <div className="rounded-xl border border-[#E5E7EB] dark:border-zinc-800 bg-white dark:bg-zinc-900 divide-y divide-[#E5E7EB]/80 dark:divide-zinc-800/80">
+            {/* 1. JivanOS Cloud */}
+            <JivanOSCloudSection isFirst />
 
-          {/* 2. Google Drive */}
-          <div className="w-full min-w-0">
+            {/* 2. Google Drive */}
             <GoogleDriveSyncSection />
-          </div>
 
-          {/* 3. Dropbox */}
-          <div className="w-full min-w-0">
+            {/* 3. Dropbox */}
             <DropboxSyncSection />
-          </div>
 
-          {/* 4. Telegram */}
-          <div className="w-full min-w-0">
+            {/* 4. Telegram */}
             <TelegramSyncSection />
-          </div>
 
-          {/* 5. WebDAV / Nextcloud (ONE merged card, not two) */}
-          <div className="w-full min-w-0">
-            <SyncProviderCard
+            {/* 5. WebDAV / Nextcloud */}
+            <SyncProviderRow
               name="WebDAV / Nextcloud"
-              description="Sync with Nextcloud, Koofr, Box, Hetzner, or any WebDAV server."
-              logo={<Globe className="w-5 h-5 text-[#0082C9]" />}
+              description="Self-hosted server sync"
+              logo={<Globe className="w-4.5 h-4.5 text-[#0082C9]" />}
+              logoBgClass="bg-sky-50 dark:bg-sky-950/60"
               brandColor="#0082C9"
               isConnected={isWebDavConnected}
               status={
                 davStatus === 'syncing'
                   ? 'syncing'
                   : davStatus === 'error'
-                  ? 'error'
-                  : isWebDavConnected
-                  ? existingDav?.lastSyncedAt
-                    ? 'synced'
-                    : 'connected'
-                  : 'disconnected'
+                    ? 'error'
+                    : isWebDavConnected
+                      ? existingDav?.lastSyncedAt
+                        ? 'synced'
+                        : 'connected'
+                      : 'disconnected'
               }
               accountLabel={isWebDavConnected ? existingDav?.username : undefined}
-              accountSublabel={isWebDavConnected ? existingDav?.serverUrl : undefined}
-              lastSyncedAt={isWebDavConnected ? existingDav?.lastSyncedAt || null : null}
-              errorMessage={davError}
-              connectLabel={davFormOpen ? 'Hide Setup' : 'Connect'}
+              metaLine={
+                isWebDavConnected
+                  ? existingDav?.lastSyncedAt
+                    ? `Last synced ${formatRelativeSyncTime(existingDav.lastSyncedAt)} · ${existingDav.serverUrl}`
+                    : existingDav?.serverUrl || 'Connected'
+                  : undefined
+              }
+              connectLabel={davFormOpen ? 'Hide' : 'Connect →'}
               onConnect={isWebDavConnected ? undefined : () => setDavFormOpen((v) => !v)}
               onSyncNow={isWebDavConnected ? handleSyncWebDav : undefined}
-              onDisconnect={isWebDavConnected ? handleDisconnectWebDav : undefined}
+              isSyncing={davStatus === 'syncing'}
               onRetry={handleSyncWebDav}
-            >
-              {!isWebDavConnected && davFormOpen && (
+              onDisconnect={isWebDavConnected ? handleDisconnectWebDav : undefined}
+              errorMessage={davError}
+              isExpanded={!isWebDavConnected && davFormOpen}
+              expandedContent={
                 <form
                   onSubmit={handleConnectWebDav}
-                  className="pt-2 border-t border-[#E5E7EB] dark:border-zinc-800 space-y-3"
+                  className="pt-2.5 border-t border-[#E5E7EB]/80 dark:border-zinc-800 space-y-2.5"
                 >
-                  {/* Quick-fill URL template chips */}
-                  <div className="space-y-1.5">
-                    <span className="text-xs font-medium text-slate-600 dark:text-zinc-400 block">
-                      Quick-fill URL template
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[11px] font-medium text-slate-500 dark:text-zinc-400 mr-0.5">
+                      Presets:
                     </span>
-                    <div className="flex flex-wrap gap-1.5">
-                      {WEBDAV_PRESETS.map((preset) => (
-                        <button
-                          key={preset.label}
-                          type="button"
-                          onClick={() => setDavUrl(preset.urlTemplate)}
-                          className="min-h-[36px] px-3 py-1.5 rounded-lg border border-[#E5E7EB] dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 hover:border-indigo-300 text-xs font-semibold text-slate-700 dark:text-zinc-200 transition cursor-pointer"
-                        >
-                          {preset.label}
-                        </button>
-                      ))}
-                    </div>
+                    {WEBDAV_PRESETS.map((preset) => (
+                      <button
+                        key={preset.label}
+                        type="button"
+                        onClick={() => setDavUrl(preset.urlTemplate)}
+                        className="h-7 px-2.5 rounded-md border border-[#E5E7EB] dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 hover:border-indigo-300 text-[11px] font-semibold text-slate-700 dark:text-zinc-200 transition cursor-pointer"
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
                   </div>
 
-                  <div className="space-y-1">
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300">
-                      Server URL
-                    </label>
+                  <input
+                    type="url"
+                    value={davUrl}
+                    onChange={(e) => setDavUrl(e.target.value)}
+                    placeholder="https://cloud.example.com/remote.php/dav/files/user/"
+                    aria-label="WebDAV Server URL"
+                    className="w-full h-9 px-3 rounded-lg border border-[#E5E7EB] dark:border-zinc-700 bg-slate-50 dark:bg-zinc-950 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 font-mono outline-none focus:border-[#0082C9]"
+                  />
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     <input
-                      type="url"
-                      value={davUrl}
-                      onChange={(e) => setDavUrl(e.target.value)}
-                      placeholder="https://cloud.example.com/remote.php/dav/files/user/"
-                      className="w-full min-h-[48px] px-3.5 py-2 rounded-xl border border-[#E5E7EB] dark:border-zinc-700 bg-white dark:bg-zinc-950 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 font-mono"
+                      type="text"
+                      autoComplete="off"
+                      value={davUsername}
+                      onChange={(e) => setDavUsername(e.target.value)}
+                      placeholder="Username or email"
+                      aria-label="WebDAV Username"
+                      className="w-full h-9 px-3 rounded-lg border border-[#E5E7EB] dark:border-zinc-700 bg-slate-50 dark:bg-zinc-950 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 outline-none focus:border-[#0082C9]"
+                    />
+                    <input
+                      type="password"
+                      autoComplete="new-password"
+                      value={davPassword}
+                      onChange={(e) => setDavPassword(e.target.value)}
+                      placeholder="Password or app token"
+                      aria-label="WebDAV Password"
+                      className="w-full h-9 px-3 rounded-lg border border-[#E5E7EB] dark:border-zinc-700 bg-slate-50 dark:bg-zinc-950 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 outline-none focus:border-[#0082C9]"
                     />
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300">
-                        Username
-                      </label>
-                      <input
-                        type="text"
-                        autoComplete="off"
-                        value={davUsername}
-                        onChange={(e) => setDavUsername(e.target.value)}
-                        placeholder="Username or email"
-                        className="w-full min-h-[48px] px-3.5 py-2 rounded-xl border border-[#E5E7EB] dark:border-zinc-700 bg-white dark:bg-zinc-950 text-xs text-slate-900 dark:text-white placeholder:text-slate-400"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300">
-                        Password / App Password
-                      </label>
-                      <input
-                        type="password"
-                        autoComplete="new-password"
-                        value={davPassword}
-                        onChange={(e) => setDavPassword(e.target.value)}
-                        placeholder="Enter password or app token"
-                        className="w-full min-h-[48px] px-3.5 py-2 rounded-xl border border-[#E5E7EB] dark:border-zinc-700 bg-white dark:bg-zinc-950 text-xs text-slate-900 dark:text-white placeholder:text-slate-400"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-end gap-2 pt-1">
+                  <div className="flex items-center justify-end gap-1.5">
                     <button
                       type="button"
                       onClick={() => {
                         setDavFormOpen(false);
                         setDavError(null);
                       }}
-                      className="min-h-[48px] px-4 py-2 rounded-full border border-slate-300 dark:border-zinc-700 text-xs font-semibold text-slate-700 dark:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 transition cursor-pointer"
+                      className="h-8 px-3 rounded-lg border border-slate-300 dark:border-zinc-700 text-xs font-medium text-slate-700 dark:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 transition cursor-pointer"
                     >
                       Cancel
                     </button>
                     <button
                       type="submit"
                       disabled={davStatus === 'syncing'}
-                      className="min-h-[48px] px-5 py-2 rounded-full bg-[#4F46E5] hover:bg-[#4338CA] disabled:opacity-60 text-white text-xs font-semibold transition cursor-pointer"
+                      className="h-8 px-3.5 rounded-lg bg-[#4F46E5] hover:bg-[#4338CA] disabled:opacity-60 text-white text-xs font-semibold transition cursor-pointer"
                     >
                       {davStatus === 'syncing' ? 'Connecting…' : 'Save & Connect'}
                     </button>
                   </div>
                 </form>
-              )}
-            </SyncProviderCard>
-          </div>
+              }
+            />
 
-          {/* 6. MEGA (20 GB free · End-to-end encrypted by default) */}
-          <div className="w-full min-w-0">
-            <MEGASyncSection />
+            {/* 6. MEGA */}
+            <MEGASyncSection isLast />
           </div>
-        </div>
+        </LayoutGroup>
 
-        {/* Advanced Expandable: S3 / R2 / MinIO */}
-        <div className="pt-1">
+        {/* Advanced Expandable Accordion (Collapsed by default): S3 / R2 / MinIO */}
+        <div className="mt-2.5">
           <button
             type="button"
             onClick={() => setShowAdvancedS3((prev) => !prev)}
-            className="min-h-[48px] px-3 py-2 rounded-xl inline-flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-100 hover:bg-slate-100 dark:hover:bg-zinc-800/70 transition cursor-pointer"
+            aria-expanded={showAdvancedS3}
+            className="h-9 px-2.5 rounded-lg inline-flex items-center gap-1.5 text-[12px] font-medium text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-100 hover:bg-slate-100/80 dark:hover:bg-zinc-800/60 transition cursor-pointer"
           >
-            {showAdvancedS3 ? (
-              <ChevronDown className="w-4 h-4" />
-            ) : (
-              <ChevronRight className="w-4 h-4" />
-            )}
+            <ChevronDown
+              className={`w-3.5 h-3.5 transition-transform duration-200 ${
+                showAdvancedS3 ? 'rotate-180' : ''
+              }`}
+            />
             <span>Advanced (S3 / R2 / MinIO)</span>
           </button>
 
-          {showAdvancedS3 && (
-            <div className="mt-2">
-              <SyncProviderCard
-                name="S3 / MinIO"
-                description="S3-compatible object storage such as AWS S3, Cloudflare R2, or MinIO."
-                logo={<Server className="w-5 h-5 text-amber-600 dark:text-amber-400" />}
-                brandColor="#D97706"
-                isConnected={isS3Connected}
-                status={
-                  s3Status === 'syncing'
-                    ? 'syncing'
-                    : s3Status === 'error'
-                    ? 'error'
-                    : isS3Connected
-                    ? s3Cfg?.lastSyncedAt
-                      ? 'synced'
-                      : 'connected'
-                    : 'disconnected'
-                }
-                accountLabel={isS3Connected ? s3Cfg?.s3Bucket : undefined}
-                accountSublabel={isS3Connected ? s3Cfg?.s3Endpoint : undefined}
-                lastSyncedAt={isS3Connected ? s3Cfg?.lastSyncedAt || null : null}
-                errorMessage={s3Error}
-                connectLabel={s3FormOpen ? 'Hide Setup' : 'Connect'}
-                onConnect={isS3Connected ? undefined : () => setS3FormOpen((v) => !v)}
-                onSyncNow={isS3Connected ? handleSyncS3 : undefined}
-                onDisconnect={isS3Connected ? handleDisconnectS3 : undefined}
-                onRetry={handleSyncS3}
+          <AnimatePresence initial={false}>
+            {showAdvancedS3 && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+                className="overflow-hidden"
               >
-                {!isS3Connected && s3FormOpen && (
-                  <form
-                    onSubmit={handleConnectS3}
-                    className="pt-2 border-t border-[#E5E7EB] dark:border-zinc-800 space-y-3"
-                  >
-                    <div className="space-y-1">
-                      <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300">
-                        Endpoint URL
-                      </label>
-                      <input
-                        type="url"
-                        value={s3Endpoint}
-                        onChange={(e) => setS3Endpoint(e.target.value)}
-                        placeholder="https://s3.us-east-1.amazonaws.com"
-                        className="w-full min-h-[48px] px-3.5 py-2 rounded-xl border border-[#E5E7EB] dark:border-zinc-700 bg-white dark:bg-zinc-950 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 font-mono"
-                      />
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300">
-                          Bucket Name
-                        </label>
-                        <input
-                          type="text"
-                          value={s3Bucket}
-                          onChange={(e) => setS3Bucket(e.target.value)}
-                          placeholder="my-jivanos-backups"
-                          className="w-full min-h-[48px] px-3.5 py-2 rounded-xl border border-[#E5E7EB] dark:border-zinc-700 bg-white dark:bg-zinc-950 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 font-mono"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300">
-                          Region
-                        </label>
-                        <input
-                          type="text"
-                          value={s3Region}
-                          onChange={(e) => setS3Region(e.target.value)}
-                          placeholder="us-east-1 or auto"
-                          className="w-full min-h-[48px] px-3.5 py-2 rounded-xl border border-[#E5E7EB] dark:border-zinc-700 bg-white dark:bg-zinc-950 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 font-mono"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300">
-                          Access Key ID
-                        </label>
-                        <input
-                          type="text"
-                          autoComplete="off"
-                          value={s3AccessKey}
-                          onChange={(e) => setS3AccessKey(e.target.value)}
-                          placeholder="AKIA..."
-                          className="w-full min-h-[48px] px-3.5 py-2 rounded-xl border border-[#E5E7EB] dark:border-zinc-700 bg-white dark:bg-zinc-950 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 font-mono"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300">
-                          Secret Access Key
-                        </label>
-                        <input
-                          type="password"
-                          autoComplete="new-password"
-                          value={s3SecretKey}
-                          onChange={(e) => setS3SecretKey(e.target.value)}
-                          placeholder="Enter secret access key"
-                          className="w-full min-h-[48px] px-3.5 py-2 rounded-xl border border-[#E5E7EB] dark:border-zinc-700 bg-white dark:bg-zinc-950 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 font-mono"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-end gap-2 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setS3FormOpen(false);
-                          setS3Error(null);
-                        }}
-                        className="min-h-[48px] px-4 py-2 rounded-full border border-slate-300 dark:border-zinc-700 text-xs font-semibold text-slate-700 dark:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 transition cursor-pointer"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="submit"
-                        disabled={s3Status === 'syncing'}
-                        className="min-h-[48px] px-5 py-2 rounded-full bg-[#4F46E5] hover:bg-[#4338CA] disabled:opacity-60 text-white text-xs font-semibold transition cursor-pointer"
-                      >
-                        {s3Status === 'syncing' ? 'Connecting…' : 'Save & Connect'}
-                      </button>
-                    </div>
-                  </form>
-                )}
-              </SyncProviderCard>
-            </div>
-          )}
-        </div>
-      </section>
-
-      {/* ═══════════════════════════════════════════════════════════
-          SECTION 2 — AUTO-SYNC SETTINGS
-          (Only rendered if at least one provider is genuinely connected)
-         ═══════════════════════════════════════════════════════════ */}
-      {overview.hasAnyConnected && (
-        <section
-          aria-labelledby="section-autosync-heading"
-          className="rounded-2xl border border-[#E5E7EB] dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 sm:p-5 space-y-5"
-        >
-          <div className="space-y-0.5">
-            <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4F46E5] dark:text-indigo-400">
-              Auto-Sync Settings
-            </div>
-            <h2
-              id="section-autosync-heading"
-              className="text-base font-semibold text-slate-900 dark:text-white"
-            >
-              Schedule, Security &amp; Sync Preferences
-            </h2>
-          </div>
-
-          {/* Primary Sync Target — ONLY connected providers */}
-          <div className="space-y-2">
-            <div className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
-              Primary Sync Target
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {overview.connectedProviders.map((provider) => {
-                const selected = activePrimaryProviderId === provider.id;
-                return (
-                  <button
-                    key={provider.id}
-                    type="button"
-                    onClick={() => handleSelectPrimaryProvider(provider.id)}
-                    className={`min-h-[48px] px-4 py-2 rounded-full text-xs font-semibold border transition cursor-pointer ${
-                      selected
-                        ? 'bg-[#4F46E5] text-white border-[#4F46E5]'
-                        : 'bg-slate-50 dark:bg-zinc-950 text-slate-700 dark:text-zinc-200 border-[#E5E7EB] dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-800'
-                    }`}
-                  >
-                    {provider.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Sync Interval Segmented Button: 15m | 30m | 1h | Manual */}
-          <div className="space-y-2">
-            <div className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
-              Sync Interval
-            </div>
-            <div className="grid grid-cols-4 rounded-full border border-[#E5E7EB] dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950/70 p-1 gap-1">
-              {INTERVAL_SEGMENTS.map((seg) => {
-                const isSelected = normalizedInterval === seg.value;
-                return (
-                  <button
-                    key={seg.value}
-                    type="button"
-                    onClick={() =>
-                      updateJoplinSyncSettings({ autoSyncIntervalMinutes: seg.value })
+                <div className="mt-1.5 rounded-xl border border-[#E5E7EB] dark:border-zinc-800 bg-white dark:bg-zinc-900">
+                  <SyncProviderRow
+                    name="S3 / MinIO"
+                    description="AWS S3, Cloudflare R2, or MinIO"
+                    logo={<Server className="w-4.5 h-4.5 text-amber-600 dark:text-amber-400" />}
+                    logoBgClass="bg-amber-50 dark:bg-amber-950/60"
+                    brandColor="#D97706"
+                    isConnected={isS3Connected}
+                    status={
+                      s3Status === 'syncing'
+                        ? 'syncing'
+                        : s3Status === 'error'
+                          ? 'error'
+                          : isS3Connected
+                            ? s3Cfg?.lastSyncedAt
+                              ? 'synced'
+                              : 'connected'
+                            : 'disconnected'
                     }
-                    className={`min-h-[44px] rounded-full text-xs font-semibold transition cursor-pointer ${
-                      isSelected
-                        ? 'bg-[#4F46E5] text-white'
-                        : 'text-slate-600 dark:text-zinc-400 hover:bg-slate-200/60 dark:hover:bg-zinc-800'
-                    }`}
-                  >
-                    {seg.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+                    accountLabel={isS3Connected ? s3Cfg?.s3Bucket : undefined}
+                    metaLine={
+                      isS3Connected
+                        ? s3Cfg?.lastSyncedAt
+                          ? `Last synced ${formatRelativeSyncTime(s3Cfg.lastSyncedAt)} · ${s3Cfg.s3Endpoint}`
+                          : s3Cfg?.s3Endpoint || 'Connected'
+                        : undefined
+                    }
+                    connectLabel={s3FormOpen ? 'Hide' : 'Connect →'}
+                    onConnect={isS3Connected ? undefined : () => setS3FormOpen((v) => !v)}
+                    onSyncNow={isS3Connected ? handleSyncS3 : undefined}
+                    isSyncing={s3Status === 'syncing'}
+                    onRetry={handleSyncS3}
+                    onDisconnect={isS3Connected ? handleDisconnectS3 : undefined}
+                    errorMessage={s3Error}
+                    isExpanded={!isS3Connected && s3FormOpen}
+                    isFirst
+                    isLast
+                    expandedContent={
+                      <form
+                        onSubmit={handleConnectS3}
+                        className="pt-2.5 border-t border-[#E5E7EB]/80 dark:border-zinc-800 space-y-2.5"
+                      >
+                        <input
+                          type="url"
+                          value={s3Endpoint}
+                          onChange={(e) => setS3Endpoint(e.target.value)}
+                          placeholder="Endpoint URL (e.g. https://s3.us-east-1.amazonaws.com)"
+                          aria-label="S3 Endpoint URL"
+                          className="w-full h-9 px-3 rounded-lg border border-[#E5E7EB] dark:border-zinc-700 bg-slate-50 dark:bg-zinc-950 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 font-mono outline-none focus:border-amber-600"
+                        />
 
-          {/* Toggle Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-zinc-950/60 border border-[#E5E7EB] dark:border-zinc-800 flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-sm font-semibold text-slate-900 dark:text-white">
-                  Auto-sync on edit
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                          <input
+                            type="text"
+                            value={s3Bucket}
+                            onChange={(e) => setS3Bucket(e.target.value)}
+                            placeholder="Bucket name"
+                            aria-label="S3 Bucket Name"
+                            className="w-full h-9 px-3 rounded-lg border border-[#E5E7EB] dark:border-zinc-700 bg-slate-50 dark:bg-zinc-950 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 font-mono outline-none focus:border-amber-600"
+                          />
+                          <input
+                            type="text"
+                            value={s3Region}
+                            onChange={(e) => setS3Region(e.target.value)}
+                            placeholder="Region (e.g. us-east-1 or auto)"
+                            aria-label="S3 Region"
+                            className="w-full h-9 px-3 rounded-lg border border-[#E5E7EB] dark:border-zinc-700 bg-slate-50 dark:bg-zinc-950 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 font-mono outline-none focus:border-amber-600"
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                          <input
+                            type="text"
+                            autoComplete="off"
+                            value={s3AccessKey}
+                            onChange={(e) => setS3AccessKey(e.target.value)}
+                            placeholder="Access Key ID"
+                            aria-label="S3 Access Key ID"
+                            className="w-full h-9 px-3 rounded-lg border border-[#E5E7EB] dark:border-zinc-700 bg-slate-50 dark:bg-zinc-950 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 font-mono outline-none focus:border-amber-600"
+                          />
+                          <input
+                            type="password"
+                            autoComplete="new-password"
+                            value={s3SecretKey}
+                            onChange={(e) => setS3SecretKey(e.target.value)}
+                            placeholder="Secret Access Key"
+                            aria-label="S3 Secret Access Key"
+                            className="w-full h-9 px-3 rounded-lg border border-[#E5E7EB] dark:border-zinc-700 bg-slate-50 dark:bg-zinc-950 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 font-mono outline-none focus:border-amber-600"
+                          />
+                        </div>
+
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setS3FormOpen(false);
+                              setS3Error(null);
+                            }}
+                            className="h-8 px-3 rounded-lg border border-slate-300 dark:border-zinc-700 text-xs font-medium text-slate-700 dark:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 transition cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="submit"
+                            disabled={s3Status === 'syncing'}
+                            className="h-8 px-3.5 rounded-lg bg-[#4F46E5] hover:bg-[#4338CA] disabled:opacity-60 text-white text-xs font-semibold transition cursor-pointer"
+                          >
+                            {s3Status === 'syncing' ? 'Connecting…' : 'Save & Connect'}
+                          </button>
+                        </div>
+                      </form>
+                    }
+                  />
                 </div>
-                <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5">
-                  Upload changes automatically after edits
-                </p>
-              </div>
-              <M3Switch
-                checked={joplinSyncSettings.syncOnChange}
-                onChange={(val) => updateJoplinSyncSettings({ syncOnChange: val })}
-              />
-            </div>
-
-            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-zinc-950/60 border border-[#E5E7EB] dark:border-zinc-800 flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-sm font-semibold text-slate-900 dark:text-white">
-                  Sync on app launch
-                </div>
-                <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5">
-                  Check for newer updates when opening JivanOS
-                </p>
-              </div>
-              <M3Switch
-                checked={joplinSyncSettings.syncOnStartup}
-                onChange={(val) => updateJoplinSyncSettings({ syncOnStartup: val })}
-              />
-            </div>
-
-            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-zinc-950/60 border border-[#E5E7EB] dark:border-zinc-800 flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-sm font-semibold text-slate-900 dark:text-white">
-                  E2E Encryption (AES-256)
-                </div>
-                <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5">
-                  Encrypt backups before uploading
-                </p>
-              </div>
-              <M3Switch
-                checked={joplinSyncSettings.e2eeEnabled}
-                onChange={(val) => updateJoplinSyncSettings({ e2eeEnabled: val })}
-              />
-            </div>
-
-            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-zinc-950/60 border border-[#E5E7EB] dark:border-zinc-800 flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-sm font-semibold text-slate-900 dark:text-white">
-                  Include profile in sync
-                </div>
-                <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5">
-                  Sync avatar, profile details &amp; currency
-                </p>
-              </div>
-              <M3Switch
-                checked={joplinSyncSettings.syncPersonalDetails}
-                onChange={(val) => updateJoplinSyncSettings({ syncPersonalDetails: val })}
-              />
-            </div>
-          </div>
-
-          {joplinSyncSettings.e2eeEnabled && (
-            <div className="p-4 rounded-2xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/70 space-y-2">
-              <label className="flex items-center gap-1.5 text-xs font-semibold text-amber-900 dark:text-amber-200">
-                <Lock className="w-3.5 h-3.5" />
-                <span>Encryption Passphrase</span>
-              </label>
-              <input
-                type="password"
-                autoComplete="new-password"
-                value={joplinSyncSettings.e2eePassphrase || ''}
-                onChange={(e) => updateJoplinSyncSettings({ e2eePassphrase: e.target.value })}
-                placeholder="Enter a passphrase shared across your devices"
-                className="w-full min-h-[48px] px-3.5 py-2 rounded-xl border border-amber-200 dark:border-amber-800 bg-white dark:bg-zinc-950 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 font-mono"
-              />
-            </div>
-          )}
-        </section>
-      )}
-
-      {/* ═══════════════════════════════════════════════════════════
-          SECTION 3 — LOCAL BACKUP (Always Available)
-         ═══════════════════════════════════════════════════════════ */}
-      <section
-        aria-labelledby="section-local-backup-heading"
-        className="rounded-2xl border border-[#E5E7EB] dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 sm:p-5 space-y-5"
-      >
-        <div className="flex items-start gap-3">
-          <div className="w-11 h-11 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-[#4F46E5] dark:text-indigo-400 flex items-center justify-center shrink-0">
-            <HardDrive className="w-5 h-5" />
-          </div>
-          <div className="min-w-0 space-y-0.5">
-            <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4F46E5] dark:text-indigo-400">
-              Local Backup
-            </div>
-            <h2
-              id="section-local-backup-heading"
-              className="text-base font-semibold text-slate-900 dark:text-white"
-            >
-              Offline Backup &amp; Recent Snapshots
-            </h2>
-            <p className="text-xs text-slate-600 dark:text-zinc-400 leading-relaxed">
-              {isNativeAndroid
-                ? 'Save a JSON backup to Downloads with Share Sheet, or restore any snapshot.'
-                : 'Save a JSON backup to your device or restore from a saved file.'}
-            </p>
-          </div>
-        </div>
-
-        {/* One FilledButton + One OutlinedButton */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <button
-            type="button"
-            id="btn-m3-export-backup"
-            onClick={handleExportBackup}
-            disabled={isExporting}
-            className="min-h-[48px] px-5 py-3 rounded-full bg-[#4F46E5] hover:bg-[#4338CA] active:scale-[0.99] disabled:opacity-60 text-white text-sm font-semibold transition flex items-center justify-center gap-2 cursor-pointer"
-          >
-            <Download className="w-4 h-4 shrink-0" />
-            <span>{isExporting ? 'Saving Backup…' : 'Export Backup'}</span>
-            {isNativeAndroid && <Share2 className="w-3.5 h-3.5 opacity-85 shrink-0" />}
-          </button>
-
-          <button
-            type="button"
-            id="btn-m3-restore-from-file"
-            onClick={handleOpenFilePicker}
-            className="min-h-[48px] px-5 py-3 rounded-full bg-transparent hover:bg-slate-100 dark:hover:bg-zinc-800 active:scale-[0.99] text-[#4F46E5] dark:text-indigo-300 border border-slate-300 dark:border-zinc-700 text-sm font-semibold transition flex items-center justify-center gap-2 cursor-pointer"
-          >
-            <Upload className="w-4 h-4 shrink-0" />
-            <span>Restore from File</span>
-          </button>
-
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".json,application/json"
-            onChange={handleFileChange}
-            className="hidden"
-            aria-label="Select JivanOS JSON backup file"
-          />
-        </div>
-
-        <div className="h-px bg-[#E5E7EB] dark:bg-zinc-800" />
-
-        {/* Recent Snapshots (last 3 rotating) */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <h3 className="text-sm font-semibold text-slate-900 dark:text-zinc-100">
-              Recent Snapshots
-            </h3>
-            <span className="text-xs text-slate-500 dark:text-zinc-400">
-              Last 3 auto-saved snapshots
-            </span>
-          </div>
-
-          {isLoadingSnapshots ? (
-            <div className="py-6 text-center text-xs text-slate-500 dark:text-zinc-400">
-              Loading recent snapshots…
-            </div>
-          ) : snapshots.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-[#E5E7EB] dark:border-zinc-800 p-5 text-center text-xs text-slate-500 dark:text-zinc-400">
-              No automatic snapshots recorded yet.
-            </div>
-          ) : (
-            <div className="divide-y divide-[#E5E7EB] dark:divide-zinc-800 rounded-2xl border border-[#E5E7EB] dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-950/40 overflow-hidden">
-              {snapshots.slice(0, 3).map((snap) => (
-                <button
-                  key={snap.filename}
-                  type="button"
-                  onClick={() => handleSelectSnapshot(snap)}
-                  className="w-full min-h-[60px] px-4 py-3 text-left flex items-center justify-between gap-3 hover:bg-indigo-50/60 dark:hover:bg-zinc-800/70 transition cursor-pointer"
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div
-                      className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
-                        snap.slot === 1
-                          ? 'bg-indigo-100 dark:bg-indigo-950/75 text-[#4F46E5] dark:text-indigo-300'
-                          : 'bg-slate-200/70 dark:bg-zinc-800 text-slate-600 dark:text-zinc-300'
-                      }`}
-                    >
-                      <History className="w-4 h-4" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-sm font-semibold text-slate-900 dark:text-zinc-100">
-                        {formatSnapshotTimestamp(snap.timestamp)}
-                      </div>
-                      <div className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5 tabular-nums">
-                        {formatSnapshotSize(snap.sizeBytes)}
-                        {snap.slot === 1 ? ' · Latest' : ''}
-                      </div>
-                    </div>
-                  </div>
-
-                  <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#4F46E5] dark:text-indigo-300 shrink-0">
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    <span>Restore</span>
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </section>
+
+      {/* ═══════════════════════════════════════════════════════════
+          SECTIONS 2 & 3 — SYNC SETTINGS + LOCAL BACKUP
+          Phone (<600px): Single column stacked
+          Tablet / Desktop (>=600px): 2-column 50/50 side-by-side grid
+         ═══════════════════════════════════════════════════════════ */}
+      <div
+        className={
+          overview.hasAnyConnected
+            ? 'grid grid-cols-1 min-[600px]:grid-cols-2 gap-4 items-start'
+            : ''
+        }
+      >
+        {overview.hasAnyConnected && (
+          <SyncSettingsCard
+            connectedProviders={overview.connectedProviders}
+            primaryProviderId={activePrimaryProviderId}
+            onSelectPrimaryProvider={handleSelectPrimaryProvider}
+            intervalMinutes={normalizedInterval}
+            onChangeInterval={(interval) =>
+              updateJoplinSyncSettings({ autoSyncIntervalMinutes: interval })
+            }
+            syncOnChange={joplinSyncSettings.syncOnChange}
+            onToggleSyncOnChange={(val) => updateJoplinSyncSettings({ syncOnChange: val })}
+            syncOnStartup={joplinSyncSettings.syncOnStartup}
+            onToggleSyncOnStartup={(val) => updateJoplinSyncSettings({ syncOnStartup: val })}
+            e2eeEnabled={joplinSyncSettings.e2eeEnabled}
+            onToggleE2ee={(val) => updateJoplinSyncSettings({ e2eeEnabled: val })}
+            e2eePassphrase={joplinSyncSettings.e2eePassphrase || ''}
+            onChangeE2eePassphrase={(val) => updateJoplinSyncSettings({ e2eePassphrase: val })}
+          />
+        )}
+
+        <LocalBackupCard
+          snapshots={snapshots}
+          isLoadingSnapshots={isLoadingSnapshots}
+          isExporting={isExporting}
+          isNativeAndroid={isNativeAndroid}
+          fileInputRef={fileInputRef}
+          onExportBackup={handleExportBackup}
+          onOpenFilePicker={handleOpenFilePicker}
+          onFileChange={handleFileChange}
+          onSelectSnapshot={handleSelectSnapshot}
+        />
+      </div>
 
       {/* Restore Confirmation Dialog */}
       {pendingRestore && (

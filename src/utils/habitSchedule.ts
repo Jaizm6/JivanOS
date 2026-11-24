@@ -77,3 +77,42 @@ export function getHabitFrequencyLabel(habit: Habit): string {
   }
   return 'Daily';
 }
+
+export interface NextScheduledDayInfo {
+  dayShort: string;
+  daysUntil: number;
+  dateStr: string;
+  compactLabel: string;
+}
+
+/**
+ * Finds the next scheduled date after `fromDateStr` (within the next 7 days).
+ */
+export function getNextScheduledDayInfo(
+  habit: Habit,
+  fromDateStr: string
+): NextScheduledDayInfo | null {
+  if (!fromDateStr) return null;
+  const base = new Date(fromDateStr + 'T00:00:00');
+  if (isNaN(base.getTime())) return null;
+
+  const dayNamesShort = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  for (let offset = 1; offset <= 7; offset++) {
+    const candidate = new Date(base.getFullYear(), base.getMonth(), base.getDate() + offset);
+    const yyyy = candidate.getFullYear();
+    const mm = String(candidate.getMonth() + 1).padStart(2, '0');
+    const dd = String(candidate.getDate()).padStart(2, '0');
+    const candidateStr = `${yyyy}-${mm}-${dd}`;
+    if (isHabitScheduledForDate(habit, candidateStr)) {
+      const dayShort = dayNamesShort[candidate.getDay()];
+      return {
+        dayShort,
+        daysUntil: offset,
+        dateStr: candidateStr,
+        compactLabel: offset === 1 ? `Next ${dayShort}` : `Next ${dayShort} · ${offset}d`,
+      };
+    }
+  }
+  return null;
+}
+

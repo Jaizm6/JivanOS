@@ -43,11 +43,22 @@ import {
   updateStoredCloudMeta,
 } from '../providers/FirestoreSyncProvider';
 
+import {
+  SyncProviderMenuItem,
+  SyncProviderRow,
+  SyncRowStatus,
+} from '../../components/settings/SyncProviderRow';
+
 interface CloudConflictState {
   remoteEnvelope: DriveBackupEnvelope;
   remoteLastModified: string;
   remoteSizeBytes: number;
   localLastSyncedAt: string | null;
+}
+
+export interface JivanOSCloudSectionProps {
+  isFirst?: boolean;
+  isLast?: boolean;
 }
 
 const JivanOSMark: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) => (
@@ -91,7 +102,10 @@ const GoogleLogoSmall: React.FC = () => (
   </svg>
 );
 
-export const JivanOSCloudSection: React.FC = () => {
+export const JivanOSCloudSection: React.FC<JivanOSCloudSectionProps> = ({
+  isFirst = false,
+  isLast = false,
+}) => {
   const { exportEncryptedJSON, replaceAllAppDataFromBackup } = useApp();
   const sub = useSubscription();
 
@@ -107,6 +121,7 @@ export const JivanOSCloudSection: React.FC = () => {
     () => firestoreSyncProvider.isListeningRealtime
   );
   const [history, setHistory] = useState<CloudSyncHistoryItem[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
   const [conflictState, setConflictState] = useState<CloudConflictState | null>(null);
   const [isResolvingConflict, setIsResolvingConflict] = useState(false);
   const [isExportingLastBackup, setIsExportingLastBackup] = useState(false);
@@ -388,6 +403,7 @@ export const JivanOSCloudSection: React.FC = () => {
   const handleSignOut = async () => {
     await firestoreSyncProvider.disconnect();
     setHistory([]);
+    setShowHistory(false);
     setSyncStatus('idle');
     setErrorMessage(null);
     showAndroidToast('Signed out of JivanOS Cloud', 2400, 'default');
@@ -397,428 +413,240 @@ export const JivanOSCloudSection: React.FC = () => {
     sub.user?.displayName ||
     (sub.user?.email ? sub.user.email.split('@')[0] : 'JivanOS Member');
   const displayEmail = sub.user?.email || '';
-  const initials = computeInitials(displayName, displayEmail);
   const lastSyncLabel = meta.lastSyncedAt
     ? formatRelativeSyncTime(meta.lastSyncedAt) === 'Just now'
       ? 'Synced just now'
       : `Last synced ${formatRelativeSyncTime(meta.lastSyncedAt)}`
     : 'Not synced yet';
 
+  const isSignedIn = Boolean(sub.user);
+  const isUnverified = Boolean(sub.user && !sub.emailVerified);
+  const isCheckingSub = Boolean(sub.user && sub.emailVerified && sub.loading);
+  const isEntitled = Boolean(sub.user && sub.emailVerified && !sub.loading && sub.isPremium);
+  const isExpiredOrPaywall = Boolean(
+    sub.user && sub.emailVerified && !sub.loading && !sub.isPremium
+  );
+
+  // Derive compact status & label
+  let rowStatus: SyncRowStatus = 'disconnected';
+  let statusLabel: string | undefined;
+
+  if (isUnverified) {
+    rowStatus = 'trial';
+    statusLabel = 'Verify email';
+  } else if (isCheckingSub) {
+    rowStatus = 'syncing';
+    statusLabel = 'Checking…';
+  } else if (isExpiredOrPaywall) {
+    rowStatus = 'expired';
+    statusLabel = 'Expired';
+  } else if (isEntitled) {
+    if (syncStatus === 'syncing') {
+      rowStatus = 'syncing';
+      statusLabel = 'Syncing…';
+    } else if (syncStatus === 'error') {
+      rowStatus = 'error';
+      statusLabel = 'Error';
+    } else if (sub.status === 'trial') {
+      rowStatus = 'trial';
+      statusLabel = `Trial · ${sub.trialDaysRemaining}d left`;
+    } else {
+      rowStatus = 'synced';
+      statusLabel = 'Active ✓';
+    }
+  }
+
+  // Compact metadata line when signed in
+  const metaLine = isUnverified
+    ? 'Verify inbox to activate 14-day free trial'
+    : isCheckingSub
+      ? 'Checking subscription status…'
+      : isExpiredOrPaywall
+        ? 'Sync paused · Your last backup is safe'
+        : sub.status === 'trial'
+          ? isListening
+            ? `Syncing in real-time · ${lastSyncLabel}`
+            : lastSyncLabel
+          : `${lastSyncLabel}${isListening ? ' · Real-time live' : ''}${
+              meta.lastFileSizeBytes !== null
+                ? ` · ${formatDriveFileSize(meta.lastFileSizeBytes)}`
+                : ''
+            }`;
+
+  // Overflow menu items for signed-in states
+  const extraMenuItems: SyncProviderMenuItem[] = [];
+  if (isEntitled) {
+    extraMenuItems.push({
+      id: 'realtime-toggle',
+      label: 'Real-time sync',
+      sublabel: meta.realtimeEnabled ? 'On' : 'Off',
+      icon: (
+        <Radio
+          className={`w-3.5 h-3.5 shrink-0 ${
+            isListening ? 'text-emerald-500' : 'text-slate-400'
+          }`}
+        />
+      ),
+      onClick: handleToggleRealtime,
+    });
+    if (history.length > 0) {
+      extraMenuItems.push({
+        id: 'sync-history',
+        label: showHistory ? 'Hide recent syncs' : 'Recent cloud syncs',
+        icon: <History className="w-3.5 h-3.5 text-slate-500 shrink-0" />,
+        onClick: () => setShowHistory((v) => !v),
+      });
+    }
+    extraMenuItems.push({
+      id: 'manage-sub',
+      label: sub.status === 'trial' ? 'Upgrade (₹99/mo · ₹499/yr)' : 'Manage Subscription',
+      icon: <ExternalLink className="w-3.5 h-3.5 text-[#4F46E5] dark:text-indigo-400 shrink-0" />,
+      href: JIVANOS_SUBSCRIBE_URL,
+      onClick: () => {},
+    });
+  }
+
+  // Compact expandable content for unverified / expired / optional history drawer
+  let expandedContent: React.ReactNode = null;
+  if (isUnverified) {
+    expandedContent = (
+      <div className="pt-2 border-t border-amber-200/80 dark:border-amber-900/50 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={async () => {
+            const verified = await sub.refreshUserVerification();
+            if (verified) {
+              showAndroidToast('Email verified! Activating JivanOS Cloud...', 2600, 'success');
+            } else {
+              showAndroidToast('Still waiting for email verification.', 2600, 'default');
+            }
+          }}
+          className="h-8 px-3 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold transition cursor-pointer"
+        >
+          I&rsquo;ve Verified
+        </button>
+        <button
+          type="button"
+          onClick={async () => {
+            try {
+              await resendEmailVerification();
+              showAndroidToast('Verification email resent', 2400, 'success');
+            } catch (err: any) {
+              showAndroidToast(err?.message || 'Could not resend email.', 2800, 'error');
+            }
+          }}
+          className="h-8 px-3 rounded-lg border border-amber-300 dark:border-amber-800 text-xs font-medium text-amber-800 dark:text-amber-200 hover:bg-amber-100/70 dark:hover:bg-amber-900/40 transition cursor-pointer"
+        >
+          Resend Email
+        </button>
+      </div>
+    );
+  } else if (isExpiredOrPaywall) {
+    expandedContent = (
+      <div className="pt-2 border-t border-rose-200/80 dark:border-rose-900/50 flex flex-wrap items-center gap-2">
+        <a
+          href={JIVANOS_SUBSCRIBE_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="h-8 px-3 rounded-lg bg-[#4F46E5] hover:bg-[#4338CA] text-white text-xs font-semibold transition inline-flex items-center gap-1.5 whitespace-nowrap"
+        >
+          <span>Renew — ₹99/mo</span>
+          <ExternalLink className="w-3 h-3" />
+        </a>
+        <button
+          type="button"
+          disabled={isExportingLastBackup}
+          onClick={handleExportLastBackup}
+          className="h-8 px-3 rounded-lg border border-slate-300 dark:border-zinc-700 text-xs font-medium text-slate-700 dark:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 transition inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-60 whitespace-nowrap"
+        >
+          <Download className="w-3 h-3" />
+          <span>{isExportingLastBackup ? 'Exporting…' : 'Export last backup'}</span>
+        </button>
+      </div>
+    );
+  } else if (isEntitled && showHistory && history.length > 0) {
+    expandedContent = (
+      <div className="pt-2 border-t border-indigo-200/60 dark:border-indigo-900/50 space-y-1">
+        <div className="text-[10.5px] font-semibold uppercase tracking-[0.06em] text-slate-500 dark:text-zinc-400">
+          Recent Cloud Syncs
+        </div>
+        <div className="divide-y divide-slate-200/60 dark:divide-zinc-800/70">
+          {history.slice(0, 3).map((item) => (
+            <div
+              key={item.id}
+              className="py-1 flex items-center justify-between gap-2 text-[11.5px]"
+            >
+              <span className="font-medium text-slate-700 dark:text-zinc-200 truncate">
+                {item.deviceName}
+              </span>
+              <span className="text-slate-500 dark:text-zinc-400 tabular-nums shrink-0">
+                {formatRelativeSyncTime(item.timestamp)}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
-      <section
-        aria-label="JivanOS Cloud"
-        style={
-          sub.user && sub.emailVerified
-            ? { borderLeftWidth: 3, borderLeftColor: '#4F46E5' }
-            : undefined
+      <SyncProviderRow
+        name="JivanOS Cloud"
+        description="Real-time sync · 14-day free trial"
+        extraLine={!isSignedIn ? '₹99/month · ₹499/year' : undefined}
+        badge={
+          !isSignedIn ? (
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10.5px] font-semibold bg-indigo-50 dark:bg-indigo-950/70 text-[#4F46E5] dark:text-indigo-300 shrink-0">
+              Premium
+            </span>
+          ) : undefined
         }
-        className="rounded-3xl border border-[#E5E7EB] dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 sm:p-5 space-y-4 w-full min-w-0"
-      >
-        {/* Header Row */}
-        <div className="flex items-start justify-between gap-3 flex-wrap">
-          <div className="flex items-start gap-3 min-w-0 flex-1">
-            <div className="w-11 h-11 rounded-2xl bg-[#4F46E5] text-white flex items-center justify-center shrink-0 relative">
-              <JivanOSMark className="w-5 h-5" />
-              <Cloud className="w-3.5 h-3.5 absolute -bottom-1 -right-1 text-[#4F46E5] dark:text-indigo-300 bg-white dark:bg-zinc-900 rounded-full p-0.5" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="text-base font-semibold tracking-tight text-slate-900 dark:text-zinc-100 leading-snug">
-                  JivanOS Cloud
-                </h3>
-
-                {/* Tier Status Chips */}
-                {!sub.user && (
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-medium bg-indigo-50 dark:bg-indigo-950/60 text-[#4F46E5] dark:text-indigo-300">
-                    Premium · ₹99/month
-                  </span>
-                )}
-                {sub.user && sub.emailVerified && sub.status === 'active' && (
-                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white">
-                    <Check className="w-3 h-3" />
-                    <span>Active</span>
-                  </span>
-                )}
-                {sub.user && sub.emailVerified && sub.status === 'trial' && (
-                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-xs font-semibold bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300">
-                    <Sparkles className="w-3 h-3" />
-                    <span>Trial</span>
-                  </span>
-                )}
-                {sub.user && sub.emailVerified && sub.status === 'expired' && (
-                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-xs font-semibold bg-rose-600 text-white">
-                    <X className="w-3 h-3" />
-                    <span>Expired</span>
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-slate-600 dark:text-zinc-400 mt-0.5 leading-relaxed">
-                Real-time encrypted sync across all your devices
-              </p>
-            </div>
-          </div>
-
-          {/* Live Sync Status Chip */}
-          <div className="shrink-0">
-            {!sub.user ? (
-              <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-200/80 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300">
-                Not connected
-              </span>
-            ) : sub.user && sub.emailVerified && sub.isPremium ? (
-              <>
-                {syncStatus === 'syncing' && (
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-600 text-white animate-pulse">
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Syncing…</span>
-                  </span>
-                )}
-                {syncStatus === 'synced' && meta.lastSyncedAt && (
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-600 text-white">
-                    <Check className="w-3.5 h-3.5" />
-                    <span>Synced ✓</span>
-                  </span>
-                )}
-                {syncStatus === 'error' && (
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-rose-600 text-white">
-                    <X className="w-3.5 h-3.5" />
-                    <span>Error ✗</span>
-                  </span>
-                )}
-              </>
-            ) : null}
-          </div>
-        </div>
-
-        {/* STATE 1: NOT SIGNED IN */}
-        {!sub.user && (
-          <div className="space-y-4">
-            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600 dark:text-zinc-300">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 font-medium border border-indigo-100 dark:border-indigo-900/60">
-                Real-time sync
-              </span>
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 font-medium border border-amber-200/70 dark:border-amber-900/60">
-                14-day free trial
-              </span>
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-200 font-medium border border-slate-200/80 dark:border-zinc-700">
-                ₹99/month · ₹499/year
-              </span>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2.5">
+        logo={<JivanOSMark className="w-4.5 h-4.5 text-[#4F46E5] dark:text-indigo-300" />}
+        logoBgClass="bg-indigo-100/80 dark:bg-indigo-950/70"
+        brandColor={isExpiredOrPaywall ? '#E11D48' : '#4F46E5'}
+        isConnected={isSignedIn}
+        prominent={!isSignedIn}
+        status={rowStatus}
+        statusLabel={statusLabel}
+        accountLabel={isSignedIn ? displayEmail || displayName : undefined}
+        metaLine={isSignedIn ? metaLine : undefined}
+        disconnectedActions={
+          !isSignedIn ? (
+            <>
               <button
                 type="button"
                 id="btn-jivanos-cloud-start-trial"
                 onClick={() => handleOpenAuthSheet('trial')}
-                className="min-h-[48px] px-6 py-3 rounded-full bg-indigo-600 hover:bg-indigo-700 active:scale-[0.99] text-white text-sm font-semibold shadow-xs transition flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap"
+                className="h-8 px-3 rounded-lg bg-[#4F46E5] hover:bg-[#4338CA] active:scale-[0.98] text-white text-xs font-semibold transition inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
               >
-                <Cloud className="w-4 h-4 shrink-0" />
+                <Sparkles className="w-3.5 h-3.5 shrink-0" />
                 <span>Start Free Trial</span>
               </button>
-
               <button
                 type="button"
                 id="btn-jivanos-cloud-signin"
                 onClick={() => handleOpenAuthSheet('signin')}
-                className="min-h-[44px] px-4 py-2.5 rounded-full text-sm font-semibold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 transition cursor-pointer whitespace-nowrap"
+                className="h-8 px-2.5 rounded-lg border border-slate-300 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-800 text-xs font-medium text-indigo-700 dark:text-indigo-300 transition cursor-pointer whitespace-nowrap"
               >
                 Sign In
               </button>
-            </div>
-          </div>
-        )}
-
-        {/* STATE 1B: SIGNED IN WITH UNVERIFIED EMAIL */}
-        {sub.user && !sub.emailVerified && (
-          <div className="rounded-2xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/70 dark:bg-amber-950/30 p-4 space-y-3">
-            <div className="text-sm font-semibold text-amber-900 dark:text-amber-200">
-              Verify your email to activate your 14-day free trial
-            </div>
-            <p className="text-xs text-amber-800/90 dark:text-amber-300/90 leading-relaxed">
-              We sent a verification link to <span className="font-semibold">{displayEmail}</span>.
-              Verify your inbox, then tap &ldquo;I&rsquo;ve Verified&rdquo;.
-            </p>
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={async () => {
-                  const verified = await sub.refreshUserVerification();
-                  if (verified) {
-                    showAndroidToast('Email verified! Activating JivanOS Cloud...', 2600, 'success');
-                  } else {
-                    showAndroidToast('Still waiting for email verification.', 2600, 'default');
-                  }
-                }}
-                className="min-h-[40px] px-4 py-2 rounded-full bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold transition cursor-pointer"
-              >
-                I&rsquo;ve Verified
-              </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  try {
-                    await resendEmailVerification();
-                    showAndroidToast('Verification email resent', 2400, 'success');
-                  } catch (err: any) {
-                    showAndroidToast(err?.message || 'Could not resend email.', 2800, 'error');
-                  }
-                }}
-                className="min-h-[40px] px-3.5 py-2 rounded-full text-xs font-semibold text-amber-800 dark:text-amber-200 hover:bg-amber-100/80 dark:hover:bg-amber-900/40 transition cursor-pointer"
-              >
-                Resend Email
-              </button>
-              <button
-                type="button"
-                onClick={handleSignOut}
-                className="min-h-[40px] px-3.5 py-2 rounded-full text-xs font-semibold text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 transition cursor-pointer ml-auto"
-              >
-                Sign Out
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* LOADING SUBSCRIPTION STATE */}
-        {sub.user && sub.emailVerified && sub.loading && (
-          <div className="py-5 text-center text-xs text-slate-500 dark:text-zinc-400 flex items-center justify-center gap-2">
-            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-            <span>Checking JivanOS Cloud subscription status…</span>
-          </div>
-        )}
-
-        {/* STATE 2 & 3: TRIAL ACTIVE OR SUBSCRIBED ACTIVE */}
-        {sub.user && sub.emailVerified && !sub.loading && sub.isPremium && (
-          <div className="space-y-4">
-            {/* Trial Days Remaining Banner */}
-            {sub.status === 'trial' && (
-              <div className="rounded-2xl border border-amber-200/90 dark:border-amber-800/60 bg-amber-50/80 dark:bg-amber-950/35 px-4 py-2.5 flex items-center justify-between gap-2 text-xs text-amber-900 dark:text-amber-200">
-                <span className="font-semibold">
-                  {sub.trialDaysRemaining}{' '}
-                  {sub.trialDaysRemaining === 1 ? 'day' : 'days'} remaining in trial
-                </span>
-                <span className="text-amber-700 dark:text-amber-300/90">All sync features unlocked</span>
-              </div>
-            )}
-
-            {/* User Account Bar + Sync Now */}
-            <div className="rounded-2xl border border-slate-200/85 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-950/50 p-3.5 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3 min-w-0">
-                {sub.user.photoURL ? (
-                  <img
-                    src={sub.user.photoURL}
-                    alt={displayName}
-                    referrerPolicy="no-referrer"
-                    className="w-10 h-10 rounded-full object-cover shrink-0 border border-slate-200 dark:border-zinc-700"
-                  />
-                ) : (
-                  <div className="w-10 h-10 rounded-full bg-indigo-600 text-white font-semibold text-sm flex items-center justify-center shrink-0">
-                    {initials}
-                  </div>
-                )}
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-slate-900 dark:text-zinc-100 truncate">
-                    {displayName}
-                  </div>
-                  <div className="text-xs text-slate-500 dark:text-zinc-400 truncate">
-                    {displayEmail}
-                  </div>
-                  <div className="text-[11px] text-slate-500 dark:text-zinc-400 mt-0.5 flex items-center gap-1.5 tabular-nums flex-wrap">
-                    <span>{lastSyncLabel}</span>
-                    {meta.lastFileSizeBytes !== null && (
-                      <>
-                        <span aria-hidden="true">·</span>
-                        <span>{formatDriveFileSize(meta.lastFileSizeBytes)}</span>
-                      </>
-                    )}
-                    {isListening && (
-                      <>
-                        <span aria-hidden="true">·</span>
-                        <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
-                          <span>Live</span>
-                        </span>
-                      </>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                id="btn-jivanos-cloud-sync-now"
-                onClick={handleSyncNow}
-                disabled={syncStatus === 'syncing'}
-                title="Sync Now"
-                aria-label="Sync Now"
-                className="w-11 h-11 rounded-full bg-indigo-600 hover:bg-indigo-700 active:scale-95 disabled:opacity-60 text-white flex items-center justify-center shrink-0 shadow-xs transition cursor-pointer"
-              >
-                <RefreshCw className={`w-4.5 h-4.5 ${syncStatus === 'syncing' ? 'animate-spin' : ''}`} />
-              </button>
-            </div>
-
-            {/* Real-time Sync Toggle */}
-            <div className="flex items-center justify-between gap-3 px-1">
-              <div className="flex items-center gap-2.5 min-w-0">
-                <Radio
-                  className={`w-4 h-4 shrink-0 ${
-                    isListening ? 'text-emerald-500 animate-pulse' : 'text-slate-400'
-                  }`}
-                />
-                <div className="min-w-0">
-                  <div className="text-xs font-semibold text-slate-800 dark:text-zinc-200">
-                    Real-time cross-device sync
-                  </div>
-                  <div className="text-[11px] text-slate-500 dark:text-zinc-400">
-                    {isListening
-                      ? 'Listening live via Firestore across your devices'
-                      : 'Paused — tap Sync Now to sync manually'}
-                  </div>
-                </div>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={meta.realtimeEnabled}
-                onClick={handleToggleRealtime}
-                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors cursor-pointer ${
-                  meta.realtimeEnabled ? 'bg-indigo-600' : 'bg-slate-300 dark:bg-zinc-700'
-                }`}
-              >
-                <span
-                  className={`inline-block h-4.5 w-4.5 transform rounded-full bg-white shadow-xs transition-transform ${
-                    meta.realtimeEnabled ? 'translate-x-5.5' : 'translate-x-1'
-                  }`}
-                />
-              </button>
-            </div>
-
-            {/* Sync History (last 3 entries) */}
-            {history.length > 0 && (
-              <div className="rounded-2xl border border-slate-200/80 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-950/40 p-3 space-y-2">
-                <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-zinc-400">
-                  <History className="w-3.5 h-3.5" />
-                  <span>Recent Cloud Syncs</span>
-                </div>
-                <div className="divide-y divide-slate-200/60 dark:divide-zinc-800/80">
-                  {history.slice(0, 3).map((item) => (
-                    <div
-                      key={item.id}
-                      className="py-1.5 flex items-center justify-between gap-2 text-xs"
-                    >
-                      <span className="font-medium text-slate-700 dark:text-zinc-200 truncate">
-                        {item.deviceName}
-                      </span>
-                      <span className="text-[11px] text-slate-500 dark:text-zinc-400 tabular-nums shrink-0">
-                        {formatRelativeSyncTime(item.timestamp)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {errorMessage && (
-              <div className="rounded-2xl border border-rose-200 dark:border-rose-900/70 bg-rose-50/70 dark:bg-rose-950/35 px-3.5 py-2.5 text-xs text-rose-700 dark:text-rose-300">
-                {errorMessage}
-              </div>
-            )}
-
-            {/* Upgrade Card (Trial State Only) */}
-            {sub.status === 'trial' && (
-              <div className="rounded-2xl border border-indigo-200/80 dark:border-indigo-900/60 bg-indigo-50/60 dark:bg-indigo-950/30 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-xs font-semibold text-indigo-950 dark:text-indigo-100">
-                    Upgrade to keep syncing
-                  </div>
-                  <div className="text-[11px] text-indigo-700/90 dark:text-indigo-300/90 mt-0.5">
-                    ₹99/month or ₹499/year (save 58%) · Instant multi-device cloud sync
-                  </div>
-                </div>
-                <a
-                  href={JIVANOS_SUBSCRIBE_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center gap-1.5 min-h-[38px] px-4 py-2 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold transition shrink-0 whitespace-nowrap"
-                >
-                  <span>Upgrade</span>
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </a>
-              </div>
-            )}
-
-            {/* Bottom Actions Row */}
-            <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-              <a
-                href={JIVANOS_SUBSCRIBE_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-700 dark:text-indigo-300 hover:underline"
-              >
-                <span>Manage Subscription</span>
-                <ExternalLink className="w-3.5 h-3.5" />
-              </a>
-
-              <button
-                type="button"
-                onClick={handleSignOut}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 transition cursor-pointer"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                <span>Sign Out</span>
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* STATE 4: EXPIRED OR NON-PREMIUM PAYWALL */}
-        {sub.user && sub.emailVerified && !sub.loading && !sub.isPremium && (
-          <div className="space-y-4">
-            <div className="rounded-2xl border border-rose-200/80 dark:border-rose-900/60 bg-rose-50/60 dark:bg-rose-950/30 p-4 space-y-2">
-              <div className="text-sm font-semibold text-rose-900 dark:text-rose-200">
-                {sub.status === 'expired'
-                  ? 'Your subscription ended. Your last backup is safe.'
-                  : 'JivanOS Cloud is a premium feature'}
-              </div>
-              <p className="text-xs text-rose-800/85 dark:text-rose-300/85 leading-relaxed">
-                Unlock instant real-time Firestore sync across Android, Web, and Desktop for{' '}
-                <span className="font-semibold">₹99/month</span> or{' '}
-                <span className="font-semibold">₹499/year</span>. Syncing is paused, but you can
-                still export your last cloud backup anytime.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2.5">
-              <a
-                href={JIVANOS_SUBSCRIBE_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="min-h-[46px] px-5 py-2.5 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold shadow-xs transition inline-flex items-center justify-center gap-2 whitespace-nowrap"
-              >
-                <span>Renew — ₹99/month</span>
-                <ExternalLink className="w-4 h-4" />
-              </a>
-
-              <button
-                type="button"
-                disabled={isExportingLastBackup}
-                onClick={handleExportLastBackup}
-                className="min-h-[46px] px-5 py-2.5 rounded-full bg-transparent hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-800 dark:text-zinc-200 border border-slate-300 dark:border-zinc-700 text-sm font-semibold transition inline-flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 whitespace-nowrap"
-              >
-                <Download className="w-4 h-4" />
-                <span>{isExportingLastBackup ? 'Exporting…' : 'Export last backup'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleSignOut}
-                className="min-h-[40px] px-3 py-2 rounded-full text-xs font-semibold text-slate-500 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 transition cursor-pointer ml-auto"
-              >
-                Sign Out
-              </button>
-            </div>
-          </div>
-        )}
-      </section>
+            </>
+          ) : undefined
+        }
+        onSyncNow={isEntitled ? handleSyncNow : undefined}
+        syncButtonId="btn-jivanos-cloud-sync-now"
+        isSyncing={syncStatus === 'syncing'}
+        onRetry={isEntitled ? handleSyncNow : undefined}
+        extraMenuItems={extraMenuItems}
+        onDisconnect={isSignedIn ? handleSignOut : undefined}
+        disconnectLabel="Sign Out"
+        errorMessage={errorMessage}
+        isExpanded={Boolean(expandedContent)}
+        expandedContent={expandedContent}
+        isFirst={isFirst}
+        isLast={isLast}
+      />
 
       {/* Sign-In / Free Trial Sheet (Google + Email/Password) */}
       {authSheetMode && (

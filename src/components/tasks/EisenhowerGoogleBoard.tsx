@@ -45,11 +45,12 @@ interface EisenhowerGoogleBoardProps {
   onFilterTag?: (tag: string) => void;
   onFilterProject?: (project: string) => void;
   dndProps: DragAndDropContextType;
-  filter?: 'all' | 'today' | 'upcoming' | 'completed' | 'date' | 'archived';
-  onFilterChange?: (filter: 'all' | 'today' | 'upcoming' | 'completed' | 'date' | 'archived') => void;
+  filter?: 'all' | 'today' | 'overdue' | 'upcoming' | 'completed' | 'date' | 'archived';
+  onFilterChange?: (filter: 'all' | 'today' | 'overdue' | 'upcoming' | 'completed' | 'date' | 'archived') => void;
   selectedTaskDate?: string;
   onSelectTaskDate?: (date: string) => void;
   todayCount?: number;
+  overdueCount?: number;
   upcomingCount?: number;
   allCount?: number;
   dateCount?: number;
@@ -221,6 +222,7 @@ export const EisenhowerGoogleBoard: React.FC<EisenhowerGoogleBoardProps> = ({
   selectedTaskDate,
   onSelectTaskDate,
   todayCount,
+  overdueCount,
   upcomingCount,
   allCount,
   dateCount,
@@ -233,7 +235,7 @@ export const EisenhowerGoogleBoard: React.FC<EisenhowerGoogleBoardProps> = ({
   const [layoutMode, setLayoutMode] = useState<LayoutMode>('grid2x2');
   const [focusedQuadId, setFocusedQuadId] = useState<EisenhowerQuadrant | null>(null);
   const [isTimeDropdownOpen, setIsTimeDropdownOpen] = useState(false);
-  const [localFilter, setLocalFilter] = useState<'all' | 'today' | 'upcoming' | 'completed' | 'date' | 'archived'>('today');
+  const [localFilter, setLocalFilter] = useState<'all' | 'today' | 'overdue' | 'upcoming' | 'completed' | 'date' | 'archived'>('today');
   const [completingIds, setCompletingIds] = useState<Set<string>>(new Set());
   const [fadingIds, setFadingIds] = useState<Set<string>>(new Set());
   const [celebratingId, setCelebratingId] = useState<string | null>(null);
@@ -274,7 +276,7 @@ export const EisenhowerGoogleBoard: React.FC<EisenhowerGoogleBoardProps> = ({
 
   const activeFilter = filter ?? localFilter;
 
-  const handleSelectFilter = (f: 'all' | 'today' | 'upcoming' | 'completed' | 'date' | 'archived') => {
+  const handleSelectFilter = (f: 'all' | 'today' | 'overdue' | 'upcoming' | 'completed' | 'date' | 'archived') => {
     if (onFilterChange) {
       onFilterChange(f);
     }
@@ -389,7 +391,10 @@ export const EisenhowerGoogleBoard: React.FC<EisenhowerGoogleBoardProps> = ({
   const totalFilteredTasks = QUADRANTS.reduce((sum, q) => sum + getQuadTasks(q.id).length, 0);
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 h-full w-full select-none relative space-y-1 overflow-hidden">
+    <div
+      data-no-drawer-swipe="true"
+      className="flex flex-col flex-1 min-h-0 h-full w-full select-none relative space-y-1 overflow-hidden"
+    >
       {/* Top Header: Ultra-compact, single-line (Layout Switch + Tasks Count + New Task) */}
       <div className="flex items-center justify-between gap-1.5 px-1 py-0.5 shrink-0">
         <div className="flex items-center gap-1.5 min-w-0">
@@ -421,6 +426,7 @@ export const EisenhowerGoogleBoard: React.FC<EisenhowerGoogleBoardProps> = ({
               title="Filter matrix by timeframe (Today, Upcoming, Date, All, Done, Archived)"
             >
               {activeFilter === 'today' && <Clock className="w-2.5 h-2.5 text-amber-500 shrink-0" />}
+              {activeFilter === 'overdue' && <OverdueIcon className="w-2.5 h-2.5 text-rose-500 shrink-0" />}
               {activeFilter === 'upcoming' && <CalendarDays className="w-2.5 h-2.5 text-blue-500 shrink-0" />}
               {activeFilter === 'date' && <Calendar className="w-2.5 h-2.5 text-rose-500 shrink-0" />}
               {activeFilter === 'all' && <Sparkles className="w-2.5 h-2.5 text-indigo-500 shrink-0" />}
@@ -430,6 +436,8 @@ export const EisenhowerGoogleBoard: React.FC<EisenhowerGoogleBoardProps> = ({
               <span>
                 {activeFilter === 'today'
                   ? 'Today'
+                  : activeFilter === 'overdue'
+                  ? 'Overdue'
                   : activeFilter === 'upcoming'
                   ? 'Upcoming'
                   : activeFilter === 'date'
@@ -473,7 +481,29 @@ export const EisenhowerGoogleBoard: React.FC<EisenhowerGoogleBoardProps> = ({
                       Today
                     </span>
                     <span className="text-[10px] font-mono px-1 rounded bg-slate-100 dark:bg-slate-700/80 text-slate-600 dark:text-slate-300 font-semibold">
-                      {todayCount !== undefined ? todayCount : tasks.filter(t => !t.archived && t.status !== 'archived' && !t.completed && (!t.dueDate || t.dueDate <= todayStr)).length}
+                      {todayCount !== undefined ? todayCount : tasks.filter(t => !t.archived && t.status !== 'archived' && !t.completed && (!t.dueDate || t.dueDate === todayStr)).length}
+                    </span>
+                  </button>
+
+                  {/* Overdue */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleSelectFilter('overdue');
+                      setIsTimeDropdownOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-between px-2.5 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-700/60 transition cursor-pointer ${
+                      activeFilter === 'overdue'
+                        ? 'text-rose-600 dark:text-rose-400 font-bold bg-rose-50/60 dark:bg-rose-950/30'
+                        : 'text-slate-700 dark:text-slate-300 font-medium'
+                    }`}
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
+                      Overdue
+                    </span>
+                    <span className="text-[10px] font-mono px-1 rounded bg-rose-50 dark:bg-rose-950/70 text-rose-600 dark:text-rose-300 font-semibold">
+                      {overdueCount !== undefined ? overdueCount : tasks.filter(t => !t.archived && t.status !== 'archived' && !t.completed && Boolean(t.dueDate) && t.dueDate < todayStr).length}
                     </span>
                   </button>
 
@@ -642,12 +672,13 @@ export const EisenhowerGoogleBoard: React.FC<EisenhowerGoogleBoardProps> = ({
       <div
         ref={carouselRef}
         onScroll={handleScroll}
+        data-no-drawer-swipe="true"
         className={
           focusedQuadId
             ? 'flex-1 min-h-0 flex flex-col w-full h-full overflow-hidden'
             : layoutMode === 'grid2x2'
             ? 'flex-1 min-h-0 grid grid-cols-2 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] gap-1.5 sm:gap-2.5 w-full h-full overflow-hidden'
-            : 'flex-1 min-h-0 flex gap-2 overflow-x-auto snap-x snap-mandatory pb-0.5 pt-0.5 px-0.5 scroll-smooth custom-scrollbar items-stretch w-full h-full'
+            : 'flex-1 min-h-0 flex gap-2 overflow-x-auto overflow-y-hidden overscroll-x-contain snap-x snap-proximity pb-1 pt-0.5 px-1 custom-scrollbar items-stretch w-full h-full [touch-action:pan-x_pan-y] [-webkit-overflow-scrolling:touch]'
         }
       >
         {QUADRANTS.filter(q => !focusedQuadId || q.id === focusedQuadId).map(quad => {
@@ -781,7 +812,11 @@ export const EisenhowerGoogleBoard: React.FC<EisenhowerGoogleBoardProps> = ({
               {/* TickTick SS2 Quadrant Body: Borderless Rows, 2-Line Readable Task Titles, Sub-Line Date/Time */}
               <div
                 {...dndProps.getQuadrantDropProps(quad.id)}
-                className="flex-1 min-h-0 overflow-y-auto touch-pan-y custom-scrollbar px-2.5 pt-1.5 pb-2 space-y-1.5 min-w-0"
+                className={`flex-1 min-h-0 overflow-y-auto custom-scrollbar px-2.5 pt-1.5 pb-2 space-y-2 min-w-0 ${
+                  layoutMode === 'columns' && !isFocused
+                    ? '[touch-action:pan-x_pan-y]'
+                    : 'touch-pan-y'
+                }`}
               >
                 {quadTasks.length === 0 ? (
                   <div
@@ -831,7 +866,7 @@ export const EisenhowerGoogleBoard: React.FC<EisenhowerGoogleBoardProps> = ({
                           if (dndProps.wasDraggingRef.current) return;
                           onOpenDetailTask(task);
                         }}
-                        className={`group relative flex items-start gap-2 py-0.5 rounded-md hover:bg-slate-50/80 dark:hover:bg-zinc-800/40 transition-all duration-200 cursor-pointer select-none ${
+                        className={`group relative flex items-center gap-2.5 py-1 rounded-md hover:bg-slate-50/80 dark:hover:bg-zinc-800/40 transition-all duration-200 cursor-pointer select-none ${
                           isFading ? 'opacity-0 translate-x-4 pointer-events-none' : ''
                         } ${
                           isBeingDragged ? 'opacity-40 scale-[0.98]' : ''
@@ -849,8 +884,12 @@ export const EisenhowerGoogleBoard: React.FC<EisenhowerGoogleBoardProps> = ({
                             : ''
                         }`}
                       >
-                        {/* Generous 33px tap target centered on 17px Quadrant Checkbox */}
-                        <div className="relative w-[17px] h-[18px] flex items-center justify-center shrink-0">
+                        {/* Generous 44px tap target centered on thumb-friendly Quadrant Checkbox */}
+                        <div
+                          className={`relative flex items-center justify-center shrink-0 ${
+                            layoutMode === 'grid2x2' && !isFocused ? 'w-[22px] h-[22px]' : 'w-[25px] h-[25px]'
+                          }`}
+                        >
                           {celebratingId === task.id && (
                             <CheckmarkCelebration
                               activeKey={celebrationKey}
@@ -868,20 +907,22 @@ export const EisenhowerGoogleBoard: React.FC<EisenhowerGoogleBoardProps> = ({
                               e.stopPropagation();
                               handleToggleWithAnim(task);
                             }}
-                            className="absolute -inset-2 flex items-center justify-center rounded-full cursor-pointer touch-manipulation z-10 hover:bg-slate-100/70 dark:hover:bg-zinc-800/60 transition-colors"
+                            className="absolute -inset-2.5 flex items-center justify-center rounded-full cursor-pointer touch-manipulation z-10 hover:bg-slate-100/70 dark:hover:bg-zinc-800/60 active:scale-90 transition"
                             title={isVisuallyDone ? 'Completed' : 'Mark complete'}
                             aria-label={isVisuallyDone ? 'Mark incomplete' : 'Mark complete'}
                           >
                             <span
-                              className={`w-[17px] h-[17px] rounded-[5px] flex items-center justify-center shrink-0 transition-all ${
+                              className={`${
+                                layoutMode === 'grid2x2' && !isFocused ? 'w-[22px] h-[22px] rounded-[6px]' : 'w-[25px] h-[25px] rounded-[7px]'
+                              } flex items-center justify-center shrink-0 transition-all ${
                                 isVisuallyDone
-                                  ? `${quad.badgeBg} border-[1.5px] ${quad.borderColor} text-white scale-105`
-                                  : `${quad.borderColor} border-[1.5px] bg-transparent`
+                                  ? `${quad.badgeBg} border-[2px] ${quad.borderColor} text-white scale-105`
+                                  : `${quad.borderColor} border-[2px] bg-transparent`
                               }`}
                             >
                               {isVisuallyDone && (
                                 <AnimatedCheckIcon
-                                  className="w-3 h-3 text-white"
+                                  className="w-3.5 h-3.5 text-white"
                                   strokeWidth={3}
                                   animate={isCompleting}
                                 />

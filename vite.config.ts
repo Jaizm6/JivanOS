@@ -33,6 +33,9 @@ export default defineConfig(({mode}) => {
         'firebase/firestore',
       ],
     },
+    worker: {
+      format: 'es',
+    },
     build: {
       chunkSizeWarningLimit: 1000,
       rollupOptions: {

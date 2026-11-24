@@ -33,7 +33,6 @@ import {
 import { useApp } from '../../context/AppContext';
 import { HydrationProgressWidget } from '../dashboard/widgets/HydrationProgressWidget';
 import { HabitCategory } from '../../types';
-import { QuoteBanner } from '../common/QuoteBanner';
 
 export type TimeHorizon = '7d' | '30d' | '90d' | '180d' | '365d' | 'custom';
 export type AnalyticsTab = 'overview' | 'habits' | 'tasks' | 'health' | 'hydration' | 'finances';

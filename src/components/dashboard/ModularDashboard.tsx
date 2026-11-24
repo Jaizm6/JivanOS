@@ -13,7 +13,6 @@ import { UpcomingBillsWidget } from './widgets/UpcomingBillsWidget';
 import { ActiveGoalsWidget } from './widgets/ActiveGoalsWidget';
 import { SyncStatusWidget } from './widgets/SyncStatusWidget';
 import { WidgetId } from '../../types';
-import { QuoteBanner } from '../common/QuoteBanner';
 
 type DashboardViewCategory = 'all' | 'health' | 'productivity' | 'reflection';
 

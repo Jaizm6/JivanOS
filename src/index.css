@@ -23,8 +23,14 @@ html {
   padding: 0;
   box-sizing: border-box;
   overscroll-behavior-y: none;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 2dppx) {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
 }
 
 body {
@@ -360,8 +366,8 @@ html.dark #root > div,
 }
 
 /* Structural Layout Protection: Header, Bottom Nav & Persistent Sidebar */
-html:not(.dark) header,
-html:not(.dark) header.sticky {
+html:not(.dark) header:not([data-inpage-header="true"]),
+html:not(.dark) header.sticky:not([data-inpage-header="true"]) {
   background-color: #ffffff !important;
   border-bottom: 1px solid #cbd5e1 !important;
 }
@@ -371,8 +377,8 @@ html:not(.dark) nav.fixed {
   border-top: 1px solid #cbd5e1 !important;
 }
 
-html.dark header,
-html.dark header.sticky {
+html.dark header:not([data-inpage-header="true"]),
+html.dark header.sticky:not([data-inpage-header="true"]) {
   background-color: #050507 !important;
   border-bottom: 1px solid #2b2b35 !important;
   box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.9) !important;
@@ -427,8 +433,8 @@ button[class*="rounded-lg"] {
 }
 
 /* Structural Layout: Header and Persistent Sidebar maintain dock alignment with crisp borders */
-header,
-header.sticky {
+header:not([data-inpage-header="true"]),
+header.sticky:not([data-inpage-header="true"]) {
   border-radius: 0 !important;
   box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05) !important;
   border-top: none !important;
@@ -931,59 +937,55 @@ html.dark div[class*="fixed inset-0"]:not([data-unified-modal="true"]) > div[cla
   border-color: #27272a !important;
 }
 
-html.dark input:not([type="checkbox"]):not([type="radio"]),
-html.dark textarea,
-html.dark select {
+html.dark input:not([type="checkbox"]):not([type="radio"]):not(.bg-transparent),
+html.dark textarea:not(.bg-transparent),
+html.dark select:not(.bg-transparent) {
   background-color: #141416 !important;
   border-color: #27272a !important;
   color: #f4f4f5 !important;
 }
 
-html.dark input:not([type="checkbox"]):not([type="radio"]):focus,
-html.dark textarea:focus,
-html.dark select:focus {
+html.dark input:not([type="checkbox"]):not([type="radio"]):not(.bg-transparent):focus,
+html.dark textarea:not(.bg-transparent):focus,
+html.dark select:not(.bg-transparent):focus {
   border-color: var(--primary-accent, #6366f1) !important;
 }
 
 /* ==========================================================================
-   ZERO-BLOAT GPU FLUID ANIMATION ENGINE (60/120FPS COMPOSITOR TRANSITIONS)
+   ZERO-BLUR, ULTRA-SNAPPY COMPOSITOR ANIMATION ENGINE (120FPS CRISP PC TEXT)
+   Never leaves lingering transform/will-change locks on settled pages or modals
    ========================================================================== */
 @keyframes sysPageEnter {
   0% {
     opacity: 0;
-    transform: translate3d(0, 8px, 0);
+    transform: translateY(6px);
   }
   100% {
     opacity: 1;
-    transform: translate3d(0, 0, 0);
+    transform: none;
   }
 }
 
 @keyframes sysViewEnter {
   0% {
     opacity: 0;
-    transform: translate3d(0, 8px, 0) scale3d(0.992, 0.992, 1);
+    transform: translateY(5px);
   }
   100% {
     opacity: 1;
-    transform: translate3d(0, 0, 0) scale3d(1, 1, 1);
+    transform: none;
   }
 }
 
 @keyframes sysNavPillPop {
   0% {
     opacity: 0;
-    transform: scale3d(0.55, 0.82, 1);
-    border-radius: 6px;
-  }
-  60% {
-    opacity: 1;
-    transform: scale3d(1.04, 1.02, 1);
-    border-radius: 18px;
+    transform: scaleX(0.7) scaleY(0.9);
+    border-radius: 8px;
   }
   100% {
     opacity: 1;
-    transform: scale3d(1, 1, 1);
+    transform: none;
     border-radius: 16px;
   }
 }
@@ -991,11 +993,11 @@ html.dark select:focus {
 @keyframes sysModalSpringIn {
   0% {
     opacity: 0;
-    transform: translate3d(0, 14px, 0) scale3d(0.96, 0.96, 1);
+    transform: translateY(10px) scale(0.98);
   }
   100% {
     opacity: 1;
-    transform: translate3d(0, 0, 0) scale3d(1, 1, 1);
+    transform: none;
   }
 }
 
@@ -1009,38 +1011,35 @@ html.dark select:focus {
 }
 
 .animate-page-enter {
-  animation: sysPageEnter 200ms cubic-bezier(0.05, 0.7, 0.1, 1) backwards;
-  will-change: transform, opacity;
+  animation: sysPageEnter 150ms cubic-bezier(0.2, 0, 0, 1) backwards;
 }
 
 .animate-view-enter {
-  animation: sysViewEnter 200ms cubic-bezier(0.05, 0.7, 0.1, 1) backwards;
-  will-change: transform, opacity;
+  animation: sysViewEnter 140ms cubic-bezier(0.2, 0, 0, 1) backwards;
 }
 
 .animate-nav-pill {
-  animation: sysNavPillPop 220ms cubic-bezier(0.05, 0.7, 0.1, 1) both;
+  animation: sysNavPillPop 160ms cubic-bezier(0.2, 0, 0, 1) backwards;
 }
 
-/* Universal Modal & Dialog Spring Entrance (excluded for Framer Motion unified modals to prevent double-animation blink) */
+/* Universal Modal & Dialog Snappy Entrance (never freezes transform on settled PC dialogs) */
 [role="dialog"]:not([data-unified-modal="true"]),
 .modal-content:not([data-unified-modal="true"]),
 div[class*="fixed inset-0"]:not([data-unified-modal="true"]) > div[class*="rounded-2xl"]:not([data-unified-modal="true"]),
 div[class*="fixed inset-0"]:not([data-unified-modal="true"]) > div[class*="rounded-3xl"]:not([data-unified-modal="true"]) {
-  animation: sysModalSpringIn 220ms cubic-bezier(0.05, 0.7, 0.1, 1) both;
-  will-change: transform, opacity;
+  animation: sysModalSpringIn 160ms cubic-bezier(0.2, 0, 0, 1) backwards;
 }
 
 div[class*="fixed inset-0"][class*="bg-slate-900"]:not(.opacity-0):not([data-drawer-backdrop]):not([data-unified-modal="true"]),
 div[class*="fixed inset-0"][class*="bg-black"]:not(.opacity-0):not([data-drawer-backdrop]):not([data-unified-modal="true"]) {
-  animation: sysBackdropFadeIn 180ms cubic-bezier(0.05, 0.7, 0.1, 1) both;
+  animation: sysBackdropFadeIn 130ms cubic-bezier(0.2, 0, 0, 1) backwards;
 }
 
 /* Universal Tactile Button Micro-Interactions (Excluded for Framer Motion controls so CSS transitions never fight JS transforms) */
 button:not(:disabled):not([data-motion-anim="true"]) {
   transition-property: transform, background-color, border-color, color, opacity;
-  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
-  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+  transition-duration: 120ms;
 }
 
 button:active:not(:disabled):not([data-no-press-scale="true"]):not([data-motion-anim="true"]) {
@@ -1407,43 +1406,39 @@ textarea:not(.bg-transparent):focus {
   -webkit-backdrop-filter: none !important;
 }
 
-/* GPU-Isolated Left Panel Drawer & Scrim (Zero Shadow Reallocation / Zero Blur / Synchronized Curves) */
+/* Crisp Left Panel Drawer & Scrim (Zero Permanent Blur / Fast 170ms Emphasized Curve) */
 [data-drawer-sidebar="true"] {
   contain: layout style paint;
-  backface-visibility: hidden;
-  will-change: transform;
 }
 
 [data-drawer-sidebar="true"][data-open="true"] {
-  transform: translate3d(0, 0, 0);
+  transform: none;
   pointer-events: auto;
-  transition: transform 280ms cubic-bezier(0.05, 0.7, 0.1, 1);
+  transition: transform 180ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 [data-drawer-sidebar="true"][data-open="false"] {
-  transform: translate3d(-100%, 0, 0);
+  transform: translateX(-100%);
   pointer-events: none;
-  transition: transform 220ms cubic-bezier(0.2, 0, 0, 1);
+  transition: transform 150ms cubic-bezier(0.3, 0, 0.8, 0.15);
 }
 
 [data-drawer-backdrop="true"] {
   contain: strict;
-  backface-visibility: hidden;
-  will-change: opacity;
 }
 
 [data-drawer-backdrop="true"][data-open="true"] {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
-  transition: opacity 280ms cubic-bezier(0.05, 0.7, 0.1, 1), visibility 0ms linear 0ms;
+  transition: opacity 160ms cubic-bezier(0.2, 0, 0, 1), visibility 0ms linear 0ms;
 }
 
 [data-drawer-backdrop="true"][data-open="false"] {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transition: opacity 220ms cubic-bezier(0.2, 0, 0, 1), visibility 0ms linear 220ms;
+  transition: opacity 140ms cubic-bezier(0.3, 0, 0.8, 0.15), visibility 0ms linear 140ms;
 }
 
 

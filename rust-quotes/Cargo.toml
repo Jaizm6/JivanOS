@@ -1,0 +1,18 @@
+[package]
+name = "quotes_wasm"
+version = "0.1.0"
+edition = "2021"
+description = "Fast zero-unsafe WebAssembly helpers for JivanOS quote import parsing, duplicate detection, and FNV-1a 64-bit content hashing."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

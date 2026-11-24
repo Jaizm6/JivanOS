@@ -1,0 +1,57 @@
+name: Build Quotes Rust WASM
+
+on:
+  push:
+    paths:
+      - 'rust-quotes/**'
+      - '.github/workflows/build-wasm.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable with wasm32 target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+
+      - name: Run Rust unit tests
+        working-directory: rust-quotes
+        run: cargo test
+
+      - name: Build WASM bundle (web target)
+        run: |
+          wasm-pack build rust-quotes --target web --release --out-dir ../src/wasm
+          rm -f src/wasm/.gitignore src/wasm/package.json src/wasm/README.md
+
+      - name: Check compiled .wasm size
+        run: ls -lh src/wasm/quotes_wasm_bg.wasm
+
+      - name: Upload compiled WASM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: quotes-wasm-bundle
+          path: src/wasm/
+
+      - name: Commit compiled WASM back to repo (if permitted)
+        continue-on-error: true
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/wasm/
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(wasm): update compiled quotes_wasm bundle"
+            git push
+          else
+            echo "No changes in src/wasm/ to commit."
+          fi

@@ -108,6 +108,7 @@ export const PlannerPage: React.FC<{ embedded?: boolean }> = ({ embedded = false
     addTask,
     habits,
     toggleHabitDay,
+    hydration,
     goals,
     toggleGoalMilestone,
     bills,
@@ -720,8 +721,33 @@ export const PlannerPage: React.FC<{ embedded?: boolean }> = ({ embedded = false
 
     // 3. Habits scheduled or completed for today
     if (filterHabits) {
+      const liveWaterMl = Math.max(
+        0,
+        (hydration?.todayLogs || []).reduce((acc, log) => acc + (log.amountMl || 0), 0)
+      );
+      const liveWaterTarget = hydration?.targetMl || 3000;
+
       habits.filter(h => !h.archived).forEach(h => {
-        const isDoneToday = !!h.completionHistory[selectedDate];
+        const isWaterHabit =
+          Boolean(h.syncHydration) ||
+          h.id === 'hab_1' ||
+          h.name.toLowerCase().includes('water') ||
+          h.name.toLowerCase().includes('hydration');
+        const isMeasurableHabit =
+          h.habitType === 'counter' ||
+          h.habitType === 'measurement' ||
+          isWaterHabit ||
+          (typeof h.targetCount === 'number' && h.targetCount > 0 && h.habitType !== 'quit');
+
+        let isDoneToday = !!h.completionHistory[selectedDate];
+        if (selectedDate === todayStr) {
+          if (isWaterHabit) {
+            isDoneToday = liveWaterMl >= liveWaterTarget;
+          } else if (isMeasurableHabit && h.targetCount && h.targetCount > 0) {
+            isDoneToday = (h.counterValue || 0) >= h.targetCount;
+          }
+        }
+
         list.push({
           id: `habit-${h.id}`,
           sourceType: 'habit',
@@ -742,7 +768,7 @@ export const PlannerPage: React.FC<{ embedded?: boolean }> = ({ embedded = false
       const timeB = b.startTime || '99:99';
       return timeA.localeCompare(timeB);
     });
-  }, [tasks, scheduleItems, habits, selectedDate, filterTasks, filterSchedule, filterHabits]);
+  }, [tasks, scheduleItems, habits, hydration, selectedDate, todayStr, filterTasks, filterSchedule, filterHabits]);
 
   // Comprehensive Timeline & Free-Time Alignment Analysis
   const scheduleAnalysis = useMemo(() => {
@@ -1075,8 +1101,9 @@ export const PlannerPage: React.FC<{ embedded?: boolean }> = ({ embedded = false
                 setInitialHourForAdd(undefined);
                 setUniversalModalType('event');
               }}
-              className="p-1.5 sm:p-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition shadow-2xs cursor-pointer flex items-center justify-center"
+              className="h-8 w-8 rounded-lg bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white transition shadow-2xs cursor-pointer flex items-center justify-center shrink-0"
               title="Add Task"
+              aria-label="Add Task"
             >
               <Plus className="w-4 h-4 stroke-[2.5]" />
             </button>

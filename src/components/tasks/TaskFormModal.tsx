@@ -8,6 +8,7 @@ import {
   FORM_EASE,
   FORM_SPRING,
   FORM_EXIT_TRANSITION,
+  CRISP_TRANSFORM_TEMPLATE,
   UNIFIED_MODAL_POSITION_CLASS,
   UNIFIED_FORM_SHEET_CLASS,
   useModalScrollLock,
@@ -181,9 +182,8 @@ export const TaskFormModal: React.FC<TaskFormModalProps> = ({
           <motion.div
             data-unified-modal="true"
             initial={{ opacity: 0 }}
-            animate={{ opacity: 1, transition: { duration: 0.2, ease: FORM_EASE } }}
+            animate={{ opacity: 1, transition: { duration: 0.14, ease: FORM_EASE } }}
             exit={{ opacity: 0, transition: FORM_EXIT_TRANSITION }}
-            style={{ willChange: 'opacity' }}
             className="fixed inset-0 bg-black/55 dark:bg-black/75 touch-none overscroll-none"
             onClick={onClose}
           />
@@ -191,10 +191,10 @@ export const TaskFormModal: React.FC<TaskFormModalProps> = ({
           {/* Separate Composited Modal Sheet / Card */}
           <motion.div
             data-unified-modal="true"
-            initial={{ opacity: 0, y: 22, scale: 0.97 }}
+            initial={{ opacity: 0, y: 14, scale: 0.985 }}
             animate={{ opacity: 1, y: 0, scale: 1, transition: FORM_SPRING }}
-            exit={{ opacity: 0, y: 16, scale: 0.97, transition: FORM_EXIT_TRANSITION }}
-            style={{ willChange: 'transform, opacity' }}
+            exit={{ opacity: 0, y: 10, scale: 0.985, transition: FORM_EXIT_TRANSITION }}
+            transformTemplate={CRISP_TRANSFORM_TEMPLATE}
             onClick={e => e.stopPropagation()}
             className={UNIFIED_FORM_SHEET_CLASS}
           >

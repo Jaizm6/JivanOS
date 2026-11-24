@@ -79,7 +79,15 @@ export const SnapshotInspectorModal: React.FC<SnapshotInspectorModalProps> = ({
   const medCount = Array.isArray(data.medications) ? data.medications.length : 0;
   const billCount = Array.isArray(data.bills) ? data.bills.length : 0;
   const goalCount = Array.isArray(data.goals) ? data.goals.length : 0;
-  const quoteCount = Array.isArray(data.quotes) ? data.quotes.length : 0;
+  const quoteCount =
+    data.quoteLibrary &&
+    typeof data.quoteLibrary === 'object' &&
+    data.quoteLibrary.custom &&
+    typeof data.quoteLibrary.custom === 'object'
+      ? Object.keys(data.quoteLibrary.custom).length
+      : Array.isArray(data.quotes)
+      ? data.quotes.length
+      : 0;
 
   const rawJsonString = snapshotData
     ? JSON.stringify(snapshotData.data || snapshotData.raw, null, 2)
@@ -216,7 +224,7 @@ export const SnapshotInspectorModal: React.FC<SnapshotInspectorModalProps> = ({
                   { label: 'Medications & Doses', count: medCount, icon: Sparkles, color: 'text-rose-600 bg-rose-50 dark:bg-rose-950/60' },
                   { label: 'Bills & Subscriptions', count: billCount, icon: ReceiptText, color: 'text-blue-600 bg-blue-50 dark:bg-blue-950/60' },
                   { label: 'Long-term Goals', count: goalCount, icon: Target, color: 'text-amber-600 bg-amber-50 dark:bg-amber-950/60' },
-                  { label: 'Daily Quotes', count: quoteCount, icon: Quote, color: 'text-teal-600 bg-teal-50 dark:bg-teal-950/60' },
+                  { label: 'Custom quotes', count: quoteCount, icon: Quote, color: 'text-teal-600 bg-teal-50 dark:bg-teal-950/60' },
                 ].map((item, idx) => (
                   <div
                     key={idx}
