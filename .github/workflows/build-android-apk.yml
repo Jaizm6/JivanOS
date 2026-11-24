@@ -356,19 +356,33 @@ jobs:
             JivanOS.aab
           if-no-files-found: warn
 
-      - name: Publish JivanOS.apk to GitHub Releases
+      - name: Publish JivanOS.apk & JivanOS.aab to GitHub Releases
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete latest-apk --yes --cleanup-tag 2>/dev/null || true
           printf '%s\n' \
             "## JivanOS v${JIVANOS_VER_NAME:-3.0.1} (Build ${JIVANOS_VER_CODE:-30001})" \
             "" \
+            "- **Android**: \`JivanOS.apk\` (Direct install) & \`JivanOS.aab\` (Play Store bundle)" \
+            "- **Windows**: \`.msi\` & NSIS \`.exe\` desktop installers" \
+            "- **Linux**: \`.AppImage\` & \`.deb\` desktop packages" \
             "- **Package ID**: \`com.jaiz.jivanos\`" \
             "- **In-Place Updates**: Signed with your release keystore (\`v1/v2\` verified) so future updates install smoothly without uninstalling." \
-            "- **Offline Backup & Auto-Snapshots**: Pure Android MediaStore Downloads export, Share Sheet integration, and rotating 3-slot private snapshots." \
             > /tmp/release-notes.md
-          gh release create latest-apk JivanOS.apk \
-            --title "JivanOS Android APK (v${JIVANOS_VER_NAME:-3.0.1})" \
-            --notes-file /tmp/release-notes.md
+
+          ASSETS=(JivanOS.apk)
+          if [ -f "JivanOS.aab" ]; then
+            ASSETS+=(JivanOS.aab)
+          fi
+
+          if ! gh release view latest-apk >/dev/null 2>&1; then
+            gh release create latest-apk "${ASSETS[@]}" \
+              --title "JivanOS Multi-Platform Release (v${JIVANOS_VER_NAME:-3.0.1})" \
+              --notes-file /tmp/release-notes.md
+          else
+            gh release upload latest-apk "${ASSETS[@]}" --clobber
+            gh release edit latest-apk \
+              --title "JivanOS Multi-Platform Release (v${JIVANOS_VER_NAME:-3.0.1})" \
+              --notes-file /tmp/release-notes.md
+          fi
