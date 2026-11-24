@@ -125,7 +125,7 @@ class AndroidGoogleDriveSyncProvider(private val context: Context) : SyncProvide
         return GoogleSignIn.hasPermissions(account, Scope(JivanDriveAppDataClient.DRIVE_APPDATA_SCOPE))
     }
 
-    override suspend fun disconnect() = SyncIoDispatcher.runIo {
+    override suspend fun disconnect(): Unit = SyncIoDispatcher.runIo {
         val account = GoogleSignIn.getLastSignedInAccount(context)
         WorkManager.getInstance(context.applicationContext)
             .cancelUniqueWork(JivanDriveSyncWorker.UNIQUE_WORK_NAME)
@@ -139,6 +139,7 @@ class AndroidGoogleDriveSyncProvider(private val context: Context) : SyncProvide
             .build()
         val client = GoogleSignIn.getClient(context, gso)
         Tasks.await(client.signOut())
+        Unit
     }
 
     override suspend fun getLastSyncInfo(): SyncInfo? = SyncIoDispatcher.runIo {

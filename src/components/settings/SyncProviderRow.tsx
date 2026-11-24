@@ -124,7 +124,7 @@ export const SyncProviderRow: React.FC<SyncProviderRowProps> = ({
     onSelectInterval || onRestore || onDisconnect || extraMenuItems.length > 0
   );
 
-  // Close floating overflow menu on outside tap or Escape
+  // Close floating overflow menu on outside tap, Escape, or when another SyncProviderRow opens its menu
   useEffect(() => {
     if (!menuOpen) return;
     const handlePointerDown = (e: MouseEvent | TouchEvent) => {
@@ -135,13 +135,21 @@ export const SyncProviderRow: React.FC<SyncProviderRowProps> = ({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setMenuOpen(false);
     };
+    const handleOtherMenuOpen = (e: Event) => {
+      const detail = (e as CustomEvent<{ source: HTMLDivElement | null }>).detail;
+      if (detail?.source !== menuRef.current) {
+        setMenuOpen(false);
+      }
+    };
     document.addEventListener('mousedown', handlePointerDown);
     document.addEventListener('touchstart', handlePointerDown, { passive: true });
     document.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('jivanos:sync-row-menu-open', handleOtherMenuOpen);
     return () => {
       document.removeEventListener('mousedown', handlePointerDown);
       document.removeEventListener('touchstart', handlePointerDown);
       document.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('jivanos:sync-row-menu-open', handleOtherMenuOpen);
     };
   }, [menuOpen]);
 
@@ -244,7 +252,7 @@ export const SyncProviderRow: React.FC<SyncProviderRowProps> = ({
           ? { borderLeftWidth: 3, borderLeftColor: brandColor }
           : undefined
       }
-      className={`relative transition-colors ${radiusClasses} ${
+      className={`relative transition-colors ${menuOpen ? 'z-50' : 'z-0'} ${radiusClasses} ${
         shouldTint
           ? 'bg-[#E8E7FF]/45 dark:bg-indigo-950/25'
           : 'bg-white dark:bg-zinc-900 hover:bg-slate-50/75 dark:hover:bg-zinc-800/40'
@@ -407,10 +415,22 @@ export const SyncProviderRow: React.FC<SyncProviderRowProps> = ({
                 )}
 
                 {hasMenu && (
-                  <div ref={menuRef} className="relative">
+                  <div ref={menuRef} className="relative z-50">
                     <button
                       type="button"
-                      onClick={() => setMenuOpen((v) => !v)}
+                      onClick={() => {
+                        setMenuOpen((prev) => {
+                          const next = !prev;
+                          if (next) {
+                            window.dispatchEvent(
+                              new CustomEvent('jivanos:sync-row-menu-open', {
+                                detail: { source: menuRef.current },
+                              })
+                            );
+                          }
+                          return next;
+                        });
+                      }}
                       aria-haspopup="menu"
                       aria-expanded={menuOpen}
                       aria-label={`More options for ${name}`}
@@ -428,7 +448,7 @@ export const SyncProviderRow: React.FC<SyncProviderRowProps> = ({
                           animate={{ opacity: 1, y: 0, scale: 1 }}
                           exit={{ opacity: 0, y: -4, scale: 0.97 }}
                           transition={{ duration: 0.14 }}
-                          className="absolute right-0 top-9 z-50 w-56 rounded-xl border border-[#E5E7EB] dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-lg py-1.5"
+                          className="absolute right-0 top-9 z-[100] w-56 rounded-xl border border-[#E5E7EB] dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-xl py-1.5"
                         >
                           {/* Auto-sync interval selector inside dropdown */}
                           {onSelectInterval && (

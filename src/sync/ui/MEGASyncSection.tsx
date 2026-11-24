@@ -493,7 +493,7 @@ export const MEGASyncSection: React.FC<MEGASyncSectionProps> = ({
     <>
       <SyncProviderRow
         name="MEGA"
-        description="20 GB free, E2E encrypted"
+        description="E2E encrypted"
         logo={<MegaLogoSvg className="w-5 h-5" />}
         logoBgClass="bg-red-50 dark:bg-red-950/50"
         brandColor={isSessionExpired ? '#D97706' : MEGA_RED}
