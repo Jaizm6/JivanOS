@@ -11,6 +11,9 @@ on:
 permissions:
   contents: read
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build-windows:
     name: Build Windows (.msi + .exe)
@@ -19,11 +22,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
+          node-version: '22'
 
       - name: Install Rust stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -34,15 +36,12 @@ jobs:
           workspaces: src-tauri -> target
 
       - name: Install npm dependencies
-        run: npm ci
+        run: npm install --legacy-peer-deps
 
       - name: Build Tauri Windows installers (.msi & NSIS .exe)
         run: npm run tauri:build
         env:
-          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
-          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+          CI: true
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
@@ -64,6 +63,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libfuse2 \
             libwebkit2gtk-4.1-dev \
             libgtk-3-dev \
             libayatana-appindicator3-dev \
@@ -74,11 +78,10 @@ jobs:
             patchelf \
             xdg-utils
 
-      - name: Setup Node.js
+      - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
+          node-version: '22'
 
       - name: Install Rust stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -89,15 +92,14 @@ jobs:
           workspaces: src-tauri -> target
 
       - name: Install npm dependencies
-        run: npm ci
+        run: npm install --legacy-peer-deps
 
       - name: Build Tauri Linux bundles (.AppImage & .deb)
         run: npm run tauri:build
         env:
-          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
-          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+          CI: true
+          APPIMAGE_EXTRACT_AND_RUN: 1
+          NO_STRIP: true
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
@@ -107,3 +109,4 @@ jobs:
             src-tauri/target/release/bundle/appimage/*.AppImage
             src-tauri/target/release/bundle/deb/*.deb
           if-no-files-found: error
+

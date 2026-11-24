@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "JivanOS desktop capabilities (HTTP, Shell open, Dialog, AppData FS, Global Shortcuts, Notifications, Autostart, Stronghold)",
+  "description": "JivanOS desktop capabilities (Shell open, Global Shortcuts, Notifications, Autostart)",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -10,23 +10,13 @@
     "core:window:allow-unminimize",
     "core:event:default",
     "shell:allow-open",
-    "dialog:default",
-    "fs:allow-appdata-read-recursive",
-    "fs:allow-appdata-write-recursive",
-    "http:default",
-    {
-      "identifier": "http:allow-fetch",
-      "allow": [
-        { "url": "https://**" }
-      ]
-    },
     "global-shortcut:allow-register",
     "global-shortcut:allow-unregister",
     "global-shortcut:allow-is-registered",
     "notification:default",
     "autostart:allow-enable",
     "autostart:allow-disable",
-    "autostart:allow-is-enabled",
-    "stronghold:default"
+    "autostart:allow-is-enabled"
   ]
 }
+

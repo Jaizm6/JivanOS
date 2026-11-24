@@ -1,4 +1,4 @@
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 
 use std::collections::HashSet;
 use wasm_bindgen::prelude::*;
