@@ -344,7 +344,12 @@ export const TelegramSyncSection: React.FC<TelegramSyncSectionProps> = ({
     <>
       <SyncProviderRow
         name="Telegram"
-        description="Free backup to your bot chat"
+        badge={
+          <span className="px-1.5 py-0.5 rounded-md bg-sky-100 dark:bg-sky-950/75 text-sky-700 dark:text-sky-300 border border-sky-200/80 dark:border-sky-800/70 text-[10px] font-bold uppercase tracking-wider leading-none">
+            Basic
+          </span>
+        }
+        description="Pinned live message sync & backup to your bot chat"
         logo={<TelegramLogoSvg className="w-4.5 h-4.5 text-[#229ED9]" />}
         logoBgClass="bg-sky-50 dark:bg-sky-950/60"
         brandColor="#229ED9"

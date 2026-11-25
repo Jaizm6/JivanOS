@@ -51,6 +51,7 @@ import {
 } from './sync/providers/FirestoreSyncProvider';
 import { googleDriveSyncProvider } from './sync/providers/GoogleDriveProvider';
 import { dropboxSyncProvider } from './sync/providers/DropboxProvider';
+import { UnifiedSyncBackupCoordinator } from './sync/UnifiedSyncBackupCoordinator';
 
 // Lazy-loaded secondary tabs and modals with automatic network retry
 const MedicationManager = lazyWithRetry(() => import('./components/medications/MedicationManager').then(m => ({ default: m.MedicationManager })));
@@ -864,6 +865,9 @@ const AppContent: React.FC = () => {
 
       {/* Always-mounted Daily Quote Reminder Service (runs across all tabs) */}
       <QuoteReminderService />
+
+      {/* Always-mounted Unified Sync & Multi-Destination Scheduled Backup Coordinator */}
+      <UnifiedSyncBackupCoordinator />
 
       {/* Draggable Floating PiP Stopwatch / Timer Widget */}
       <DraggablePiPWidget />

@@ -282,34 +282,40 @@ public class JivanGoogleDrivePlugin extends Plugin {
     @PluginMethod
     public void scheduleAutoSync(PluginCall call) {
         int intervalMinutes = call.getInt("intervalMinutes", 0);
+        boolean wifiOnly = call.getBoolean("wifiOnly", true);
+        boolean onlyWhileCharging = call.getBoolean("onlyWhileCharging", false);
         Context ctx = getContext();
 
         SharedPreferences prefs = ctx.getSharedPreferences(
                 JivanDriveAppDataClient.PREFS_NAME,
                 Context.MODE_PRIVATE
         );
-        prefs.edit().putInt(JivanDriveAppDataClient.KEY_AUTO_INTERVAL, intervalMinutes).apply();
+        prefs.edit()
+                .putInt(JivanDriveAppDataClient.KEY_AUTO_INTERVAL, intervalMinutes)
+                .putBoolean("backup_wifi_only", wifiOnly)
+                .putBoolean("backup_only_charging", onlyWhileCharging)
+                .apply();
 
         WorkManager wm = WorkManager.getInstance(ctx);
         if (intervalMinutes <= 0) {
             wm.cancelUniqueWork(JivanDriveSyncWorker.UNIQUE_WORK_NAME);
         } else {
-            long clampedMinutes = Math.max(15L, intervalMinutes);
+            long delayMinutes = Math.max(15L, intervalMinutes);
             Constraints constraints = new Constraints.Builder()
-                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .setRequiredNetworkType(wifiOnly ? NetworkType.UNMETERED : NetworkType.CONNECTED)
+                    .setRequiresCharging(onlyWhileCharging)
                     .build();
 
-            PeriodicWorkRequest workRequest = new PeriodicWorkRequest.Builder(
-                    JivanDriveSyncWorker.class,
-                    clampedMinutes,
-                    TimeUnit.MINUTES
+            androidx.work.OneTimeWorkRequest workRequest = new androidx.work.OneTimeWorkRequest.Builder(
+                    JivanDriveSyncWorker.class
             )
+                    .setInitialDelay(delayMinutes, TimeUnit.MINUTES)
                     .setConstraints(constraints)
                     .build();
 
-            wm.enqueueUniquePeriodicWork(
+            wm.enqueueUniqueWork(
                     JivanDriveSyncWorker.UNIQUE_WORK_NAME,
-                    ExistingPeriodicWorkPolicy.UPDATE,
+                    androidx.work.ExistingWorkPolicy.REPLACE,
                     workRequest
             );
         }

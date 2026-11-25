@@ -450,37 +450,6 @@ export const SyncProviderRow: React.FC<SyncProviderRowProps> = ({
                           transition={{ duration: 0.14 }}
                           className="absolute right-0 top-9 z-[100] w-56 rounded-xl border border-[#E5E7EB] dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-xl py-1.5"
                         >
-                          {/* Auto-sync interval selector inside dropdown */}
-                          {onSelectInterval && (
-                            <div className="px-3 py-2 border-b border-slate-100 dark:border-zinc-800 space-y-1.5">
-                              <div className="text-[10.5px] font-semibold uppercase tracking-[0.06em] text-slate-400 dark:text-zinc-500">
-                                Auto-sync
-                              </div>
-                              <div className="grid grid-cols-4 gap-1 rounded-lg bg-slate-100 dark:bg-zinc-950 p-0.5">
-                                {DROPDOWN_INTERVALS.map((opt) => {
-                                  const active = autoSyncInterval === opt.value;
-                                  return (
-                                    <button
-                                      key={opt.value}
-                                      type="button"
-                                      onClick={() => {
-                                        onSelectInterval(opt.value);
-                                        setMenuOpen(false);
-                                      }}
-                                      className={`h-7 rounded-md text-[11px] font-semibold transition cursor-pointer ${
-                                        active
-                                          ? 'bg-[#4F46E5] text-white'
-                                          : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-100'
-                                      }`}
-                                    >
-                                      {opt.label}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          )}
-
                           {/* Extra custom menu items */}
                           {extraMenuItems.map((item) =>
                             item.href ? (
@@ -544,7 +513,7 @@ export const SyncProviderRow: React.FC<SyncProviderRowProps> = ({
                           {onDisconnect && (
                             <div
                               className={
-                                onSelectInterval || onRestore || extraMenuItems.length > 0
+                                onRestore || extraMenuItems.length > 0
                                   ? 'mt-1 pt-1 border-t border-slate-100 dark:border-zinc-800'
                                   : ''
                               }

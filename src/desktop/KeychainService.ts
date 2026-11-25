@@ -39,20 +39,22 @@ function normalizeProviderKey(provider: string): string {
  */
 export async function setToken(provider: string, value: string): Promise<void> {
   const key = normalizeProviderKey(provider);
-
-  if (isDesktop()) {
-    await invoke<void>('keychain_set_token', { provider: key, value });
-    memoryCache.set(key, value);
-    return;
-  }
+  memoryCache.set(key, value);
 
   try {
     if (typeof localStorage !== 'undefined') {
       localStorage.setItem(`${WEB_TOKEN_PREFIX}${key}`, value);
     }
-    memoryCache.set(key, value);
   } catch {
-    throw new Error(`Failed to persist ${key} token locally.`);
+    // Ignore localStorage quota errors
+  }
+
+  if (isDesktop()) {
+    try {
+      await invoke<void>('keychain_set_token', { provider: key, value });
+    } catch {
+      // Fallback to localStorage mirror on Linux/Windows when keyring daemon is unavailable
+    }
   }
 }
 
@@ -67,12 +69,15 @@ export async function getToken(provider: string): Promise<string | null> {
       const value = await invoke<string | null>('keychain_get_token', { provider: key });
       if (value) {
         memoryCache.set(key, value);
+        try {
+          if (typeof localStorage !== 'undefined') {
+            localStorage.setItem(`${WEB_TOKEN_PREFIX}${key}`, value);
+          }
+        } catch {}
         return value;
       }
-      memoryCache.delete(key);
-      return null;
     } catch {
-      return null;
+      // Fall through to localStorage fallback
     }
   }
 
@@ -83,9 +88,9 @@ export async function getToken(provider: string): Promise<string | null> {
       memoryCache.set(key, raw);
       return raw;
     }
-    return null;
+    return memoryCache.get(key) ?? null;
   } catch {
-    return null;
+    return memoryCache.get(key) ?? null;
   }
 }
 
@@ -96,15 +101,6 @@ export async function deleteToken(provider: string): Promise<void> {
   const key = normalizeProviderKey(provider);
   memoryCache.delete(key);
 
-  if (isDesktop()) {
-    try {
-      await invoke<void>('keychain_delete_token', { provider: key });
-    } catch {
-      // Ignore missing-entry errors on delete
-    }
-    return;
-  }
-
   try {
     if (typeof localStorage !== 'undefined') {
       localStorage.removeItem(`${WEB_TOKEN_PREFIX}${key}`);
@@ -112,14 +108,32 @@ export async function deleteToken(provider: string): Promise<void> {
   } catch {
     // Ignore storage removal errors
   }
+
+  if (isDesktop()) {
+    try {
+      await invoke<void>('keychain_delete_token', { provider: key });
+    } catch {
+      // Ignore missing-entry errors on delete
+    }
+  }
 }
 
 /**
- * Synchronous helper reading the last hydrated value in memory (does not hit disk/IPC).
+ * Synchronous helper reading the last hydrated value in memory or localStorage fallback.
  */
 export function getCachedTokenSync(provider: string): string | null {
   try {
-    return memoryCache.get(normalizeProviderKey(provider)) ?? null;
+    const key = normalizeProviderKey(provider);
+    const cached = memoryCache.get(key);
+    if (cached) return cached;
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(`${WEB_TOKEN_PREFIX}${key}`);
+      if (raw) {
+        memoryCache.set(key, raw);
+        return raw;
+      }
+    }
+    return null;
   } catch {
     return null;
   }

@@ -444,6 +444,10 @@ async function webFindAppDataBackupFile(
   };
 }
 
+export async function getValidDriveAccessToken(): Promise<string | null> {
+  return getInMemoryGDriveToken() || null;
+}
+
 function getRequiredWebToken(): string {
   const token = getInMemoryGDriveToken();
   if (!token) {

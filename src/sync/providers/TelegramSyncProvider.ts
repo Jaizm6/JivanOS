@@ -45,6 +45,8 @@ export const TELEGRAM_NO_BACKUP_FOUND_MESSAGE =
 
 const DIRECT_TIMEOUT_MS = 12000;
 
+export const TELEGRAM_SYNC_MIN_PUSH_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
 export interface StoredTelegramAuth {
   botToken: string;
   chatId: string;
@@ -52,6 +54,9 @@ export interface StoredTelegramAuth {
   lastSyncedAt: string | null;
   lastBackupFileId: string | null;
   lastBackupMessageId: number | null;
+  pinnedSyncMessageId?: number | null;
+  lastSyncPushEpochMs?: number | null;
+  backupHistoryMessageIds?: number[];
   lastFileSizeBytes: number | null;
   autoSyncEnabled: boolean;
   autoSyncIntervalMinutes: AutoSyncIntervalMinutes;
@@ -155,6 +160,12 @@ export function getStoredTelegramAuth(): StoredTelegramAuth | null {
       tokenFromKeychain || (typeof parsed.botToken === 'string' ? parsed.botToken : '');
     if (!parsed.chatId || (!resolvedToken && !isDesktop())) return null;
 
+    const rawHistoryIds = Array.isArray(parsed.backupHistoryMessageIds)
+      ? parsed.backupHistoryMessageIds.filter(
+          (id: unknown): id is number => typeof id === 'number' && Number.isFinite(id)
+        )
+      : [];
+
     return {
       botToken: resolvedToken,
       chatId: String(parsed.chatId),
@@ -167,6 +178,20 @@ export function getStoredTelegramAuth(): StoredTelegramAuth | null {
         Number.isFinite(parsed.lastBackupMessageId)
           ? parsed.lastBackupMessageId
           : null,
+      pinnedSyncMessageId:
+        typeof parsed.pinnedSyncMessageId === 'number' &&
+        Number.isFinite(parsed.pinnedSyncMessageId)
+          ? parsed.pinnedSyncMessageId
+          : typeof parsed.lastBackupMessageId === 'number' &&
+            Number.isFinite(parsed.lastBackupMessageId)
+          ? parsed.lastBackupMessageId
+          : null,
+      lastSyncPushEpochMs:
+        typeof parsed.lastSyncPushEpochMs === 'number' &&
+        Number.isFinite(parsed.lastSyncPushEpochMs)
+          ? parsed.lastSyncPushEpochMs
+          : null,
+      backupHistoryMessageIds: rawHistoryIds,
       lastFileSizeBytes:
         typeof parsed.lastFileSizeBytes === 'number' ? parsed.lastFileSizeBytes : null,
       autoSyncEnabled: Boolean(parsed.autoSyncEnabled),
@@ -280,14 +305,27 @@ function buildDirectTelegramInit(
   mergedParams: Record<string, unknown>,
   file?: { name: string; contentBase64: string; mimeType: string }
 ): RequestInit {
-  if (cleanMethod === 'sendDocument' && file) {
+  if ((cleanMethod === 'sendDocument' || cleanMethod === 'editMessageMedia') && file) {
     const bytes = base64ToUint8Array(file.contentBase64);
     const fd = new FormData();
-    Object.entries(mergedParams).forEach(([k, v]) => {
-      if (v !== undefined && v !== null) {
-        fd.append(k, String(v));
+    if (cleanMethod === 'editMessageMedia') {
+      if (mergedParams.chat_id !== undefined) fd.append('chat_id', String(mergedParams.chat_id));
+      if (mergedParams.message_id !== undefined) {
+        fd.append('message_id', String(mergedParams.message_id));
       }
-    });
+      const mediaPayload = {
+        type: 'document',
+        media: 'attach://document',
+        caption: typeof mergedParams.caption === 'string' ? mergedParams.caption : '',
+      };
+      fd.append('media', JSON.stringify(mediaPayload));
+    } else {
+      Object.entries(mergedParams).forEach(([k, v]) => {
+        if (v !== undefined && v !== null) {
+          fd.append(k, String(v));
+        }
+      });
+    }
     // Use File constructor when available so CapacitorHttp's native FormData bridge
     // preserves fileName ("backup.json") and contentType ("application/json") on Android.
     const filePart =
@@ -751,14 +789,34 @@ export class TelegramSyncProvider implements SyncProvider {
   }
 
   /**
-   * Uploads backup.json via POST sendDocument, pins the message via pinChatMessage (best-effort),
-   * and saves both file_id and message_id locally.
+   * Telegram as SYNC (Push):
+   * - Keeps ONE pinned live message with caption "JivanOS sync · <updatedAt> · <deviceId>".
+   * - On first sync, sends backup.json and pins it once.
+   * - On later syncs, replaces its file in-place with editMessageMedia.
+   * - If editMessageMedia fails, sends a new document, pins it, and unpins the old one.
+   * - Enforces a maximum push frequency of once every 5 minutes unless force=true.
    */
-  async backup(data: Record<string, unknown>): Promise<SyncInfo> {
+  async syncPush(
+    data: Record<string, unknown>,
+    options?: { force?: boolean }
+  ): Promise<SyncInfo & { rateLimited?: boolean; nextAllowedInMs?: number }> {
     const stored = getStoredTelegramAuth();
     const botToken = await resolveTelegramBotToken(stored);
     if (!stored || !botToken) {
-      throw new Error('Connect Telegram first before backing up.');
+      throw new Error('Connect Telegram first before syncing.');
+    }
+
+    const nowMs = Date.now();
+    const lastPushMs = stored.lastSyncPushEpochMs || 0;
+    const elapsedMs = nowMs - lastPushMs;
+    if (!options?.force && lastPushMs > 0 && elapsedMs < TELEGRAM_SYNC_MIN_PUSH_INTERVAL_MS) {
+      const remainingMs = TELEGRAM_SYNC_MIN_PUSH_INTERVAL_MS - elapsedMs;
+      return {
+        lastModified: stored.lastSyncedAt || new Date().toISOString(),
+        fileSizeBytes: stored.lastFileSizeBytes || 0,
+        rateLimited: true,
+        nextAllowedInMs: remainingMs,
+      };
     }
 
     const envelope = buildDriveBackupEnvelope(data);
@@ -767,56 +825,133 @@ export class TelegramSyncProvider implements SyncProvider {
     const sizeBytes = blob.size;
 
     if (sizeBytes > 19 * 1024 * 1024) {
-      throw new Error('Backup exceeds Telegram Bot API 20 MB document limit.');
+      throw new Error('Sync file exceeds Telegram Bot API 20 MB document limit.');
     }
 
     const iso = envelope.updatedAt;
-    const caption = `🔄 JivanOS Backup · ${iso} · ${this.platform}`;
+    const caption = `JivanOS sync · ${iso} · ${envelope.deviceId}`;
     const bytes = new TextEncoder().encode(payloadJson);
     const contentBase64 = arrayBufferToBase64(bytes);
 
     try {
-      const sentMessage = await telegramApiJson<{
-        message_id?: number;
-        document?: { file_id?: string; file_size?: number };
-      }>(botToken, 'sendDocument', {
-        params: {
-          chat_id: stored.chatId,
-          caption,
-        },
-        file: {
-          name: 'backup.json',
-          contentBase64,
-          mimeType: 'application/json',
-        },
-      });
+      // Determine existing pinned sync message ID (from local state or getChat().pinned_message)
+      let targetPinnedMsgId: number | null =
+        typeof stored.pinnedSyncMessageId === 'number' ? stored.pinnedSyncMessageId : null;
 
-      const fileId = sentMessage?.document?.file_id || stored.lastBackupFileId;
-      const messageId =
-        typeof sentMessage?.message_id === 'number'
-          ? sentMessage.message_id
-          : stored.lastBackupMessageId;
-      const reportedSize = sentMessage?.document?.file_size || sizeBytes;
-
-      // Pin the latest backup message in the private chat so any device can locate it via getChat
-      if (typeof sentMessage?.message_id === 'number') {
+      if (!targetPinnedMsgId) {
         try {
-          await telegramApiJson(botToken, 'pinChatMessage', {
+          const chatInfo = await telegramApiJson<{
+            pinned_message?: { message_id?: number; caption?: string; document?: { file_id?: string } };
+          }>(botToken, 'getChat', { params: { chat_id: stored.chatId } });
+          const pinned = chatInfo?.pinned_message;
+          if (
+            typeof pinned?.message_id === 'number' &&
+            pinned?.document?.file_id &&
+            (!pinned.caption || /JivanOS/i.test(pinned.caption))
+          ) {
+            targetPinnedMsgId = pinned.message_id;
+          }
+        } catch {
+          // Ignore getChat failure and proceed to sendDocument
+        }
+      }
+
+      let finalFileId: string | null = stored.lastBackupFileId;
+      let finalMessageId: number | null = targetPinnedMsgId;
+      let reportedSize = sizeBytes;
+      let editedInPlace = false;
+
+      // 1. Try replacing the pinned live message in-place via editMessageMedia
+      if (typeof targetPinnedMsgId === 'number') {
+        try {
+          const editedMsg = await telegramApiJson<{
+            message_id?: number;
+            document?: { file_id?: string; file_size?: number };
+          }>(botToken, 'editMessageMedia', {
             params: {
               chat_id: stored.chatId,
-              message_id: sentMessage.message_id,
-              disable_notification: true,
+              message_id: targetPinnedMsgId,
+              caption,
+            },
+            file: {
+              name: 'backup.json',
+              contentBase64,
+              mimeType: 'application/json',
             },
           });
+          if (editedMsg) {
+            editedInPlace = true;
+            finalFileId = editedMsg?.document?.file_id || finalFileId;
+            finalMessageId =
+              typeof editedMsg?.message_id === 'number' ? editedMsg.message_id : targetPinnedMsgId;
+            reportedSize = editedMsg?.document?.file_size || sizeBytes;
+          }
         } catch {
-          // If Telegram refuses pinChatMessage in this chat, skip without error
+          editedInPlace = false;
+        }
+      }
+
+      // 2. If editMessageMedia failed or no pinned message existed, send new document, pin it, and unpin old one
+      if (!editedInPlace) {
+        const sentMessage = await telegramApiJson<{
+          message_id?: number;
+          document?: { file_id?: string; file_size?: number };
+        }>(botToken, 'sendDocument', {
+          params: {
+            chat_id: stored.chatId,
+            caption,
+          },
+          file: {
+            name: 'backup.json',
+            contentBase64,
+            mimeType: 'application/json',
+          },
+        });
+
+        finalFileId = sentMessage?.document?.file_id || stored.lastBackupFileId;
+        finalMessageId =
+          typeof sentMessage?.message_id === 'number'
+            ? sentMessage.message_id
+            : stored.lastBackupMessageId;
+        reportedSize = sentMessage?.document?.file_size || sizeBytes;
+
+        if (typeof sentMessage?.message_id === 'number') {
+          try {
+            await telegramApiJson(botToken, 'pinChatMessage', {
+              params: {
+                chat_id: stored.chatId,
+                message_id: sentMessage.message_id,
+                disable_notification: true,
+              },
+            });
+          } catch {
+            // If Telegram refuses pinChatMessage in this chat, skip without error
+          }
+
+          if (
+            typeof targetPinnedMsgId === 'number' &&
+            targetPinnedMsgId !== sentMessage.message_id
+          ) {
+            try {
+              await telegramApiJson(botToken, 'unpinChatMessage', {
+                params: {
+                  chat_id: stored.chatId,
+                  message_id: targetPinnedMsgId,
+                },
+              });
+            } catch {
+              // Ignore unpin failure
+            }
+          }
         }
       }
 
       patchStoredTelegramAuth({
         lastSyncedAt: iso,
-        lastBackupFileId: fileId,
-        lastBackupMessageId: messageId,
+        lastBackupFileId: finalFileId,
+        lastBackupMessageId: finalMessageId,
+        pinnedSyncMessageId: finalMessageId,
+        lastSyncPushEpochMs: Date.now(),
         lastFileSizeBytes: reportedSize,
         lastError: null,
       });
@@ -839,6 +974,182 @@ export class TelegramSyncProvider implements SyncProvider {
       }
       throw new Error(safeMessage);
     }
+  }
+
+  /**
+   * Telegram as SYNC (Pull):
+   * - Never calls getUpdates.
+   * - Calls getChat, reads pinned_message, compares caption's updatedAt with localLastSyncedAt,
+   *   and downloads via getFile ONLY if newer.
+   */
+  async syncPull(localLastSyncedAt?: string | null): Promise<SyncRestoreResult & { skippedNotNewer?: boolean }> {
+    const stored = getStoredTelegramAuth();
+    const botToken = await resolveTelegramBotToken(stored);
+    if (!stored || !botToken) {
+      throw new Error('Connect Telegram first before syncing.');
+    }
+
+    const chatInfo = await telegramApiJson<{
+      pinned_message?: {
+        message_id?: number;
+        date?: number;
+        edit_date?: number;
+        caption?: string;
+        document?: {
+          file_id?: string;
+          file_name?: string;
+          file_size?: number;
+        };
+      };
+    }>(botToken, 'getChat', { params: { chat_id: stored.chatId } });
+
+    const pinned = chatInfo?.pinned_message;
+    const pinnedDoc = pinned?.document;
+    if (!pinned || !pinnedDoc?.file_id) {
+      return { found: false, envelope: null, lastModified: null, fileSizeBytes: 0 };
+    }
+
+    const captionIso = parseTimestampFromCaption(pinned.caption);
+    const fallbackEpoch = pinned.edit_date || pinned.date;
+    const remoteIso =
+      captionIso ||
+      (typeof fallbackEpoch === 'number' ? new Date(fallbackEpoch * 1000).toISOString() : null);
+
+    if (localLastSyncedAt && remoteIso) {
+      const localMs = Date.parse(localLastSyncedAt);
+      const remoteMs = Date.parse(remoteIso);
+      if (Number.isFinite(localMs) && Number.isFinite(remoteMs) && remoteMs <= localMs) {
+        return {
+          found: true,
+          envelope: null,
+          lastModified: remoteIso,
+          fileSizeBytes: Number(pinnedDoc.file_size || stored.lastFileSizeBytes || 0),
+          skippedNotNewer: true,
+        };
+      }
+    }
+
+    const fileMeta = await telegramApiJson<{ file_path?: string; file_size?: number }>(
+      botToken,
+      'getFile',
+      { params: { file_id: pinnedDoc.file_id } }
+    );
+    if (!fileMeta?.file_path) {
+      return { found: false, envelope: null, lastModified: null, fileSizeBytes: 0 };
+    }
+
+    const rawText = await downloadTelegramFileText(botToken, fileMeta.file_path);
+    const envelope = parseDriveBackupEnvelope(rawText);
+    if (!envelope) {
+      throw new Error('Pinned Telegram sync file is not a valid JivanOS JSON envelope.');
+    }
+
+    const resolvedSize = Number(
+      fileMeta.file_size || pinnedDoc.file_size || new Blob([rawText]).size
+    );
+    const resolvedTimestamp = remoteIso || envelope.updatedAt;
+
+    patchStoredTelegramAuth({
+      lastBackupFileId: pinnedDoc.file_id,
+      lastBackupMessageId: typeof pinned.message_id === 'number' ? pinned.message_id : stored.lastBackupMessageId,
+      pinnedSyncMessageId: typeof pinned.message_id === 'number' ? pinned.message_id : stored.pinnedSyncMessageId,
+      lastSyncedAt: resolvedTimestamp,
+      lastFileSizeBytes: resolvedSize,
+      lastError: null,
+    });
+
+    return {
+      found: true,
+      envelope,
+      lastModified: resolvedTimestamp,
+      fileSizeBytes: resolvedSize,
+    };
+  }
+
+  /**
+   * Telegram as BACKUP (History copies, separate from sync):
+   * - Sends JivanOS-YYYY-MM-DD-HHmm.json via sendDocument without pinning (never touches the pinned sync message).
+   * - Keeps the last 4 backups and calls deleteMessage on older ones (ignoring failures).
+   */
+  async createHistoryBackup(
+    filename: string,
+    fileContentString: string
+  ): Promise<{ messageId: number | null; fileId: string | null; fileSizeBytes: number }> {
+    const stored = getStoredTelegramAuth();
+    const botToken = await resolveTelegramBotToken(stored);
+    if (!stored || !botToken) {
+      throw new Error('Connect Telegram first before backing up.');
+    }
+
+    const bytes = new TextEncoder().encode(fileContentString);
+    const sizeBytes = bytes.byteLength;
+    if (sizeBytes > 19 * 1024 * 1024) {
+      throw new Error('Backup exceeds Telegram Bot API 20 MB document limit.');
+    }
+
+    const contentBase64 = arrayBufferToBase64(bytes);
+    const caption = `📦 JivanOS Backup · ${filename} · ${new Date().toISOString()}`;
+
+    const sentMessage = await telegramApiJson<{
+      message_id?: number;
+      document?: { file_id?: string; file_size?: number };
+    }>(botToken, 'sendDocument', {
+      params: {
+        chat_id: stored.chatId,
+        caption,
+      },
+      file: {
+        name: filename,
+        contentBase64,
+        mimeType: 'application/json',
+      },
+    });
+
+    const msgId = typeof sentMessage?.message_id === 'number' ? sentMessage.message_id : null;
+    const fileId = sentMessage?.document?.file_id || null;
+    const reportedSize = sentMessage?.document?.file_size || sizeBytes;
+
+    // Retention: keep last 4 backup messages; try deleteMessage on older ones and ignore failures
+    const existingIds = Array.isArray(stored.backupHistoryMessageIds)
+      ? stored.backupHistoryMessageIds.slice()
+      : [];
+    if (msgId !== null && !existingIds.includes(msgId)) {
+      existingIds.push(msgId);
+    }
+
+    while (existingIds.length > 4) {
+      const oldestMsgId = existingIds.shift();
+      if (typeof oldestMsgId === 'number' && oldestMsgId !== stored.pinnedSyncMessageId) {
+        try {
+          await telegramApiJson(botToken, 'deleteMessage', {
+            params: {
+              chat_id: stored.chatId,
+              message_id: oldestMsgId,
+            },
+          });
+        } catch {
+          // Ignore deleteMessage failure (Telegram bots can only delete messages < 48h old)
+        }
+      }
+    }
+
+    patchStoredTelegramAuth({
+      backupHistoryMessageIds: existingIds,
+      lastError: null,
+    });
+
+    return {
+      messageId: msgId,
+      fileId,
+      fileSizeBytes: reportedSize,
+    };
+  }
+
+  /**
+   * Standard SyncProvider.backup() delegates to syncPush with force=true for manual trigger compatibility.
+   */
+  async backup(data: Record<string, unknown>): Promise<SyncInfo> {
+    return this.syncPush(data, { force: true });
   }
 
   /**

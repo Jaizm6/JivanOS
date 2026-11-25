@@ -50,6 +50,35 @@ public class JivanDriveSyncWorker extends Worker {
             }
 
             JivanDriveAppDataClient.uploadBackup(ctx, token, payloadJson);
+
+            // Re-queue OneTimeWorkRequest for the next scheduled backup window (no exact alarms)
+            android.content.SharedPreferences prefs = ctx.getSharedPreferences(
+                    JivanDriveAppDataClient.PREFS_NAME,
+                    Context.MODE_PRIVATE
+            );
+            int intervalMinutes = prefs.getInt(JivanDriveAppDataClient.KEY_AUTO_INTERVAL, 0);
+            boolean wifiOnly = prefs.getBoolean("backup_wifi_only", true);
+            boolean onlyCharging = prefs.getBoolean("backup_only_charging", false);
+            if (intervalMinutes > 0) {
+                androidx.work.Constraints constraints = new androidx.work.Constraints.Builder()
+                        .setRequiredNetworkType(
+                                wifiOnly
+                                        ? androidx.work.NetworkType.UNMETERED
+                                        : androidx.work.NetworkType.CONNECTED
+                        )
+                        .setRequiresCharging(onlyCharging)
+                        .build();
+                androidx.work.OneTimeWorkRequest nextWork =
+                        new androidx.work.OneTimeWorkRequest.Builder(JivanDriveSyncWorker.class)
+                                .setInitialDelay(Math.max(15L, intervalMinutes), java.util.concurrent.TimeUnit.MINUTES)
+                                .setConstraints(constraints)
+                                .build();
+                androidx.work.WorkManager.getInstance(ctx).enqueueUniqueWork(
+                        UNIQUE_WORK_NAME,
+                        androidx.work.ExistingWorkPolicy.REPLACE,
+                        nextWork
+                );
+            }
             return Result.success();
         } catch (Exception e) {
             return Result.retry();

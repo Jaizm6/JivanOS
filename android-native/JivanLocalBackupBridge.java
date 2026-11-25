@@ -333,6 +333,78 @@ public class JivanLocalBackupBridge {
         return arr;
     }
 
+    /**
+     * 5. HISTORY BACKUP TO Documents/JivanOS/Backups (survives app uninstall)
+     * Writes JivanOS-YYYY-MM-DD-HHmm.json into Documents/JivanOS/Backups and keeps the last 4 backups.
+     */
+    @JavascriptInterface
+    public synchronized String saveBackupToDocumentsFolder(String filename, String jsonContent) {
+        JSONObject result = new JSONObject();
+        try {
+            String safeName = sanitizeBackupFilename(filename);
+            byte[] payloadBytes = (jsonContent != null ? jsonContent : "{}")
+                    .getBytes(StandardCharsets.UTF_8);
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ContentResolver resolver = context.getContentResolver();
+                String relPath = Environment.DIRECTORY_DOCUMENTS + "/JivanOS/Backups";
+                ContentValues values = new ContentValues();
+                values.put(MediaStore.MediaColumns.DISPLAY_NAME, safeName);
+                values.put(MediaStore.MediaColumns.MIME_TYPE, MIME_JSON);
+                values.put(MediaStore.MediaColumns.RELATIVE_PATH, relPath);
+                values.put(MediaStore.MediaColumns.IS_PENDING, 1);
+
+                Uri collection = MediaStore.Files.getContentUri("external");
+                Uri itemUri = resolver.insert(collection, values);
+                if (itemUri != null) {
+                    try (OutputStream out = resolver.openOutputStream(itemUri)) {
+                        if (out != null) {
+                            out.write(payloadBytes);
+                            out.flush();
+                        }
+                    }
+                    ContentValues done = new ContentValues();
+                    done.put(MediaStore.MediaColumns.IS_PENDING, 0);
+                    resolver.update(itemUri, done, null, null);
+                }
+            } else {
+                @SuppressWarnings("deprecation")
+                File docsDir = Environment.getExternalStoragePublicDirectory(
+                        Environment.DIRECTORY_DOCUMENTS
+                );
+                File targetDir = new File(docsDir, "JivanOS/Backups");
+                if (!targetDir.exists()) {
+                    targetDir.mkdirs();
+                }
+                File outFile = new File(targetDir, safeName);
+                try (FileOutputStream fos = new FileOutputStream(outFile)) {
+                    fos.write(payloadBytes);
+                    fos.flush();
+                }
+                // Keep last 4 backups
+                File[] files = targetDir.listFiles();
+                if (files != null && files.length > 4) {
+                    java.util.Arrays.sort(files, (a, b) -> a.getName().compareTo(b.getName()));
+                    for (int i = 0; i < files.length - 4; i++) {
+                        files[i].delete();
+                    }
+                }
+            }
+
+            result.put("success", true);
+            result.put("filename", safeName);
+            result.put("location", "Documents/JivanOS/Backups");
+            return result.toString();
+        } catch (Exception e) {
+            try {
+                result.put("success", false);
+                result.put("error", e.getMessage() != null ? e.getMessage() : "Documents backup failed");
+            } catch (Exception ignored) {
+            }
+            return result.toString();
+        }
+    }
+
     private String sanitizeBackupFilename(String raw) {
         String name = (raw == null || raw.trim().isEmpty())
                 ? "JivanOS-backup.json"

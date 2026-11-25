@@ -504,7 +504,10 @@ async function startServer() {
     'deleteWebhook',
     'sendMessage',
     'sendDocument',
+    'editMessageMedia',
     'pinChatMessage',
+    'unpinChatMessage',
+    'deleteMessage',
     'getChat',
     'getFile',
   ]);
@@ -521,7 +524,11 @@ async function startServer() {
     try {
       const targetUrl = `https://api.telegram.org/bot${cleanToken}/${cleanMethod}`;
       let fetchInit: RequestInit;
-      if (cleanMethod === 'sendDocument' && file && typeof file.contentBase64 === 'string') {
+      if (
+        (cleanMethod === 'sendDocument' || cleanMethod === 'editMessageMedia') &&
+        file &&
+        typeof file.contentBase64 === 'string'
+      ) {
         const fileName =
           typeof file.name === 'string' && /^[A-Za-z0-9._-]{1,100}$/.test(file.name)
             ? file.name
@@ -531,7 +538,22 @@ async function startServer() {
             ? file.mimeType
             : 'application/json';
         const formData = new FormData();
-        if (params && typeof params === 'object') {
+        if (cleanMethod === 'editMessageMedia') {
+          if (params && typeof params === 'object') {
+            if (params.chat_id !== undefined) formData.append('chat_id', String(params.chat_id));
+            if (params.message_id !== undefined) {
+              formData.append('message_id', String(params.message_id));
+            }
+            formData.append(
+              'media',
+              JSON.stringify({
+                type: 'document',
+                media: 'attach://document',
+                caption: typeof params.caption === 'string' ? params.caption : '',
+              })
+            );
+          }
+        } else if (params && typeof params === 'object') {
           for (const [k, v] of Object.entries(params)) {
             if (v !== undefined && v !== null) {
               formData.append(k, String(v));

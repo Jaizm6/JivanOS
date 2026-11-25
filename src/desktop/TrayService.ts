@@ -12,11 +12,7 @@ import {
   requestPermission,
   sendNotification,
 } from '@tauri-apps/plugin-notification';
-import {
-  isRegistered,
-  register,
-  unregister,
-} from '@tauri-apps/plugin-global-shortcut';
+import { unregister } from '@tauri-apps/plugin-global-shortcut';
 import {
   disable as disableAutostart,
   enable as enableAutostart,
@@ -29,12 +25,6 @@ export interface DesktopActionHandlers {
   onExportBackup: () => void | Promise<void>;
   onOpenSettings: () => void;
 }
-
-const DESKTOP_SHORTCUTS = {
-  SYNC: 'CommandOrControl+S',
-  EXPORT: 'CommandOrControl+E',
-  SETTINGS: 'CommandOrControl+,',
-} as const;
 
 /**
  * Updates the system tray hover tooltip (e.g., "Synced 5 min ago" or "JivanOS — Offline").
@@ -147,46 +137,20 @@ export function initDesktopTrayAndShortcuts(handlers: DesktopActionHandlers): ()
     })
     .catch(() => {});
 
-  // 2. Register Tauri global shortcuts (with fallback to focused window keydown listener)
-  const registerShortcutSafe = async (shortcut: string, cb: () => void) => {
-    try {
-      if (await isRegistered(shortcut)) {
-        await unregister(shortcut);
-      }
-      await register(shortcut, (event) => {
-        if (event.state === 'Pressed' && !disposed) {
-          cb();
-        }
-      });
-      if (disposed) {
-        await unregister(shortcut).catch(() => {});
-      } else {
-        registeredShortcuts.push(shortcut);
-      }
-    } catch {
-      // Wayland / restricted desktop environments may decline global hotkey registration
-    }
-  };
-
-  void registerShortcutSafe(DESKTOP_SHORTCUTS.SYNC, () => {
-    void handlers.onSyncNow();
-  });
-  void registerShortcutSafe(DESKTOP_SHORTCUTS.EXPORT, () => {
-    void handlers.onExportBackup();
-  });
-  void registerShortcutSafe(DESKTOP_SHORTCUTS.SETTINGS, () => {
-    void showMainDesktopWindow();
-    handlers.onOpenSettings();
-  });
-
-  // 3. Focused-window keyboard shortcut fallback (works on Wayland / when global hotkey is busy)
+  // 2. Focused-window keyboard shortcuts (never hijacks OS-wide Ctrl+S in other apps)
   const handleWindowKeyDown = (e: KeyboardEvent) => {
-    if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+    if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+    const target = e.target as HTMLElement | null;
+    const isInput =
+      target &&
+      (target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable);
     const key = e.key.toLowerCase();
-    if (key === 's') {
+    if (key === 's' && !isInput) {
       e.preventDefault();
       void handlers.onSyncNow();
-    } else if (key === 'e') {
+    } else if (key === 'e' && !isInput) {
       e.preventDefault();
       void handlers.onExportBackup();
     } else if (e.key === ',') {

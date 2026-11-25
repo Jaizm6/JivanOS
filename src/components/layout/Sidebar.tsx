@@ -331,12 +331,16 @@ export const Sidebar: React.FC = () => {
 
   return (
     <>
-      {/* Dedicated Left-Edge Touch-Drag Sensor Strip */}
+      {/* Dedicated Left-Edge Touch-Drag & Desktop Click Sensor Strip */}
       <div
         data-drawer-edge-sensor="true"
         aria-hidden="true"
-        className={`fixed top-14 bottom-16 left-0 z-[35] w-7 touch-pan-y select-none ${
-          isOpen ? 'pointer-events-none' : 'pointer-events-auto'
+        onClick={() => {
+          if (!isOpen) setIsSidebarCollapsed(false);
+        }}
+        title="Open Left Panel (Ctrl+B)"
+        className={`fixed top-14 bottom-16 left-0 z-[35] w-3 sm:w-4 touch-pan-y select-none ${
+          isOpen ? 'pointer-events-none' : 'pointer-events-auto cursor-pointer'
         }`}
       />
 

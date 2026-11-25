@@ -7,6 +7,7 @@ import { getStoredMegaAuth, hasActiveMegaSession } from './providers/MEGASyncPro
 import { getStoredCloudMeta } from './providers/FirestoreSyncProvider';
 import { getCachedDesktopOAuthAccount } from './desktop/DesktopSyncTransport';
 import { KeychainService, isDesktop } from '../desktop/KeychainService';
+import { getSyncthingFolderState } from './unifiedSyncBackupEngine';
 
 export type UnifiedProviderId =
   | 'firebase'
@@ -15,6 +16,7 @@ export type UnifiedProviderId =
   | 'telegram'
   | 'mega'
   | 'webdav'
+  | 'local_folder'
   | 's3';
 
 export interface ConnectedProviderSummary {
@@ -98,7 +100,7 @@ export function getRealSyncOverview(
     });
   }
 
-  // 4. Telegram
+  // 4. Telegram (Basic)
   const tgAuth = getStoredTelegramAuth();
   const hasTelegramToken = Boolean(
     tgAuth?.botToken || (isDesktop() && KeychainService.getCachedTokenSync('telegram'))
@@ -106,7 +108,7 @@ export function getRealSyncOverview(
   if (hasTelegramToken && tgAuth?.chatId) {
     connected.push({
       id: 'telegram',
-      label: 'Telegram',
+      label: 'Telegram (Basic)',
       accountLabel: tgAuth.botUsername ? `@${tgAuth.botUsername}` : 'Telegram Bot',
       lastSyncedAt: tgAuth.lastSyncedAt || null,
       brandColor: '#229ED9',
@@ -125,7 +127,7 @@ export function getRealSyncOverview(
     });
   }
 
-  // 5. WebDAV / Nextcloud (merged single provider)
+  // 6. WebDAV / Nextcloud (merged single provider)
   const webdavCfg = joplinSyncSettings.drives.webdav;
   const nextcloudCfg = joplinSyncSettings.drives.nextcloud;
   const activeDavCfg =
@@ -149,7 +151,19 @@ export function getRealSyncOverview(
     });
   }
 
-  // 6. S3 / MinIO (Advanced)
+  // 7. Local / Syncthing folder
+  const syncthingState = getSyncthingFolderState();
+  if (syncthingState.connected) {
+    connected.push({
+      id: 'local_folder',
+      label: 'Local / Syncthing folder',
+      accountLabel: syncthingState.folderName || syncthingState.deviceFileName,
+      lastSyncedAt: syncthingState.lastSyncedAt || null,
+      brandColor: '#0891B2',
+    });
+  }
+
+  // 8. S3 / MinIO (Advanced)
   const s3Cfg = joplinSyncSettings.drives.s3;
   if (
     s3Cfg?.s3Endpoint?.trim() &&
