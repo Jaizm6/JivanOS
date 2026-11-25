@@ -160,32 +160,35 @@ object DropboxSyncProvider {
      * intervalMinutes <= 0 cancels background sync (Manual mode).
      */
     fun autoSync(context: Context, intervalMinutes: Int) {
-        val prefs = context.getSharedPreferences(META_PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putInt(KEY_AUTO_INTERVAL, intervalMinutes).apply()
+        try {
+            val prefs = context.getSharedPreferences(META_PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.edit().putInt(KEY_AUTO_INTERVAL, intervalMinutes).apply()
 
-        val workManager = WorkManager.getInstance(context.applicationContext)
-        if (intervalMinutes <= 0) {
-            workManager.cancelUniqueWork(UNIQUE_WORK_NAME)
-            return
+            val workManager = WorkManager.getInstance(context.applicationContext)
+            if (intervalMinutes <= 0) {
+                workManager.cancelUniqueWork(UNIQUE_WORK_NAME)
+                return
+            }
+
+            val clampedMinutes = maxOf(15L, intervalMinutes.toLong())
+            val constraints = Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED)
+                .build()
+
+            val request = PeriodicWorkRequestBuilder<DropboxAutoSyncWorker>(
+                clampedMinutes,
+                TimeUnit.MINUTES
+            )
+                .setConstraints(constraints)
+                .build()
+
+            workManager.enqueueUniquePeriodicWork(
+                UNIQUE_WORK_NAME,
+                ExistingPeriodicWorkPolicy.UPDATE,
+                request
+            )
+        } catch (_: Throwable) {
         }
-
-        val clampedMinutes = maxOf(15L, intervalMinutes.toLong())
-        val constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
-            .build()
-
-        val request = PeriodicWorkRequestBuilder<DropboxAutoSyncWorker>(
-            clampedMinutes,
-            TimeUnit.MINUTES
-        )
-            .setConstraints(constraints)
-            .build()
-
-        workManager.enqueueUniquePeriodicWork(
-            UNIQUE_WORK_NAME,
-            ExistingPeriodicWorkPolicy.UPDATE,
-            request
-        )
     }
 
     fun cacheLocalPayloadForBackgroundSync(context: Context, payloadJson: String) {
@@ -198,7 +201,7 @@ object DropboxSyncProvider {
             }
             if (target.exists()) target.delete()
             tmp.renameTo(target)
-        } catch (_: Exception) {
+        } catch (_: Throwable) {
             // Never interrupt UI on background cache error
         }
     }
@@ -206,20 +209,24 @@ object DropboxSyncProvider {
     fun clearAllLocalState(context: Context) {
         try {
             WorkManager.getInstance(context.applicationContext).cancelUniqueWork(UNIQUE_WORK_NAME)
-        } catch (_: Exception) {}
+        } catch (_: Throwable) {}
         try {
             val cached = File(context.filesDir, CACHED_ENVELOPE_FILE)
             if (cached.exists()) cached.delete()
-        } catch (_: Exception) {}
-        context.getSharedPreferences(META_PREFS_NAME, Context.MODE_PRIVATE).edit().clear().apply()
+        } catch (_: Throwable) {}
+        try {
+            context.getSharedPreferences(META_PREFS_NAME, Context.MODE_PRIVATE).edit().clear().apply()
+        } catch (_: Throwable) {}
     }
 
     private fun saveSyncMetadata(context: Context, lastModifiedIso: String, sizeBytes: Long) {
-        context.getSharedPreferences(META_PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putString(KEY_LAST_MODIFIED, lastModifiedIso)
-            .putLong(KEY_LAST_SIZE, sizeBytes)
-            .apply()
+        try {
+            context.getSharedPreferences(META_PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putString(KEY_LAST_MODIFIED, lastModifiedIso)
+                .putLong(KEY_LAST_SIZE, sizeBytes)
+                .apply()
+        } catch (_: Throwable) {}
     }
 }
 
@@ -233,14 +240,14 @@ class DropboxAutoSyncWorker(
 ) : Worker(appContext, workerParams) {
 
     override fun doWork(): Result {
-        if (!DropboxAuth.hasStoredTokens(applicationContext)) {
-            return Result.success()
-        }
-        val cachedFile = File(applicationContext.filesDir, DropboxSyncProvider.CACHED_ENVELOPE_FILE)
-        if (!cachedFile.exists() || cachedFile.length() == 0L) {
-            return Result.success()
-        }
         return try {
+            if (!DropboxAuth.hasStoredTokens(applicationContext)) {
+                return Result.success()
+            }
+            val cachedFile = File(applicationContext.filesDir, DropboxSyncProvider.CACHED_ENVELOPE_FILE)
+            if (!cachedFile.exists() || cachedFile.length() == 0L) {
+                return Result.success()
+            }
             val payloadJson = cachedFile.readText(StandardCharsets.UTF_8)
             if (payloadJson.isBlank()) {
                 Result.success()
@@ -248,7 +255,7 @@ class DropboxAutoSyncWorker(
                 DropboxSyncProvider.backupToDropbox(applicationContext, payloadJson)
                 Result.success()
             }
-        } catch (_: Exception) {
+        } catch (_: Throwable) {
             Result.retry()
         }
     }
@@ -283,18 +290,26 @@ class JivanDropboxPlugin : Plugin() {
     @PluginMethod
     fun connect(call: PluginCall) {
         val ctx = context
-        if (DropboxAuth.hasStoredTokens(ctx)) {
-            ioExecutor.execute {
-                val existing = DropboxAuth.silentReAuth(ctx)
-                if (existing?.connected == true) {
-                    call.resolve(toAccountJSObject(existing))
-                } else {
-                    launchPkceFlow(call)
+        try {
+            if (DropboxAuth.hasStoredTokens(ctx)) {
+                ioExecutor.execute {
+                    try {
+                        val existing = DropboxAuth.silentReAuth(ctx)
+                        if (existing?.connected == true) {
+                            call.resolve(toAccountJSObject(existing))
+                        } else {
+                            launchPkceFlow(call)
+                        }
+                    } catch (_: Throwable) {
+                        launchPkceFlow(call)
+                    }
                 }
+                return
             }
-            return
+            launchPkceFlow(call)
+        } catch (t: Throwable) {
+            call.reject("Failed to start Dropbox connection: ${t.message}")
         }
-        launchPkceFlow(call)
     }
 
     private fun launchPkceFlow(call: PluginCall) {
@@ -308,7 +323,7 @@ class JivanDropboxPlugin : Plugin() {
         act.runOnUiThread {
             try {
                 DropboxAuth.startPkceAuth(act)
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 awaitingAuthResume = false
                 pendingConnectCall = null
                 call.reject("Failed to launch Dropbox sign-in: ${e.message}")
@@ -332,7 +347,7 @@ class JivanDropboxPlugin : Plugin() {
                 } else {
                     call.reject("Dropbox authorization was cancelled.")
                 }
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 call.reject("Dropbox sign-in failed: ${e.message}")
             }
         }
@@ -342,8 +357,12 @@ class JivanDropboxPlugin : Plugin() {
     fun silentReAuth(call: PluginCall) {
         val ctx = context
         ioExecutor.execute {
-            val account = DropboxAuth.silentReAuth(ctx)
-            call.resolve(toAccountJSObject(account))
+            try {
+                val account = DropboxAuth.silentReAuth(ctx)
+                call.resolve(toAccountJSObject(account))
+            } catch (_: Throwable) {
+                call.resolve(toAccountJSObject(null))
+            }
         }
     }
 
@@ -351,8 +370,11 @@ class JivanDropboxPlugin : Plugin() {
     fun disconnect(call: PluginCall) {
         val ctx = context
         ioExecutor.execute {
-            DropboxSyncProvider.clearAllLocalState(ctx)
-            DropboxAuth.disconnect(ctx)
+            try {
+                DropboxSyncProvider.clearAllLocalState(ctx)
+                DropboxAuth.disconnect(ctx)
+            } catch (_: Throwable) {
+            }
             val ret = JSObject()
             ret.put("disconnected", true)
             call.resolve(ret)
@@ -375,7 +397,7 @@ class JivanDropboxPlugin : Plugin() {
                 ret.put("lastModified", info.lastModified)
                 ret.put("fileSizeBytes", info.fileSizeBytes)
                 call.resolve(ret)
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 call.reject("Dropbox backup failed: ${e.message}")
             }
         }
@@ -393,7 +415,7 @@ class JivanDropboxPlugin : Plugin() {
                 ret.put("lastModified", res.lastModified)
                 ret.put("fileSizeBytes", res.fileSizeBytes)
                 call.resolve(ret)
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 call.reject("Dropbox restore failed: ${e.message}")
             }
         }
@@ -414,8 +436,12 @@ class JivanDropboxPlugin : Plugin() {
                     ret.put("fileSizeBytes", info.fileSizeBytes)
                 }
                 call.resolve(ret)
-            } catch (_: Exception) {
-                val cached = DropboxSyncProvider.getCachedSyncInfo(ctx)
+            } catch (_: Throwable) {
+                val cached = try {
+                    DropboxSyncProvider.getCachedSyncInfo(ctx)
+                } catch (_: Throwable) {
+                    null
+                }
                 val ret = JSObject()
                 if (cached != null) {
                     ret.put("exists", true)
@@ -432,7 +458,10 @@ class JivanDropboxPlugin : Plugin() {
     @PluginMethod
     fun scheduleAutoSync(call: PluginCall) {
         val intervalMinutes = call.getInt("intervalMinutes", 0) ?: 0
-        DropboxSyncProvider.autoSync(context, intervalMinutes)
+        try {
+            DropboxSyncProvider.autoSync(context, intervalMinutes)
+        } catch (_: Throwable) {
+        }
         val ret = JSObject()
         ret.put("scheduled", intervalMinutes > 0)
         ret.put("intervalMinutes", intervalMinutes)
@@ -444,7 +473,10 @@ class JivanDropboxPlugin : Plugin() {
         val payloadJson = call.getString("payloadJson", "") ?: ""
         if (payloadJson.isNotBlank()) {
             ioExecutor.execute {
-                DropboxSyncProvider.cacheLocalPayloadForBackgroundSync(context, payloadJson)
+                try {
+                    DropboxSyncProvider.cacheLocalPayloadForBackgroundSync(context, payloadJson)
+                } catch (_: Throwable) {
+                }
             }
         }
         val ret = JSObject()

@@ -52,21 +52,49 @@ object DropboxAuth {
         return DbxRequestConfig.newBuilder(CLIENT_IDENTIFIER).build()
     }
 
+    private fun createEncryptedPrefsInstance(appCtx: Context): SharedPreferences {
+        val masterKey = MasterKey.Builder(appCtx)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+        return EncryptedSharedPreferences.create(
+            appCtx,
+            ENCRYPTED_PREFS_NAME,
+            masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
+    }
+
+    private fun clearCorruptedEncryptedPrefs(appCtx: Context) {
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+                appCtx.deleteSharedPreferences(ENCRYPTED_PREFS_NAME)
+            } else {
+                appCtx.getSharedPreferences(ENCRYPTED_PREFS_NAME, Context.MODE_PRIVATE)
+                    .edit()
+                    .clear()
+                    .commit()
+            }
+        } catch (_: Throwable) {
+        }
+    }
+
     private fun getSecurePrefs(context: Context): SharedPreferences {
         cachedEncryptedPrefs?.let { return it }
         synchronized(this) {
             cachedEncryptedPrefs?.let { return it }
             val appCtx = context.applicationContext
-            val masterKey = MasterKey.Builder(appCtx)
-                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                .build()
-            val prefs = EncryptedSharedPreferences.create(
-                appCtx,
-                ENCRYPTED_PREFS_NAME,
-                masterKey,
-                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-            )
+            val prefs: SharedPreferences = try {
+                createEncryptedPrefsInstance(appCtx)
+            } catch (_: Throwable) {
+                // In-place APK upgrade or Android Auto-Backup restore can invalidate Keystore master key
+                clearCorruptedEncryptedPrefs(appCtx)
+                try {
+                    createEncryptedPrefsInstance(appCtx)
+                } catch (_: Throwable) {
+                    appCtx.getSharedPreferences("${ENCRYPTED_PREFS_NAME}_fallback", Context.MODE_PRIVATE)
+                }
+            }
             cachedEncryptedPrefs = prefs
             return prefs
         }
@@ -91,9 +119,13 @@ object DropboxAuth {
      * Must be called off the main UI thread (performs network account lookup).
      */
     fun completePendingAuthFromResume(context: Context): DropboxAccountInfo? {
-        val credential = Auth.getDbxCredential() ?: return null
-        saveCredential(context, credential)
-        return fetchAndCacheAccountProfile(context, credential)
+        return try {
+            val credential = Auth.getDbxCredential() ?: return null
+            saveCredential(context, credential)
+            fetchAndCacheAccountProfile(context, credential)
+        } catch (_: Throwable) {
+            null
+        }
     }
 
     /**
@@ -101,78 +133,93 @@ object DropboxAuth {
      * Automatically refreshes the short-lived access token using the stored refresh token if needed.
      */
     fun silentReAuth(context: Context): DropboxAccountInfo? {
-        val credential = loadStoredCredential(context) ?: return null
-        val prefs = getSecurePrefs(context)
         return try {
-            val client = createAuthenticatedClient(context, credential)
-            val account = client.users().currentAccount
-            val name = account.name?.displayName?.trim().takeUnless { it.isNullOrEmpty() }
-                ?: account.email?.substringBefore("@")
-                ?: "Dropbox User"
-            val email = account.email ?: ""
-            // Persist refreshed access token if SDK refreshed it
-            saveCredential(context, credential)
-            prefs.edit()
-                .putString(KEY_DISPLAY_NAME, name)
-                .putString(KEY_EMAIL, email)
-                .apply()
-            DropboxAccountInfo(
-                connected = true,
-                name = name,
-                email = email,
-                initials = computeInitials(name, email)
-            )
-        } catch (e: Exception) {
-            // If temporarily offline, return cached display info if valid refresh token is stored
-            val cachedName = prefs.getString(KEY_DISPLAY_NAME, "") ?: ""
-            val cachedEmail = prefs.getString(KEY_EMAIL, "") ?: ""
-            if (cachedName.isNotEmpty() || cachedEmail.isNotEmpty()) {
-                val resolvedName = cachedName.ifEmpty { cachedEmail.substringBefore("@") }
+            val credential = loadStoredCredential(context) ?: return null
+            val prefs = getSecurePrefs(context)
+            try {
+                val client = createAuthenticatedClient(context, credential)
+                val account = client.users().currentAccount
+                val name = account.name?.displayName?.trim().takeUnless { it.isNullOrEmpty() }
+                    ?: account.email?.substringBefore("@")
+                    ?: "Dropbox User"
+                val email = account.email ?: ""
+                // Persist refreshed access token if SDK refreshed it
+                saveCredential(context, credential)
+                prefs.edit()
+                    .putString(KEY_DISPLAY_NAME, name)
+                    .putString(KEY_EMAIL, email)
+                    .apply()
                 DropboxAccountInfo(
                     connected = true,
-                    name = resolvedName,
-                    email = cachedEmail,
-                    initials = computeInitials(resolvedName, cachedEmail)
+                    name = name,
+                    email = email,
+                    initials = computeInitials(name, email)
                 )
-            } else {
-                null
+            } catch (_: Throwable) {
+                // If temporarily offline, return cached display info if valid refresh token is stored
+                val cachedName = prefs.getString(KEY_DISPLAY_NAME, "") ?: ""
+                val cachedEmail = prefs.getString(KEY_EMAIL, "") ?: ""
+                if (cachedName.isNotEmpty() || cachedEmail.isNotEmpty()) {
+                    val resolvedName = cachedName.ifEmpty { cachedEmail.substringBefore("@") }
+                    DropboxAccountInfo(
+                        connected = true,
+                        name = resolvedName,
+                        email = cachedEmail,
+                        initials = computeInitials(resolvedName, cachedEmail)
+                    )
+                } else {
+                    null
+                }
             }
+        } catch (_: Throwable) {
+            null
         }
     }
 
     fun hasStoredTokens(context: Context): Boolean {
-        val prefs = getSecurePrefs(context)
-        val access = prefs.getString(KEY_ACCESS_TOKEN, null)
-        val refresh = prefs.getString(KEY_REFRESH_TOKEN, null)
-        return !access.isNullOrBlank() || !refresh.isNullOrBlank()
+        return try {
+            val prefs = getSecurePrefs(context)
+            val access = prefs.getString(KEY_ACCESS_TOKEN, null)
+            val refresh = prefs.getString(KEY_REFRESH_TOKEN, null)
+            !access.isNullOrBlank() || !refresh.isNullOrBlank()
+        } catch (_: Throwable) {
+            false
+        }
     }
 
     fun loadStoredCredential(context: Context): DbxCredential? {
-        val prefs = getSecurePrefs(context)
-        val accessToken = prefs.getString(KEY_ACCESS_TOKEN, null)?.trim()
-        val refreshToken = prefs.getString(KEY_REFRESH_TOKEN, null)?.trim()
-        val expiresAt = prefs.getLong(KEY_EXPIRES_AT, 0L)
+        return try {
+            val prefs = getSecurePrefs(context)
+            val accessToken = prefs.getString(KEY_ACCESS_TOKEN, null)?.trim()
+            val refreshToken = prefs.getString(KEY_REFRESH_TOKEN, null)?.trim()
+            val expiresAt = prefs.getLong(KEY_EXPIRES_AT, 0L)
 
-        if (accessToken.isNullOrEmpty() && refreshToken.isNullOrEmpty()) {
-            return null
+            if (accessToken.isNullOrEmpty() && refreshToken.isNullOrEmpty()) {
+                return null
+            }
+
+            val resolvedExpiresAt: Long? = if (expiresAt > 0L) expiresAt else null
+            DbxCredential(
+                accessToken ?: "",
+                resolvedExpiresAt,
+                refreshToken,
+                APP_KEY
+            )
+        } catch (_: Throwable) {
+            null
         }
-
-        val resolvedExpiresAt: Long? = if (expiresAt > 0L) expiresAt else null
-        return DbxCredential(
-            accessToken ?: "",
-            resolvedExpiresAt,
-            refreshToken,
-            APP_KEY
-        )
     }
 
     fun saveCredential(context: Context, credential: DbxCredential) {
-        val prefs = getSecurePrefs(context)
-        prefs.edit()
-            .putString(KEY_ACCESS_TOKEN, credential.accessToken ?: "")
-            .putString(KEY_REFRESH_TOKEN, credential.refreshToken ?: "")
-            .putLong(KEY_EXPIRES_AT, credential.expiresAt ?: 0L)
-            .apply()
+        try {
+            val prefs = getSecurePrefs(context)
+            prefs.edit()
+                .putString(KEY_ACCESS_TOKEN, credential.accessToken ?: "")
+                .putString(KEY_REFRESH_TOKEN, credential.refreshToken ?: "")
+                .putLong(KEY_EXPIRES_AT, credential.expiresAt ?: 0L)
+                .apply()
+        } catch (_: Throwable) {
+        }
     }
 
     /**
@@ -205,10 +252,13 @@ object DropboxAuth {
             ?: "Dropbox User"
         val email = account.email ?: ""
 
-        getSecurePrefs(context).edit()
-            .putString(KEY_DISPLAY_NAME, name)
-            .putString(KEY_EMAIL, email)
-            .apply()
+        try {
+            getSecurePrefs(context).edit()
+                .putString(KEY_DISPLAY_NAME, name)
+                .putString(KEY_EMAIL, email)
+                .apply()
+        } catch (_: Throwable) {
+        }
 
         return DropboxAccountInfo(
             connected = true,
@@ -229,10 +279,13 @@ object DropboxAuth {
                 val client = DbxClientV2(createRequestConfig(), credential)
                 client.auth().tokenRevoke()
             }
-        } catch (_: Exception) {
+        } catch (_: Throwable) {
             // Proceed to clear all local encrypted tokens regardless of network state
         } finally {
-            getSecurePrefs(context).edit().clear().apply()
+            try {
+                getSecurePrefs(context).edit().clear().apply()
+            } catch (_: Throwable) {
+            }
         }
     }
 

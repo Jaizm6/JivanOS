@@ -94,19 +94,23 @@ public class JivanGoogleDrivePlugin extends Plugin {
 
     @PluginMethod
     public void connect(PluginCall call) {
-        GoogleSignInAccount existing = GoogleSignIn.getLastSignedInAccount(getContext());
-        if (existing != null && hasAppDataPermission(existing)) {
-            call.resolve(buildAccountPayload(existing, true));
-            return;
+        try {
+            GoogleSignInAccount existing = GoogleSignIn.getLastSignedInAccount(getContext());
+            if (existing != null && hasAppDataPermission(existing)) {
+                call.resolve(buildAccountPayload(existing, true));
+                return;
+            }
+            Intent signInIntent = getSignInClient().getSignInIntent();
+            startActivityForResult(call, signInIntent, "handleSignInResult");
+        } catch (Throwable t) {
+            call.reject("Google sign-in unavailable: " + t.getMessage());
         }
-        Intent signInIntent = getSignInClient().getSignInIntent();
-        startActivityForResult(call, signInIntent, "handleSignInResult");
     }
 
     @ActivityCallback
     private void handleSignInResult(PluginCall call, ActivityResult result) {
         if (call == null) return;
-        if (result.getResultCode() != Activity.RESULT_OK && result.getData() == null) {
+        if (result == null || (result.getResultCode() != Activity.RESULT_OK && result.getData() == null)) {
             call.reject("Google sign-in was cancelled.");
             return;
         }
@@ -120,57 +124,79 @@ public class JivanGoogleDrivePlugin extends Plugin {
             call.resolve(buildAccountPayload(account, true));
         } catch (ApiException e) {
             call.reject("Google sign-in failed (code " + e.getStatusCode() + "): " + e.getMessage());
-        } catch (Exception e) {
+        } catch (Throwable e) {
             call.reject("Google sign-in failed: " + e.getMessage());
         }
     }
 
     @PluginMethod
     public void silentReAuth(PluginCall call) {
-        GoogleSignInAccount existing = GoogleSignIn.getLastSignedInAccount(getContext());
-        if (existing != null && hasAppDataPermission(existing)) {
-            call.resolve(buildAccountPayload(existing, true));
-            return;
+        try {
+            GoogleSignInAccount existing = GoogleSignIn.getLastSignedInAccount(getContext());
+            if (existing != null && hasAppDataPermission(existing)) {
+                call.resolve(buildAccountPayload(existing, true));
+                return;
+            }
+            getSignInClient().silentSignIn()
+                    .addOnSuccessListener(account -> {
+                        try {
+                            if (account != null && hasAppDataPermission(account)) {
+                                call.resolve(buildAccountPayload(account, true));
+                            } else {
+                                call.resolve(buildAccountPayload(null, false));
+                            }
+                        } catch (Throwable t) {
+                            call.resolve(buildAccountPayload(null, false));
+                        }
+                    })
+                    .addOnFailureListener(err -> call.resolve(buildAccountPayload(null, false)));
+        } catch (Throwable t) {
+            call.resolve(buildAccountPayload(null, false));
         }
-        getSignInClient().silentSignIn()
-                .addOnSuccessListener(account -> {
-                    if (account != null && hasAppDataPermission(account)) {
-                        call.resolve(buildAccountPayload(account, true));
-                    } else {
-                        call.resolve(buildAccountPayload(null, false));
-                    }
-                })
-                .addOnFailureListener(err -> call.resolve(buildAccountPayload(null, false)));
     }
 
     @PluginMethod
     public void disconnect(PluginCall call) {
         Context ctx = getContext();
-        GoogleSignInAccount existing = GoogleSignIn.getLastSignedInAccount(ctx);
+        GoogleSignInAccount existing = null;
+        try {
+            existing = GoogleSignIn.getLastSignedInAccount(ctx);
+        } catch (Throwable ignored) {
+        }
 
         // Cancel WorkManager periodic sync immediately
         try {
             WorkManager.getInstance(ctx).cancelUniqueWork(JivanDriveSyncWorker.UNIQUE_WORK_NAME);
-        } catch (Exception ignored) {
+        } catch (Throwable ignored) {
         }
 
         // Remove cached background payload and metadata
         try {
             File pending = new File(ctx.getFilesDir(), JivanDriveSyncWorker.CACHED_ENVELOPE_FILE);
             if (pending.exists()) pending.delete();
-        } catch (Exception ignored) {
+        } catch (Throwable ignored) {
         }
-        JivanDriveAppDataClient.clearSyncMetadata(ctx);
+        try {
+            JivanDriveAppDataClient.clearSyncMetadata(ctx);
+        } catch (Throwable ignored) {
+        }
 
+        final GoogleSignInAccount accountToClear = existing;
         ioExecutor.execute(() -> {
-            JivanDriveAppDataClient.clearCachedToken(ctx, existing);
-            getSignInClient().revokeAccess().addOnCompleteListener(revokeTask ->
-                    getSignInClient().signOut().addOnCompleteListener(signOutTask -> {
-                        JSObject ret = new JSObject();
-                        ret.put("disconnected", true);
-                        call.resolve(ret);
-                    })
-            );
+            try {
+                JivanDriveAppDataClient.clearCachedToken(ctx, accountToClear);
+                getSignInClient().revokeAccess().addOnCompleteListener(revokeTask ->
+                        getSignInClient().signOut().addOnCompleteListener(signOutTask -> {
+                            JSObject ret = new JSObject();
+                            ret.put("disconnected", true);
+                            call.resolve(ret);
+                        })
+                );
+            } catch (Throwable t) {
+                JSObject ret = new JSObject();
+                ret.put("disconnected", true);
+                call.resolve(ret);
+            }
         });
     }
 
@@ -182,16 +208,22 @@ public class JivanGoogleDrivePlugin extends Plugin {
             return;
         }
         Context ctx = getContext();
-        GoogleSignInAccount account = GoogleSignIn.getLastSignedInAccount(ctx);
+        GoogleSignInAccount account;
+        try {
+            account = GoogleSignIn.getLastSignedInAccount(ctx);
+        } catch (Throwable t) {
+            account = null;
+        }
         if (account == null || !hasAppDataPermission(account)) {
             call.reject("Google Drive is not connected.");
             return;
         }
 
+        final GoogleSignInAccount validAccount = account;
         ioExecutor.execute(() -> {
             try {
                 writePendingPayload(ctx, payloadJson);
-                String token = JivanDriveAppDataClient.acquireAccessToken(ctx, account);
+                String token = JivanDriveAppDataClient.acquireAccessToken(ctx, validAccount);
                 JivanDriveAppDataClient.SyncFileInfo info =
                         JivanDriveAppDataClient.uploadBackup(ctx, token, payloadJson);
 
@@ -200,7 +232,7 @@ public class JivanGoogleDrivePlugin extends Plugin {
                 ret.put("lastModified", info.lastModified);
                 ret.put("fileSizeBytes", info.fileSizeBytes);
                 call.resolve(ret);
-            } catch (Exception e) {
+            } catch (Throwable e) {
                 call.reject("Drive backup failed: " + e.getMessage());
             }
         });
@@ -209,15 +241,21 @@ public class JivanGoogleDrivePlugin extends Plugin {
     @PluginMethod
     public void restoreFromDrive(PluginCall call) {
         Context ctx = getContext();
-        GoogleSignInAccount account = GoogleSignIn.getLastSignedInAccount(ctx);
+        GoogleSignInAccount account;
+        try {
+            account = GoogleSignIn.getLastSignedInAccount(ctx);
+        } catch (Throwable t) {
+            account = null;
+        }
         if (account == null || !hasAppDataPermission(account)) {
             call.reject("Google Drive is not connected.");
             return;
         }
 
+        final GoogleSignInAccount validAccount = account;
         ioExecutor.execute(() -> {
             try {
-                String token = JivanDriveAppDataClient.acquireAccessToken(ctx, account);
+                String token = JivanDriveAppDataClient.acquireAccessToken(ctx, validAccount);
                 JivanDriveAppDataClient.RestoreResult result =
                         JivanDriveAppDataClient.downloadBackup(ctx, token);
 
@@ -227,7 +265,7 @@ public class JivanGoogleDrivePlugin extends Plugin {
                 ret.put("lastModified", result.lastModified);
                 ret.put("fileSizeBytes", result.fileSizeBytes);
                 call.resolve(ret);
-            } catch (Exception e) {
+            } catch (Throwable e) {
                 call.reject("Drive restore failed: " + e.getMessage());
             }
         });
@@ -236,7 +274,12 @@ public class JivanGoogleDrivePlugin extends Plugin {
     @PluginMethod
     public void getLastSyncInfo(PluginCall call) {
         Context ctx = getContext();
-        GoogleSignInAccount account = GoogleSignIn.getLastSignedInAccount(ctx);
+        GoogleSignInAccount account;
+        try {
+            account = GoogleSignIn.getLastSignedInAccount(ctx);
+        } catch (Throwable t) {
+            account = null;
+        }
         if (account == null || !hasAppDataPermission(account)) {
             JSObject ret = new JSObject();
             ret.put("exists", false);
@@ -244,9 +287,10 @@ public class JivanGoogleDrivePlugin extends Plugin {
             return;
         }
 
+        final GoogleSignInAccount validAccount = account;
         ioExecutor.execute(() -> {
             try {
-                String token = JivanDriveAppDataClient.acquireAccessToken(ctx, account);
+                String token = JivanDriveAppDataClient.acquireAccessToken(ctx, validAccount);
                 JivanDriveAppDataClient.SyncFileInfo info = JivanDriveAppDataClient.findBackupFile(token);
                 JSObject ret = new JSObject();
                 if (info == null) {
@@ -258,7 +302,7 @@ public class JivanGoogleDrivePlugin extends Plugin {
                     ret.put("fileSizeBytes", info.fileSizeBytes);
                 }
                 call.resolve(ret);
-            } catch (Exception e) {
+            } catch (Throwable e) {
                 // Fall back to locally cached metadata if temporarily offline
                 SharedPreferences prefs = ctx.getSharedPreferences(
                         JivanDriveAppDataClient.PREFS_NAME,
@@ -286,38 +330,41 @@ public class JivanGoogleDrivePlugin extends Plugin {
         boolean onlyWhileCharging = call.getBoolean("onlyWhileCharging", false);
         Context ctx = getContext();
 
-        SharedPreferences prefs = ctx.getSharedPreferences(
-                JivanDriveAppDataClient.PREFS_NAME,
-                Context.MODE_PRIVATE
-        );
-        prefs.edit()
-                .putInt(JivanDriveAppDataClient.KEY_AUTO_INTERVAL, intervalMinutes)
-                .putBoolean("backup_wifi_only", wifiOnly)
-                .putBoolean("backup_only_charging", onlyWhileCharging)
-                .apply();
-
-        WorkManager wm = WorkManager.getInstance(ctx);
-        if (intervalMinutes <= 0) {
-            wm.cancelUniqueWork(JivanDriveSyncWorker.UNIQUE_WORK_NAME);
-        } else {
-            long delayMinutes = Math.max(15L, intervalMinutes);
-            Constraints constraints = new Constraints.Builder()
-                    .setRequiredNetworkType(wifiOnly ? NetworkType.UNMETERED : NetworkType.CONNECTED)
-                    .setRequiresCharging(onlyWhileCharging)
-                    .build();
-
-            androidx.work.OneTimeWorkRequest workRequest = new androidx.work.OneTimeWorkRequest.Builder(
-                    JivanDriveSyncWorker.class
-            )
-                    .setInitialDelay(delayMinutes, TimeUnit.MINUTES)
-                    .setConstraints(constraints)
-                    .build();
-
-            wm.enqueueUniqueWork(
-                    JivanDriveSyncWorker.UNIQUE_WORK_NAME,
-                    androidx.work.ExistingWorkPolicy.REPLACE,
-                    workRequest
+        try {
+            SharedPreferences prefs = ctx.getSharedPreferences(
+                    JivanDriveAppDataClient.PREFS_NAME,
+                    Context.MODE_PRIVATE
             );
+            prefs.edit()
+                    .putInt(JivanDriveAppDataClient.KEY_AUTO_INTERVAL, intervalMinutes)
+                    .putBoolean("backup_wifi_only", wifiOnly)
+                    .putBoolean("backup_only_charging", onlyWhileCharging)
+                    .apply();
+
+            WorkManager wm = WorkManager.getInstance(ctx);
+            if (intervalMinutes <= 0) {
+                wm.cancelUniqueWork(JivanDriveSyncWorker.UNIQUE_WORK_NAME);
+            } else {
+                long delayMinutes = Math.max(15L, intervalMinutes);
+                Constraints constraints = new Constraints.Builder()
+                        .setRequiredNetworkType(wifiOnly ? NetworkType.UNMETERED : NetworkType.CONNECTED)
+                        .setRequiresCharging(onlyWhileCharging)
+                        .build();
+
+                androidx.work.OneTimeWorkRequest workRequest = new androidx.work.OneTimeWorkRequest.Builder(
+                        JivanDriveSyncWorker.class
+                )
+                        .setInitialDelay(delayMinutes, TimeUnit.MINUTES)
+                        .setConstraints(constraints)
+                        .build();
+
+                wm.enqueueUniqueWork(
+                        JivanDriveSyncWorker.UNIQUE_WORK_NAME,
+                        androidx.work.ExistingWorkPolicy.REPLACE,
+                        workRequest
+                );
+            }
+        } catch (Throwable ignored) {
         }
 
         JSObject ret = new JSObject();

@@ -405,6 +405,27 @@ public class JivanLocalBackupBridge {
         }
     }
 
+    /**
+     * Compatibility alias for unifiedSyncBackupEngine.ts:
+     * Saves a relative path such as "JivanOS/Backups/JivanOS-YYYY-MM-DD-HHmm.json" into Documents/JivanOS/Backups.
+     */
+    @JavascriptInterface
+    public synchronized String saveExternalFile(String relativePath, String jsonContent) {
+        String filename = relativePath;
+        if (filename != null && filename.contains("/")) {
+            filename = filename.substring(filename.lastIndexOf('/') + 1);
+        }
+        return saveBackupToDocumentsFolder(filename, jsonContent);
+    }
+
+    /**
+     * Compatibility alias for slot-based snapshot saving from JS bridge.
+     */
+    @JavascriptInterface
+    public synchronized String saveSnapshot(int slot, String jsonContent) {
+        return saveAutoSnapshot(jsonContent);
+    }
+
     private String sanitizeBackupFilename(String raw) {
         String name = (raw == null || raw.trim().isEmpty())
                 ? "JivanOS-backup.json"

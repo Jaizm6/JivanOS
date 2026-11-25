@@ -106,6 +106,9 @@ export const TelegramSyncSection: React.FC<TelegramSyncSectionProps> = ({
     return JSON.parse(raw);
   }, [exportEncryptedJSON]);
 
+  const getLocalAppDataObjectRef = React.useRef(getLocalAppDataObject);
+  getLocalAppDataObjectRef.current = getLocalAppDataObject;
+
   useEffect(() => {
     const interval = window.setInterval(() => setRelativeTick((t) => t + 1), 30000);
     return () => window.clearInterval(interval);
@@ -127,7 +130,7 @@ export const TelegramSyncSection: React.FC<TelegramSyncSectionProps> = ({
     return () => window.removeEventListener(TELEGRAM_SYNC_STATE_EVENT, handleUpdate);
   }, []);
 
-  // Silent re-auth check + auto-sync timer rehydration on mount
+  // Silent re-auth check + auto-sync timer rehydration once on mount
   useEffect(() => {
     let active = true;
     const existing = getStoredTelegramAuth();
@@ -142,7 +145,7 @@ export const TelegramSyncSection: React.FC<TelegramSyncSectionProps> = ({
           telegramSyncProvider.setAutoSync(
             true,
             existing.autoSyncIntervalMinutes,
-            getLocalAppDataObject
+            () => getLocalAppDataObjectRef.current()
           );
         }
       })
@@ -151,7 +154,7 @@ export const TelegramSyncSection: React.FC<TelegramSyncSectionProps> = ({
     return () => {
       active = false;
     };
-  }, [getLocalAppDataObject]);
+  }, []);
 
   const handleVerifyBot = async () => {
     if (isVerifying || isConnecting) return;
@@ -173,7 +176,7 @@ export const TelegramSyncSection: React.FC<TelegramSyncSectionProps> = ({
       setSyncStatus('syncing');
       setErrorMessage(null);
       try {
-        let localData = getLocalAppDataObject();
+        let localData = getLocalAppDataObjectRef.current();
         const pulled = await telegramSyncProvider.syncPull(null);
 
         if (pulled.found && pulled.envelope && pulled.envelope.data) {
@@ -188,14 +191,14 @@ export const TelegramSyncSection: React.FC<TelegramSyncSectionProps> = ({
 
         // Also keep unified sync settings updated if Telegram is active or no active provider was chosen yet
         try {
-          const rawSync = localStorage.getItem('jivanos_unified_sync_settings_v2');
+          const rawSync = localStorage.getItem('jivanos_unified_sync_settings_v1');
           const parsedSync = rawSync ? JSON.parse(rawSync) : {};
           const nextActive =
             !parsedSync.activeProvider || parsedSync.activeProvider === 'none'
               ? 'telegram'
               : parsedSync.activeProvider;
           localStorage.setItem(
-            'jivanos_unified_sync_settings_v2',
+            'jivanos_unified_sync_settings_v1',
             JSON.stringify({
               ...parsedSync,
               activeProvider: nextActive,
@@ -219,7 +222,7 @@ export const TelegramSyncSection: React.FC<TelegramSyncSectionProps> = ({
         }
       }
     },
-    [getLocalAppDataObject, replaceAllAppDataFromBackup]
+    [replaceAllAppDataFromBackup]
   );
 
   const runConnectAndDetect = async () => {

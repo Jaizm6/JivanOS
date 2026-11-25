@@ -877,10 +877,14 @@ const AppContent: React.FC = () => {
 
 export default function App() {
   return (
-    <AppProvider>
-      <ActiveSessionProvider>
-        <AppContent />
-      </ActiveSessionProvider>
-    </AppProvider>
+    <ErrorBoundary fallbackTitle="JivanOS Recovery">
+      <AppProvider>
+        <ActiveSessionProvider>
+          <ErrorBoundary fallbackTitle="JivanOS Workspace Recovery">
+            <AppContent />
+          </ErrorBoundary>
+        </ActiveSessionProvider>
+      </AppProvider>
+    </ErrorBoundary>
   );
 }

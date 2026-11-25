@@ -752,7 +752,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [medications, setMedications] = useState<Medication[]>(() => {
     try {
       const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_meds`);
-      return saved ? JSON.parse(saved) : initialMedications;
+      if (!saved) return initialMedications;
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed) ? parsed.filter(Boolean) : initialMedications;
     } catch {
       return initialMedications;
     }
@@ -761,16 +763,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [doseLogs, setDoseLogs] = useState<DoseLog[]>(() => {
     try {
       const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_doselogs`);
-      return saved ? JSON.parse(saved) : [
-        {
-          id: 'log_init_1',
-          medicationId: 'med_1',
-          medicationName: 'Vitamin D3 & K2',
-          scheduledTime: '08:30',
-          loggedAt: new Date(Date.now() - 3600000 * 3).toISOString(),
-          status: 'taken',
-        },
-      ];
+      if (!saved) {
+        return [
+          {
+            id: 'log_init_1',
+            medicationId: 'med_1',
+            medicationName: 'Vitamin D3 & K2',
+            scheduledTime: '08:30',
+            loggedAt: new Date(Date.now() - 3600000 * 3).toISOString(),
+            status: 'taken',
+          },
+        ];
+      }
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
     } catch {
       return [];
     }
@@ -781,13 +787,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_hydration`);
       if (saved) {
         const parsed = JSON.parse(saved);
+        if (!parsed || typeof parsed !== 'object') return initialHydration;
         if (!parsed.targetMl || parsed.targetMl === 2500) {
           parsed.targetMl = 3000;
         }
-        const sum = (parsed.todayLogs || []).reduce((acc: number, curr: any) => acc + (curr.amountMl || 0), 0);
-        if (sum < 0) {
-          parsed.todayLogs = [];
-        }
+        const logs = Array.isArray(parsed.todayLogs) ? parsed.todayLogs.filter(Boolean) : [];
+        const sum = logs.reduce((acc: number, curr: any) => acc + (curr?.amountMl || 0), 0);
+        parsed.todayLogs = sum < 0 ? [] : logs;
         return parsed;
       }
       return initialHydration;
@@ -799,7 +805,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [inboxItems, setInboxItems] = useState<InboxItem[]>(() => {
     try {
       const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_inbox`);
-      return saved ? JSON.parse(saved) : initialInboxItems;
+      if (!saved) return initialInboxItems;
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed) ? parsed.filter(Boolean) : initialInboxItems;
     } catch {
       return initialInboxItems;
     }
@@ -809,7 +817,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     try {
       const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_tasks`);
       if (saved) {
-        const parsed: TaskItem[] = JSON.parse(saved);
+        const raw = JSON.parse(saved);
+        const parsed: TaskItem[] = Array.isArray(raw) ? raw.filter(Boolean) : [];
+        if (!Array.isArray(raw)) return initialTasks;
         return parsed.map(t => {
           const init = initialTasks.find(it => it.id === t.id);
           const subtasks =
@@ -820,6 +830,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               : init?.subtasks || [];
           return {
             ...t,
+            title: t.title || 'Untitled Task',
             subtasks,
             checklist: subtasks,
           };
@@ -834,7 +845,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [listGroups, setListGroups] = useState<ListGroup[]>(() => {
     try {
       const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_list_groups`);
-      return saved ? JSON.parse(saved) : initialListGroups;
+      if (!saved) return initialListGroups;
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed) ? parsed.filter(Boolean) : initialListGroups;
     } catch {
       return initialListGroups;
     }
@@ -843,7 +856,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [todoLists, setTodoLists] = useState<TodoList[]>(() => {
     try {
       const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_todo_lists`);
-      return saved ? JSON.parse(saved) : initialTodoLists;
+      if (!saved) return initialTodoLists;
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed) ? parsed.filter(Boolean) : initialTodoLists;
     } catch {
       return initialTodoLists;
     }
@@ -854,7 +869,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [scheduleItems, setScheduleItems] = useState<ScheduleItem[]>(() => {
     try {
       const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_schedule`);
-      return saved ? JSON.parse(saved) : initialScheduleItems;
+      if (!saved) return initialScheduleItems;
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed) ? parsed.filter(Boolean) : initialScheduleItems;
     } catch {
       return initialScheduleItems;
     }
@@ -953,7 +970,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [goals, setGoals] = useState<Goal[]>(() => {
     try {
       const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_goals`);
-      return saved ? JSON.parse(saved) : initialGoals;
+      if (!saved) return initialGoals;
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed) ? parsed.filter(Boolean) : initialGoals;
     } catch {
       return initialGoals;
     }
@@ -962,7 +981,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [tags, setTags] = useState<AppTag[]>(() => {
     try {
       const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_tags`);
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed.filter(Boolean);
+      }
       return [
         { id: 'tag-work', name: 'work', color: '#3b82f6', description: 'Professional & engineering tasks' },
         { id: 'tag-personal', name: 'personal', color: '#10b981', description: 'Personal & lifestyle goals' },
@@ -1001,8 +1023,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     try {
       const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_bills`);
       if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
+        const raw = JSON.parse(saved);
+        const parsed = Array.isArray(raw) ? raw.filter(Boolean) : [];
+        if (parsed.length > 0) {
           // If all saved bills are old US Dollar bills, auto-migrate to initialBills with Rupee
           const isAllOldDollar = parsed.every((b: Bill) => b.currency === '$' || !b.currency);
           if (isAllOldDollar) {
@@ -1031,7 +1054,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [appLock, setAppLock] = useState<AppLockConfig>(() => {
     try {
       const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_applock`);
-      return saved ? JSON.parse(saved) : initialAppLock;
+      if (!saved) return initialAppLock;
+      const parsed = JSON.parse(saved);
+      return parsed && typeof parsed === 'object' ? { ...initialAppLock, ...parsed } : initialAppLock;
     } catch {
       return initialAppLock;
     }
@@ -1040,24 +1065,27 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [habits, setHabits] = useState<Habit[]>(() => {
     try {
       const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_habits`);
-      const rawList = saved ? JSON.parse(saved) : initialHabits;
-      return (rawList || []).map((h: Habit) => {
-        const normalizedTags = (h.tags && h.tags.length > 0)
+      const parsed = saved ? JSON.parse(saved) : initialHabits;
+      const rawList: Habit[] = Array.isArray(parsed) ? parsed.filter(Boolean) : initialHabits;
+      return rawList.map((h: Habit) => {
+        const habitName = typeof h.name === 'string' ? h.name : 'Habit';
+        const normalizedTags = (Array.isArray(h.tags) && h.tags.length > 0)
           ? h.tags
           : [h.category ? (h.category.charAt(0).toUpperCase() + h.category.slice(1)) : 'General'];
         const { currentStreak, bestStreak } = calculateHabitStreak(h.completionHistory || {});
         const baseHabit = {
           ...h,
+          name: habitName,
           tags: normalizedTags,
           cardTheme: h.cardTheme || 'clean',
           currentStreak: currentStreak,
           bestStreak: Math.max(h.bestStreak || 0, bestStreak),
         };
         if (
-          h.name.includes('Morning Hydration') ||
-          h.name.includes('Drink Water - Hydration') ||
-          h.name.includes('Drink Water (3000ml)') ||
-          h.name.toLowerCase() === 'hydration'
+          habitName.includes('Morning Hydration') ||
+          habitName.includes('Drink Water - Hydration') ||
+          habitName.includes('Drink Water (3000ml)') ||
+          habitName.toLowerCase() === 'hydration'
         ) {
           return {
             ...baseHabit,
@@ -1079,9 +1107,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [routines, setRoutines] = useState<Routine[]>(() => {
     const todayKey = formatLocalDate();
     const normalizeRoutines = (list: Routine[]): Routine[] =>
-      list.map(r => ({
+      (Array.isArray(list) ? list.filter(Boolean) : []).map(r => ({
         ...r,
-        items: (r.items || []).map(item => {
+        items: (Array.isArray(r.items) ? r.items.filter(Boolean) : []).map(item => {
           if (item.completionHistory) return item;
           const history: Record<string, boolean> = item.completed ? { [todayKey]: true } : {};
           const { currentStreak, bestStreak } = calculateHabitStreak(history);
@@ -1099,7 +1127,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         return [];
       }
       const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_routines`);
-      return normalizeRoutines(saved ? JSON.parse(saved) : initialRoutines);
+      const parsed = saved ? JSON.parse(saved) : initialRoutines;
+      return normalizeRoutines(Array.isArray(parsed) ? parsed : initialRoutines);
     } catch {
       return normalizeRoutines(initialRoutines);
     }
@@ -1279,7 +1308,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     try {
       const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_widgets`);
       if (saved) {
-        const parsed: DashboardWidgetConfig[] = JSON.parse(saved);
+        const raw = JSON.parse(saved);
+        const parsed: DashboardWidgetConfig[] = Array.isArray(raw) ? raw.filter(Boolean) : [];
+        if (parsed.length === 0) return defaultWidgets;
         const existingIds = new Set(parsed.map(w => w.id));
         const missing = defaultWidgets.filter(dw => !existingIds.has(dw.id));
         if (missing.length > 0) {
@@ -1334,7 +1365,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [notificationHistory, setNotificationHistory] = useState<AppNotification[]>(() => {
     try {
       const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_notif_history`);
-      return saved ? JSON.parse(saved) : [
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed.filter(Boolean);
+      }
+      return [
         {
           id: 'notif_hist_welcome',
           title: 'Welcome to Jivan',
@@ -1356,7 +1391,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [alarmHistory, setAlarmHistory] = useState<AlarmHistoryItem[]>(() => {
     try {
       const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_alarm_history`);
-      return saved ? JSON.parse(saved) : [];
+      if (!saved) return [];
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
     } catch {
       return [];
     }
@@ -1412,7 +1449,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_deleted_ids`);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed.slice(-500);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((id): id is string => typeof id === 'string' && id.length > 0).slice(-500);
+        }
+        if (parsed && typeof parsed === 'object') {
+          return Object.values(parsed)
+            .filter((id): id is string => typeof id === 'string' && id.length > 0)
+            .slice(-500);
+        }
       }
     } catch {}
     return [];
@@ -6033,6 +6077,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     });
   };
 
+  compilePayloadRef.current = compilePayload;
   useEffect(() => {
     compilePayloadRef.current = compilePayload;
   });
@@ -6549,9 +6594,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
-  const exportEncryptedJSON = () => {
-    return compilePayload();
-  };
+  const exportEncryptedJSON = useCallback(() => {
+    return compilePayloadRef.current();
+  }, []);
 
   const importBackupJSON = (jsonStr: string) => {
     try {
@@ -6571,33 +6616,38 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           return merged;
         });
       }
-      if (Array.isArray(data.deletedIds)) {
-        setDeletedIds(data.deletedIds);
+      if (data.deletedIds) {
+        const normalizedDeletedIds = Array.isArray(data.deletedIds)
+          ? data.deletedIds.filter((id: unknown): id is string => typeof id === 'string' && id.length > 0)
+          : typeof data.deletedIds === 'object'
+          ? Object.values(data.deletedIds).filter((id: unknown): id is string => typeof id === 'string' && id.length > 0)
+          : [];
+        setDeletedIds(normalizedDeletedIds);
         try {
-          localStorage.setItem(`${LOCAL_STORAGE_KEY}_deleted_ids`, JSON.stringify(data.deletedIds));
+          localStorage.setItem(`${LOCAL_STORAGE_KEY}_deleted_ids`, JSON.stringify(normalizedDeletedIds));
         } catch {}
       }
-      if (data.medications) {
+      if (Array.isArray(data.medications)) {
         setMedications(data.medications);
         try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_meds`, JSON.stringify(data.medications)); } catch {}
       }
-      if (data.tasks) {
+      if (Array.isArray(data.tasks)) {
         setTasks(data.tasks);
         try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_tasks`, JSON.stringify(data.tasks)); } catch {}
       }
-      if (data.goals) {
+      if (Array.isArray(data.goals)) {
         setGoals(data.goals);
         try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_goals`, JSON.stringify(data.goals)); } catch {}
       }
-      if (data.bills) {
+      if (Array.isArray(data.bills)) {
         setBills(data.bills);
         try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_bills`, JSON.stringify(data.bills)); } catch {}
       }
-      if (data.appLock) {
+      if (data.appLock && typeof data.appLock === 'object') {
         setAppLock(data.appLock);
         try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_applock`, JSON.stringify(data.appLock)); } catch {}
       }
-      if (data.hydration) {
+      if (data.hydration && typeof data.hydration === 'object') {
         setHydration(data.hydration);
         try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_hydration`, JSON.stringify(data.hydration)); } catch {}
       }
@@ -6620,30 +6670,30 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           localStorage.setItem(`${LOCAL_STORAGE_KEY}_routines_merged_to_habits_v1`, 'true');
         } catch {}
       }
-      if (data.widgets) {
+      if (Array.isArray(data.widgets)) {
         setWidgets(data.widgets);
         try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_widgets`, JSON.stringify(data.widgets)); } catch {}
       }
-      if (data.doseLogs) {
+      if (Array.isArray(data.doseLogs)) {
         setDoseLogs(data.doseLogs);
         try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_doselogs`, JSON.stringify(data.doseLogs)); } catch {}
       }
-      if (data.todoLists) {
+      if (Array.isArray(data.todoLists)) {
         setTodoLists(data.todoLists);
         try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_todo_lists`, JSON.stringify(data.todoLists)); } catch {}
       }
-      if (data.listGroups) {
+      if (Array.isArray(data.listGroups)) {
         setListGroups(data.listGroups);
         try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_list_groups`, JSON.stringify(data.listGroups)); } catch {}
       }
-      if (data.tags) {
+      if (Array.isArray(data.tags)) {
         setTags(data.tags);
         try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_tags`, JSON.stringify(data.tags)); } catch {}
       }
-      if (data.scheduleItems) {
+      if (Array.isArray(data.scheduleItems)) {
         setScheduleItems(data.scheduleItems);
         try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_schedule`, JSON.stringify(data.scheduleItems)); } catch {}
-      } else if (data.schedule) {
+      } else if (Array.isArray(data.schedule)) {
         setScheduleItems(data.schedule);
         try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_schedule`, JSON.stringify(data.schedule)); } catch {}
       }
@@ -6736,7 +6786,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setProfile(nextProfile);
       try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_profile`, JSON.stringify(nextProfile)); } catch {}
 
-      const nextDeletedIds: string[] = Array.isArray(data.deletedIds) ? data.deletedIds : [];
+      const nextDeletedIds: string[] = Array.isArray(data.deletedIds)
+        ? data.deletedIds.filter((id: unknown): id is string => typeof id === 'string' && id.length > 0)
+        : data.deletedIds && typeof data.deletedIds === 'object'
+        ? Object.values(data.deletedIds).filter((id: unknown): id is string => typeof id === 'string' && id.length > 0)
+        : [];
       setDeletedIds(nextDeletedIds);
       try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_deleted_ids`, JSON.stringify(nextDeletedIds)); } catch {}
 
