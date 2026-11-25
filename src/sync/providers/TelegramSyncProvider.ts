@@ -978,9 +978,10 @@ export class TelegramSyncProvider implements SyncProvider {
 
   /**
    * Telegram as SYNC (Pull):
-   * - Never calls getUpdates.
    * - Calls getChat, reads pinned_message, compares caption's updatedAt with localLastSyncedAt,
    *   and downloads via getFile ONLY if newer.
+   * - If no pinned_message exists yet (e.g. first migration from unpinned backup), falls back
+   *   once to the latest backup document so the merged state can be pinned on push.
    */
   async syncPull(localLastSyncedAt?: string | null): Promise<SyncRestoreResult & { skippedNotNewer?: boolean }> {
     const stored = getStoredTelegramAuth();
@@ -989,31 +990,52 @@ export class TelegramSyncProvider implements SyncProvider {
       throw new Error('Connect Telegram first before syncing.');
     }
 
-    const chatInfo = await telegramApiJson<{
-      pinned_message?: {
-        message_id?: number;
-        date?: number;
-        edit_date?: number;
-        caption?: string;
-        document?: {
-          file_id?: string;
-          file_name?: string;
-          file_size?: number;
-        };
-      };
-    }>(botToken, 'getChat', { params: { chat_id: stored.chatId } });
+    let targetFileId: string | null = null;
+    let targetMsgId: number | null = null;
+    let targetFileSize = 0;
+    let remoteIso: string | null = null;
 
-    const pinned = chatInfo?.pinned_message;
-    const pinnedDoc = pinned?.document;
-    if (!pinned || !pinnedDoc?.file_id) {
-      return { found: false, envelope: null, lastModified: null, fileSizeBytes: 0 };
+    try {
+      const chatInfo = await telegramApiJson<{
+        pinned_message?: {
+          message_id?: number;
+          date?: number;
+          edit_date?: number;
+          caption?: string;
+          document?: {
+            file_id?: string;
+            file_name?: string;
+            file_size?: number;
+          };
+        };
+      }>(botToken, 'getChat', { params: { chat_id: stored.chatId } });
+
+      const pinned = chatInfo?.pinned_message;
+      const pinnedDoc = pinned?.document;
+      if (pinned && pinnedDoc?.file_id) {
+        targetFileId = pinnedDoc.file_id;
+        targetMsgId = typeof pinned.message_id === 'number' ? pinned.message_id : null;
+        targetFileSize = Number(pinnedDoc.file_size || 0);
+        const captionIso = parseTimestampFromCaption(pinned.caption);
+        const fallbackEpoch = pinned.edit_date || pinned.date;
+        remoteIso =
+          captionIso ||
+          (typeof fallbackEpoch === 'number' ? new Date(fallbackEpoch * 1000).toISOString() : null);
+      }
+    } catch {
+      // Fall through to resolveLatestTelegramBackupDoc if getChat failed
     }
 
-    const captionIso = parseTimestampFromCaption(pinned.caption);
-    const fallbackEpoch = pinned.edit_date || pinned.date;
-    const remoteIso =
-      captionIso ||
-      (typeof fallbackEpoch === 'number' ? new Date(fallbackEpoch * 1000).toISOString() : null);
+    if (!targetFileId) {
+      const fallbackDoc = await resolveLatestTelegramBackupDoc(botToken, stored);
+      if (!fallbackDoc?.fileId) {
+        return { found: false, envelope: null, lastModified: null, fileSizeBytes: 0 };
+      }
+      targetFileId = fallbackDoc.fileId;
+      targetMsgId = fallbackDoc.messageId;
+      targetFileSize = fallbackDoc.fileSizeBytes;
+      remoteIso = fallbackDoc.timestampIso;
+    }
 
     if (localLastSyncedAt && remoteIso) {
       const localMs = Date.parse(localLastSyncedAt);
@@ -1023,7 +1045,7 @@ export class TelegramSyncProvider implements SyncProvider {
           found: true,
           envelope: null,
           lastModified: remoteIso,
-          fileSizeBytes: Number(pinnedDoc.file_size || stored.lastFileSizeBytes || 0),
+          fileSizeBytes: Number(targetFileSize || stored.lastFileSizeBytes || 0),
           skippedNotNewer: true,
         };
       }
@@ -1032,7 +1054,7 @@ export class TelegramSyncProvider implements SyncProvider {
     const fileMeta = await telegramApiJson<{ file_path?: string; file_size?: number }>(
       botToken,
       'getFile',
-      { params: { file_id: pinnedDoc.file_id } }
+      { params: { file_id: targetFileId } }
     );
     if (!fileMeta?.file_path) {
       return { found: false, envelope: null, lastModified: null, fileSizeBytes: 0 };
@@ -1041,18 +1063,18 @@ export class TelegramSyncProvider implements SyncProvider {
     const rawText = await downloadTelegramFileText(botToken, fileMeta.file_path);
     const envelope = parseDriveBackupEnvelope(rawText);
     if (!envelope) {
-      throw new Error('Pinned Telegram sync file is not a valid JivanOS JSON envelope.');
+      throw new Error('Telegram sync file is not a valid JivanOS JSON envelope.');
     }
 
     const resolvedSize = Number(
-      fileMeta.file_size || pinnedDoc.file_size || new Blob([rawText]).size
+      fileMeta.file_size || targetFileSize || new Blob([rawText]).size
     );
     const resolvedTimestamp = remoteIso || envelope.updatedAt;
 
     patchStoredTelegramAuth({
-      lastBackupFileId: pinnedDoc.file_id,
-      lastBackupMessageId: typeof pinned.message_id === 'number' ? pinned.message_id : stored.lastBackupMessageId,
-      pinnedSyncMessageId: typeof pinned.message_id === 'number' ? pinned.message_id : stored.pinnedSyncMessageId,
+      lastBackupFileId: targetFileId,
+      lastBackupMessageId: targetMsgId ?? stored.lastBackupMessageId,
+      pinnedSyncMessageId: targetMsgId ?? stored.pinnedSyncMessageId,
       lastSyncedAt: resolvedTimestamp,
       lastFileSizeBytes: resolvedSize,
       lastError: null,

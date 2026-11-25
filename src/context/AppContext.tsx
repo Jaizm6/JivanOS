@@ -169,6 +169,7 @@ interface AppContextType {
 
   // Inbox & Universal Capture
   inboxItems: InboxItem[];
+  deletedIds: string[];
   addInboxItem: (item: Omit<InboxItem, 'id' | 'createdAt'>) => void;
   updateInboxItem: (id: string, updates: Partial<InboxItem>) => void;
   deleteInboxItem: (id: string) => void;
@@ -2870,16 +2871,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Medication handlers
   const addMedication = (med: Omit<Medication, 'id'>) => {
+    const nowIso = new Date().toISOString();
     const newMed: Medication = {
       ...med,
       id: `med_${Date.now()}`,
+      updatedAt: nowIso,
     };
     setMedications(prev => [newMed, ...prev]);
     pushNotification(`Medication Added`, `${newMed.name} added to schedule.`, 'medication');
   };
 
   const updateMedication = (med: Medication) => {
-    setMedications(prev => prev.map(m => (m.id === med.id ? med : m)));
+    const nowIso = new Date().toISOString();
+    setMedications(prev =>
+      prev.map(m => (m.id === med.id ? { ...med, updatedAt: nowIso } : m))
+    );
   };
 
   const deleteMedication = (id: string) => {
@@ -2891,13 +2897,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const targetMed = medications.find(m => m.id === medicationId);
     if (!targetMed) return;
 
+    const nowIso = new Date().toISOString();
     const newLog: DoseLog = {
       id: `log_${Date.now()}`,
       medicationId,
       medicationName: targetMed.name,
       scheduledTime,
-      loggedAt: new Date().toISOString(),
+      loggedAt: nowIso,
       status,
+      updatedAt: nowIso,
     };
     setDoseLogs(prev => [newLog, ...prev]);
 
@@ -2906,7 +2914,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setMedications(prev =>
         prev.map(m =>
           m.id === medicationId
-            ? { ...m, remainingPills: Math.max(0, m.remainingPills - 1) }
+            ? { ...m, remainingPills: Math.max(0, m.remainingPills - 1), updatedAt: nowIso }
             : m
         )
       );
@@ -2957,13 +2965,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     if (idsToRemove.size === 0) return;
 
+    idsToRemove.forEach(removedId => recordDeletedId(removedId));
     setDoseLogs(prev => prev.filter(log => !idsToRemove.has(log.id)));
 
     if (takenRemovedCount > 0) {
+      const nowIso = new Date().toISOString();
       setMedications(prev =>
         prev.map(m =>
           m.id === medicationId
-            ? { ...m, remainingPills: m.remainingPills + takenRemovedCount }
+            ? { ...m, remainingPills: m.remainingPills + takenRemovedCount, updatedAt: nowIso }
             : m
         )
       );
@@ -2978,6 +2988,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const refillPills = (medicationId: string, quantity: number) => {
+    const nowIso = new Date().toISOString();
     setMedications(prev =>
       prev.map(m =>
         m.id === medicationId
@@ -2985,6 +2996,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               ...m,
               remainingPills: m.remainingPills + quantity,
               totalPills: m.totalPills + quantity,
+              updatedAt: nowIso,
             }
           : m
       )
@@ -3325,6 +3337,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const newG: ListGroup = {
       ...group,
       id: `group_${Date.now()}`,
+      updatedAt: new Date().toISOString(),
     };
     setListGroups(prev => [...prev, newG]);
     soundEngine.playSuccessChime();
@@ -3332,18 +3345,24 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const updateListGroup = (group: ListGroup) => {
-    setListGroups(prev => prev.map(g => (g.id === group.id ? group : g)));
+    const nowIso = new Date().toISOString();
+    setListGroups(prev =>
+      prev.map(g => (g.id === group.id ? { ...group, updatedAt: nowIso } : g))
+    );
   };
 
   const deleteListGroup = (id: string) => {
+    recordDeletedId(id);
     setListGroups(prev => prev.filter(g => g.id !== id));
   };
 
   const addTodoList = (list: Omit<TodoList, 'id'>) => {
+    const nowIso = new Date().toISOString();
     const newL: TodoList = {
       ...list,
       id: `list_${Date.now()}`,
-      createdAt: new Date().toISOString(),
+      createdAt: nowIso,
+      updatedAt: nowIso,
     };
     setTodoLists(prev => [...prev, newL]);
     soundEngine.playSuccessChime();
@@ -3351,10 +3370,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const updateTodoList = (list: TodoList) => {
-    setTodoLists(prev => prev.map(l => (l.id === list.id ? list : l)));
+    const nowIso = new Date().toISOString();
+    setTodoLists(prev =>
+      prev.map(l => (l.id === list.id ? { ...list, updatedAt: nowIso } : l))
+    );
   };
 
   const deleteTodoList = (id: string) => {
+    recordDeletedId(id);
     setTodoLists(prev => prev.filter(l => l.id !== id));
     if (selectedListId === id) setSelectedListId('all');
   };
@@ -3387,10 +3410,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Inbox Handlers
   const addInboxItem = (item: Omit<InboxItem, 'id' | 'createdAt'>) => {
+    const nowIso = new Date().toISOString();
     const newItem: InboxItem = {
       ...item,
       id: `inbox_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      createdAt: new Date().toISOString(),
+      createdAt: nowIso,
+      updatedAt: nowIso,
     };
     setInboxItems(prev => [newItem, ...prev]);
     soundEngine.playSuccessChime();
@@ -3398,20 +3423,25 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const updateInboxItem = (id: string, updates: Partial<InboxItem>) => {
-    setInboxItems(prev => prev.map(item => (item.id === id ? { ...item, ...updates } : item)));
+    const nowIso = new Date().toISOString();
+    setInboxItems(prev =>
+      prev.map(item => (item.id === id ? { ...item, ...updates, updatedAt: nowIso } : item))
+    );
   };
 
   const deleteInboxItem = (id: string) => {
+    recordDeletedId(id);
     setInboxItems(prev => prev.filter(item => item.id !== id));
   };
 
   const toggleInboxItemComplete = (id: string) => {
+    const nowIso = new Date().toISOString();
     setInboxItems(prev =>
       prev.map(item => {
         if (item.id === id) {
           const willComplete = !item.isCompleted;
           if (willComplete) soundEngine.playWaterDropNotification();
-          return { ...item, isCompleted: willComplete };
+          return { ...item, isCompleted: willComplete, updatedAt: nowIso };
         }
         return item;
       })
@@ -3488,12 +3518,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const updateTask = (task: TaskItem) => {
+    const nowIso = new Date().toISOString();
     setTasks(prev =>
       prev.map(t => {
         if (t.id !== task.id) return t;
         const timeOrDateChanged = t.dueTime !== task.dueTime || t.dueDate !== task.dueDate;
         return {
           ...task,
+          updatedAt: nowIso,
           lastDueRemindedAt: timeOrDateChanged ? undefined : task.lastDueRemindedAt,
           alerts: task.alerts
             ? task.alerts.map(a => (timeOrDateChanged ? { ...a, triggered: false } : a))
@@ -3509,8 +3541,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const toggleStarTask = (taskId: string) => {
+    const nowIso = new Date().toISOString();
     setTasks(prev =>
-      prev.map(t => (t.id === taskId ? { ...t, isStarred: !t.isStarred } : t))
+      prev.map(t => (t.id === taskId ? { ...t, isStarred: !t.isStarred, updatedAt: nowIso } : t))
     );
   };
 
@@ -3520,6 +3553,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     let recurringNextDate: string | null = null;
 
     const nowDate = new Date();
+    const nowIso = nowDate.toISOString();
     const localTodayStr = `${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, '0')}-${String(nowDate.getDate()).padStart(2, '0')}`;
 
     setTasks(prev => {
@@ -3557,6 +3591,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               completedAt: undefined,
               lastCompletedDate: undefined,
               streak: Math.max(0, (t.streak || 1) - 1),
+              updatedAt: nowIso,
             };
           }
 
@@ -3589,10 +3624,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               dueDate: nextDate,
               completed: false,
               status: 'todo',
-              completedAt: nowDate.toISOString(),
+              completedAt: nowIso,
               lastCompletedDate: localTodayStr,
               alerts: resetAlerts,
               streak: nextStreak,
+              updatedAt: nowIso,
             };
           }
 
@@ -3600,9 +3636,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             ...t,
             completed: willComplete,
             status: willComplete ? 'done' : 'todo',
-            completedAt: willComplete ? nowDate.toISOString() : undefined,
+            completedAt: willComplete ? nowIso : undefined,
             lastCompletedDate: willComplete ? localTodayStr : undefined,
             streak: nextStreak,
+            updatedAt: nowIso,
           };
         }
         return t;
@@ -3617,6 +3654,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         title: snapshot.title,
         subtitle: recurringNextDate ? `Recurring · Next: ${recurringNextDate}` : undefined,
         onUndo: () => {
+          const undoIso = new Date().toISOString();
           setTasks(prev =>
             prev.map(t =>
               t.id === id
@@ -3630,6 +3668,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                     dueDate: snapshot.dueDate,
                     alerts: snapshot.alerts,
                     streak: snapshot.streak,
+                    updatedAt: undoIso,
                   }
                 : t
             )
@@ -3640,11 +3679,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const toggleSubtask = (taskId: string, subtaskId: string) => {
+    const nowIso = new Date().toISOString();
     setTasks(prev =>
       prev.map(t => {
         if (t.id === taskId) {
           return {
             ...t,
+            updatedAt: nowIso,
             subtasks: t.subtasks.map(s =>
               s.id === subtaskId ? { ...s, completed: !s.completed } : s
             ),
@@ -3658,6 +3699,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const setTaskStatus = (taskId: string, status: TaskStatus) => {
     let completedTaskSnapshot: TaskItem | null = null;
     let wasCompleting = false;
+    const nowIso = new Date().toISOString();
 
     setTasks(prev => {
       const found = prev.find(t => t.id === taskId);
@@ -3674,8 +3716,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             ...t,
             status,
             completed: isDone,
-            completedAt: isDone ? new Date().toISOString() : undefined,
+            completedAt: isDone ? nowIso : undefined,
             streak: nextStreak,
+            updatedAt: nowIso,
           };
         }
         return t;
@@ -3689,6 +3732,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         targetId: taskId,
         title: snapshot.title,
         onUndo: () => {
+          const undoIso = new Date().toISOString();
           setTasks(prev =>
             prev.map(t =>
               t.id === taskId
@@ -3700,6 +3744,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                     dueDate: snapshot.dueDate,
                     alerts: snapshot.alerts,
                     streak: snapshot.streak,
+                    updatedAt: undoIso,
                   }
                 : t
             )
@@ -3718,17 +3763,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       neither: 'low',
     };
     const nextPriority = quadPriorityMap[quadrant] || 'medium';
+    const nowIso = new Date().toISOString();
     setTasks(prev =>
-      prev.map(t => (t.id === taskId ? { ...t, quadrant, priority: nextPriority } : t))
+      prev.map(t => (t.id === taskId ? { ...t, quadrant, priority: nextPriority, updatedAt: nowIso } : t))
     );
   };
 
   // Schedule & Time-Blocking Handlers
   const addScheduleItem = (itemData: Omit<ScheduleItem, 'id' | 'createdAt'>) => {
+    const nowIso = new Date().toISOString();
     const newItem: ScheduleItem = {
       ...itemData,
       id: `sched_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      createdAt: new Date().toISOString(),
+      createdAt: nowIso,
+      updatedAt: nowIso,
     };
     setScheduleItems(prev =>
       [...prev, newItem].sort((a, b) => a.startTime.localeCompare(b.startTime))
@@ -3738,16 +3786,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const updateScheduleItem = (item: ScheduleItem) => {
+    const nowIso = new Date().toISOString();
     setScheduleItems(prev =>
-      prev.map(s => (s.id === item.id ? item : s)).sort((a, b) => a.startTime.localeCompare(b.startTime))
+      prev.map(s => (s.id === item.id ? { ...item, updatedAt: nowIso } : s)).sort((a, b) => a.startTime.localeCompare(b.startTime))
     );
   };
 
   const deleteScheduleItem = (id: string) => {
+    recordDeletedId(id);
     setScheduleItems(prev => prev.filter(s => s.id !== id));
   };
 
   const toggleScheduleItem = (id: string) => {
+    const nowIso = new Date().toISOString();
     setScheduleItems(prev =>
       prev.map(s => {
         if (s.id === id) {
@@ -3762,13 +3813,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                       ...t,
                       completed: willComplete,
                       status: willComplete ? 'done' : 'todo',
-                      completedAt: willComplete ? new Date().toISOString() : undefined,
+                      completedAt: willComplete ? nowIso : undefined,
+                      updatedAt: nowIso,
                     }
                   : t
               )
             );
           }
-          return { ...s, completed: willComplete };
+          return { ...s, completed: willComplete, updatedAt: nowIso };
         }
         return s;
       })
@@ -3853,10 +3905,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Goals Handlers
   const addGoal = (goal: Omit<Goal, 'id' | 'createdAt'>) => {
+    const nowIso = new Date().toISOString();
     const newGoal: Goal = {
       ...goal,
       id: `goal_${Date.now()}`,
-      createdAt: new Date().toISOString(),
+      createdAt: nowIso,
+      updatedAt: nowIso,
     };
     setGoals(prev => [newGoal, ...prev]);
     soundEngine.playSuccessChime();
@@ -3872,6 +3926,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       ...goal,
       progress,
       status: progress === 100 ? ('completed' as const) : goal.status,
+      updatedAt: new Date().toISOString(),
     };
     setGoals(prev => prev.map(g => (g.id === goal.id ? updated : g)));
     soundEngine.playSuccessChime();
@@ -3879,8 +3934,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const linkTaskToGoal = (taskId: string, goalId?: string) => {
+    const nowIso = new Date().toISOString();
     setTasks(prev =>
-      prev.map(t => (t.id === taskId ? { ...t, goalId: goalId || undefined } : t))
+      prev.map(t => (t.id === taskId ? { ...t, goalId: goalId || undefined, updatedAt: nowIso } : t))
     );
     const targetGoal = goals.find(g => g.id === goalId);
     if (targetGoal) {
@@ -3889,10 +3945,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const deleteGoal = (id: string) => {
+    recordDeletedId(id);
+    const nowIso = new Date().toISOString();
     setGoals(prev => prev.filter(g => g.id !== id));
     // Clear goal binding from affected tasks
     setTasks(prev =>
-      prev.map(t => (t.goalId === id ? { ...t, goalId: undefined } : t))
+      prev.map(t => (t.goalId === id ? { ...t, goalId: undefined, updatedAt: nowIso } : t))
     );
     soundEngine.playClick();
     pushNotification('Goal Deleted', 'Life goal was removed.', 'system');
@@ -3924,6 +3982,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const addTag = useCallback((name: string, color?: string, description?: string) => {
     const trimmed = name.trim().toLowerCase().replace(/^#/, '');
     if (!trimmed) return;
+    const nowIso = new Date().toISOString();
     setTags(prev => {
       if (prev.some(t => t.name.toLowerCase() === trimmed)) return prev;
       return [
@@ -3933,7 +3992,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           name: trimmed,
           color: color || '#6366f1',
           description,
-          createdAt: new Date().toISOString(),
+          createdAt: nowIso,
+          updatedAt: nowIso,
         },
       ];
     });
@@ -3945,6 +4005,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const oldTrimmed = oldName.trim().toLowerCase().replace(/^#/, '');
     const newTrimmed = newName.trim().toLowerCase().replace(/^#/, '');
     if (!oldTrimmed || !newTrimmed) return;
+    const nowIso = new Date().toISOString();
 
     setTags(prev =>
       prev.map(t =>
@@ -3954,6 +4015,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               name: newTrimmed,
               color: color || t.color,
               description: description !== undefined ? description : t.description,
+              updatedAt: nowIso,
             }
           : t
       )
@@ -3965,6 +4027,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         if (!task.tags || !task.tags.some(t => t.toLowerCase() === oldTrimmed)) return task;
         return {
           ...task,
+          updatedAt: nowIso,
           tags: task.tags.map(t => (t.toLowerCase() === oldTrimmed ? newTrimmed : t)),
         };
       })
@@ -3977,8 +4040,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const deleteTag = useCallback((name: string) => {
     const trimmed = name.trim().toLowerCase().replace(/^#/, '');
     if (!trimmed) return;
+    const nowIso = new Date().toISOString();
 
-    setTags(prev => prev.filter(t => t.name.toLowerCase() !== trimmed));
+    setTags(prev => {
+      prev.forEach(t => {
+        if (t.name.toLowerCase() === trimmed) {
+          recordDeletedId(t.id);
+        }
+      });
+      return prev.filter(t => t.name.toLowerCase() !== trimmed);
+    });
 
     // Remove deleted tag from all tasks
     setTasks(prev =>
@@ -3986,6 +4057,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         if (!task.tags || !task.tags.some(t => t.toLowerCase() === trimmed)) return task;
         return {
           ...task,
+          updatedAt: nowIso,
           tags: task.tags.filter(t => t.toLowerCase() !== trimmed),
         };
       })
@@ -3996,6 +4068,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [pushNotification]);
 
   const toggleGoalMilestone = (goalId: string, milestoneId: string) => {
+    const nowIso = new Date().toISOString();
     setGoals(prev =>
       prev.map(g => {
         if (g.id === goalId) {
@@ -4014,6 +4087,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             ...g,
             milestones: updatedMilestones,
             progress: newProgress,
+            updatedAt: nowIso,
             status:
               newProgress === 100
                 ? 'completed'
@@ -4029,10 +4103,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Bills & Subscriptions Handlers
   const addBill = (bill: Omit<Bill, 'id' | 'paymentHistory'>) => {
+    const nowIso = new Date().toISOString();
     const newBill: Bill = {
       ...bill,
       id: `bill_${Date.now()}`,
       paymentHistory: [],
+      updatedAt: nowIso,
     };
     setBills(prev => [newBill, ...prev]);
     soundEngine.playSuccessChime();
@@ -4040,14 +4116,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const updateBill = (bill: Bill) => {
-    setBills(prev => prev.map(b => (b.id === bill.id ? bill : b)));
+    const nowIso = new Date().toISOString();
+    setBills(prev => prev.map(b => (b.id === bill.id ? { ...bill, updatedAt: nowIso } : b)));
   };
 
   const deleteBill = (id: string) => {
+    recordDeletedId(id);
     setBills(prev => prev.filter(b => b.id !== id));
   };
 
   const markBillPaid = (id: string, amount?: number) => {
+    const nowIso = new Date().toISOString();
     setBills(prev =>
       prev.map(b => {
         if (b.id === id) {
@@ -4055,7 +4134,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           const historyEntry = {
             id: `pay_${Date.now()}`,
             amount: paidAmount,
-            paidAt: new Date().toISOString().split('T')[0],
+            paidAt: nowIso.split('T')[0],
             note: 'Paid via JivanOS Bill Tracker',
           };
           soundEngine.playBillPaid();
@@ -4063,7 +4142,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           return {
             ...b,
             isPaid: true,
-            paidDate: new Date().toISOString().split('T')[0],
+            paidDate: nowIso.split('T')[0],
+            updatedAt: nowIso,
             paymentHistory: [historyEntry, ...(b.paymentHistory || [])],
           };
         }
@@ -4075,6 +4155,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const unmarkBillPaid = (id: string) => {
     const targetBill = bills.find(b => b.id === id);
     if (!targetBill || !targetBill.isPaid) return;
+    const nowIso = new Date().toISOString();
     setBills(prev =>
       prev.map(b => {
         if (b.id === id) {
@@ -4082,6 +4163,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             ...b,
             isPaid: false,
             paidDate: undefined,
+            updatedAt: nowIso,
             paymentHistory: (b.paymentHistory || []).slice(1),
           };
         }
@@ -4401,6 +4483,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                   completionHistory: nextHistory,
                   currentStreak,
                   bestStreak: Math.max(h.bestStreak || 0, bestStreak),
+                  updatedAt: new Date().toISOString(),
                 };
               })
             );
@@ -4449,6 +4532,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             completionHistory: newHistory,
             currentStreak: streaks.currentStreak,
             bestStreak: Math.max(h.bestStreak || 0, streaks.bestStreak),
+            updatedAt: new Date().toISOString(),
           };
         }
         return h;
@@ -4466,6 +4550,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           if (!hasMatch) return r;
           return {
             ...r,
+            updatedAt: new Date().toISOString(),
             items: r.items.map(i => {
               if (i.id !== habitId && i.title.toLowerCase().trim() !== targetName) return i;
               const fallbackHistory = { ...(i.completionHistory || {}) };
@@ -4480,6 +4565,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 completed: dateStr === todayKeyLocal ? Boolean(nextHistory[dateStr]) : i.completed,
                 currentStreak: computed.currentStreak,
                 bestStreak: Math.max(i.bestStreak || 0, computed.bestStreak),
+                updatedAt: new Date().toISOString(),
               };
             }),
           };
@@ -4493,6 +4579,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       habitData.name.toLowerCase().includes('water') ||
       habitData.name.toLowerCase().includes('hydration');
 
+    const nowIso = new Date().toISOString();
     const newHabit: Habit = {
       ...habitData,
       id: `hab_${Date.now()}`,
@@ -4500,7 +4587,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       currentStreak: 0,
       bestStreak: 0,
       completionHistory: {},
-      createdAt: new Date().toISOString().split('T')[0],
+      createdAt: nowIso.split('T')[0],
+      updatedAt: nowIso,
       cardTheme: 'clean',
     };
     setHabits(prev => [...prev, newHabit]);
@@ -4531,8 +4619,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 tags: newHabit.tags,
                 reminderTime: newHabit.reminderTime,
                 timerMinutes: newHabit.timerMinutes,
+                updatedAt: nowIso,
               };
-              return { ...r, items: [...r.items, rItem] };
+              return { ...r, updatedAt: nowIso, items: [...r.items, rItem] };
             }
           }
           return r;
@@ -4568,10 +4657,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       }));
     }
 
+    const nowIso = new Date().toISOString();
     const cleanedHabit: Habit = {
       ...habit,
       cardTheme: 'clean',
       syncHydration: isWater ? true : habit.syncHydration,
+      updatedAt: nowIso,
     };
 
     // 1. Update in habits list (or append if originating from routine items)
@@ -4620,11 +4711,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 bestStreak: habit.bestStreak,
                 archived: habit.archived,
                 archivedAt: habit.archivedAt,
+                updatedAt: nowIso,
               };
             }
             return i;
           });
-          return { ...r, items: updatedItems };
+          return { ...r, updatedAt: nowIso, items: updatedItems };
         }
 
         if (isTaggedToRoutine) {
@@ -4653,8 +4745,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             customDays: habit.customDays,
             archived: habit.archived,
             archivedAt: habit.archivedAt,
+            updatedAt: nowIso,
           };
-          return { ...r, items: [...r.items, linkedItem] };
+          return { ...r, updatedAt: nowIso, items: [...r.items, linkedItem] };
         }
 
         return r;
@@ -4704,6 +4797,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             completionHistory: updatedHistory,
             currentStreak,
             bestStreak: Math.max(h.bestStreak || 0, bestStreak),
+            updatedAt: new Date().toISOString(),
           };
         }
         return h;
@@ -4712,10 +4806,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const deleteHabit = (id: string) => {
+    recordDeletedId(id);
     setHabits(prev => prev.filter(h => h.id !== id));
     setRoutines(prev =>
       prev.map(r => ({
         ...r,
+        updatedAt: new Date().toISOString(),
         items: r.items.filter(i => i.id !== id && i.title.toLowerCase().trim() !== (habits.find(h => h.id === id)?.name.toLowerCase().trim() || ''))
       }))
     );
@@ -4740,6 +4836,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             completionHistory: newHistory,
             currentStreak,
             bestStreak: Math.max(h.bestStreak || 0, bestStreak),
+            updatedAt: new Date().toISOString(),
           };
         }
         return h;
@@ -6815,69 +6912,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     importBackupJSONRef.current = importBackupJSON;
   });
 
-  // Joplin-style Auto-Sync on any local change (tasks, habits, meds, or personal profile details)
-  useEffect(() => {
-    if (isInitialMountRef.current) {
-      isInitialMountRef.current = false;
-      lastSyncedPayloadHashRef.current = getDataHash();
-      return;
-    }
-    if (isApplyingRemoteSyncRef.current) {
-      return;
-    }
-    if (!joplinSyncSettings.syncOnChange) {
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      try {
-        const currentDataHash = getDataHash();
-        if (!currentDataHash || currentDataHash === lastSyncedPayloadHashRef.current) {
-          return;
-        }
-        lastSyncedPayloadHashRef.current = currentDataHash;
-        syncWithCloud().catch(() => {});
-      } catch {}
-    }, 2500);
-
-    return () => clearTimeout(timer);
-  }, [
-    tasks,
-    medications,
-    doseLogs,
-    habits,
-    routines,
-    goals,
-    bills,
-    hydration,
-    profile.name,
-    profile.nickname,
-    profile.avatarPhoto,
-    profile.email,
-    profile.identifier,
-    profile.bio,
-    profile.dateOfBirth,
-    profile.heightCm,
-    profile.weightKg,
-    profile.gender,
-    profile.preferredCurrency,
-    profile.updatedAt,
-    todoLists,
-    listGroups,
-    tags,
-    scheduleItems,
-    inboxItems,
-    workflowStages,
-    currency,
-    quotes,
-    deletedQuoteIds,
-    favoriteQuoteIds,
-    quoteCategoriesRaw,
-    deletedIds,
-    joplinSyncSettings.syncOnChange,
-  ]);
-
-  // Phase 2 Google Drive Silent Re-Auth on Launch & Auto-Sync Resume
+  // Phase 2 Google Drive Silent Re-Auth on Launch
   useEffect(() => {
     let active = true;
     silentReAuthGoogleDrive()
@@ -6887,15 +6922,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           const parsed = JSON.parse(compilePayloadRef.current());
           cachePayloadForBackgroundSync(parsed).catch(() => {});
         } catch {}
-        const driveMeta = getStoredDriveSyncMeta();
-        if (driveMeta.autoSyncEnabled && driveMeta.autoSyncIntervalMinutes > 0) {
-          scheduleGoogleDriveAutoSync(driveMeta.autoSyncIntervalMinutes, async () => {
-            try {
-              const latest = JSON.parse(compilePayloadRef.current());
-              await backupToDrive(latest);
-            } catch {}
-          }).catch(() => {});
-        }
       })
       .catch(() => {});
     return () => {
@@ -6903,7 +6929,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
   }, []);
 
-  // Phase 4 Dropbox Silent Re-Auth on Launch & Auto-Sync Resume
+  // Phase 4 Dropbox Silent Re-Auth on Launch
   useEffect(() => {
     let active = true;
     silentReAuthDropbox()
@@ -6913,15 +6939,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           const parsed = JSON.parse(compilePayloadRef.current());
           cacheDropboxPayloadForBackgroundSync(parsed).catch(() => {});
         } catch {}
-        const dbxMeta = getStoredDropboxSyncMeta();
-        if (dbxMeta.autoSyncEnabled && dbxMeta.autoSyncIntervalMinutes > 0) {
-          scheduleDropboxAutoSync(dbxMeta.autoSyncIntervalMinutes, async () => {
-            try {
-              const latest = JSON.parse(compilePayloadRef.current());
-              await backupToDropbox(latest);
-            } catch {}
-          }).catch(() => {});
-        }
       })
       .catch(() => {});
     return () => {
@@ -6929,7 +6946,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
   }, []);
 
-  // Phase 1 Offline Silent Auto-Snapshot (rotates snapshot-1.json .. snapshot-3.json on every user change)
+  // Phase 1 Offline Silent Auto-Snapshot (rotates snapshot-1.json .. snapshot-3.json on user changes)
   useEffect(() => {
     if (isAutoSnapshotMountRef.current) {
       isAutoSnapshotMountRef.current = false;
@@ -6963,7 +6980,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           cacheDropboxPayloadForBackgroundSync(parsedPayload).catch(() => {});
         } catch {}
       } catch {}
-    }, 1800);
+    }, 3500);
 
     return () => window.clearTimeout(timer);
   }, [
@@ -6975,17 +6992,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     goals,
     bills,
     hydration,
-    profile.name,
-    profile.nickname,
-    profile.avatarPhoto,
-    profile.email,
-    profile.identifier,
-    profile.bio,
-    profile.dateOfBirth,
-    profile.heightCm,
-    profile.weightKg,
-    profile.gender,
-    profile.preferredCurrency,
     profile.updatedAt,
     todoLists,
     listGroups,
@@ -7005,18 +7011,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     accentTone,
     deletedIds,
   ]);
-
-  // Joplin-style Configurable Interval Auto-Sync & Focus Sync
-  useEffect(() => {
-    const mins = joplinSyncSettings.autoSyncIntervalMinutes;
-    if (!mins || mins <= 0) return;
-    const interval = setInterval(() => {
-      if (isOnline || joplinSyncSettings.primaryTarget === 'local_folder') {
-        syncWithCloud().catch(() => {});
-      }
-    }, mins * 60 * 1000);
-    return () => clearInterval(interval);
-  }, [isOnline, joplinSyncSettings.autoSyncIntervalMinutes, joplinSyncSettings.primaryTarget]);
 
   const unreadNotificationsCount = useMemo(
     () => notifications.filter(n => !n.read).length,
@@ -7186,6 +7180,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         updateRoutineItemSubSteps,
         quotes,
         deletedQuoteIds,
+        deletedIds,
         addQuote,
         addQuotes,
         updateQuote,

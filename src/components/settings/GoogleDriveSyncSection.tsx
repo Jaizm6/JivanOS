@@ -168,7 +168,8 @@ export const GoogleDriveSyncSection: React.FC<GoogleDriveSyncSectionProps> = ({
     }
   }, [getLocalAppDataObject]);
 
-  // Check remote backup.json timestamp vs local lastSyncedAt
+  // Silent Joplin-style bidirectional sync (pull + item-level merge + push) for after-connect & sync-now;
+  // only explicit 'restore-check' opens the restore modal.
   const inspectRemoteBeforeSync = useCallback(
     async (mode: 'after-connect' | 'sync-now' | 'restore-check') => {
       setSyncStatus('syncing');
@@ -177,11 +178,9 @@ export const GoogleDriveSyncSection: React.FC<GoogleDriveSyncSectionProps> = ({
         const localLastSyncedAt = getStoredDriveSyncMeta().lastSyncedAt;
         const remote = await googleDriveSyncProvider.restore();
 
-        if (remote.found && remote.envelope) {
-          const remoteUpdatedAt = remote.envelope.updatedAt || remote.lastModified || '';
-          const remoteIsNewer = isRemoteNewerThanLocal(remoteUpdatedAt, localLastSyncedAt);
-
-          if (remoteIsNewer || mode === 'restore-check') {
+        if (mode === 'restore-check') {
+          if (remote.found && remote.envelope) {
+            const remoteUpdatedAt = remote.envelope.updatedAt || remote.lastModified || '';
             setSyncStatus(localLastSyncedAt ? 'synced' : 'idle');
             setConflictState({
               remoteEnvelope: remote.envelope,
@@ -191,31 +190,35 @@ export const GoogleDriveSyncSection: React.FC<GoogleDriveSyncSectionProps> = ({
             });
             return;
           }
-        }
-
-        if (mode === 'restore-check') {
           setSyncStatus(localLastSyncedAt ? 'synced' : 'idle');
           showAndroidToast('No cloud backup found in Drive AppData yet', 2800, 'default');
           return;
         }
 
-        if (mode === 'sync-now') {
-          setSyncStatus(localLastSyncedAt ? 'synced' : 'idle');
-          setShowUploadConfirm(true);
-          return;
+        // Silent Joplin-style bidirectional merge & push
+        let localData = getLocalAppDataObject();
+        if (remote.found && remote.envelope && remote.envelope.data) {
+          localData = mergeDriveData(localData, remote.envelope.data);
+          replaceAllAppDataFromBackup(JSON.stringify(localData));
         }
 
-        // after-connect when no newer cloud backup exists
-        setSyncStatus(localLastSyncedAt ? 'synced' : 'idle');
+        await googleDriveSyncProvider.backup(localData);
+        const latestMeta = getStoredDriveSyncMeta();
+        setMeta(latestMeta);
+        setSyncStatus('synced');
+
+        if (mode === 'sync-now') {
+          showAndroidToast('Synced with Google Drive (items merged)', 2400, 'success');
+        }
       } catch (err: any) {
-        const msg = err?.message || 'Unable to check Google Drive backup.';
+        const msg = err?.message || 'Unable to sync with Google Drive.';
         updateStoredDriveSyncMeta({ lastError: msg });
         setSyncStatus('error');
         setErrorMessage(msg);
         showAndroidToast(msg, 3400, 'error');
       }
     },
-    []
+    [getLocalAppDataObject, replaceAllAppDataFromBackup]
   );
 
   // 1. CONNECT GOOGLE DRIVE

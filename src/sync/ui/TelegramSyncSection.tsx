@@ -168,6 +168,60 @@ export const TelegramSyncSection: React.FC<TelegramSyncSectionProps> = ({
     }
   };
 
+  const performSilentJoplinTelegramSync = useCallback(
+    async (showToast = true) => {
+      setSyncStatus('syncing');
+      setErrorMessage(null);
+      try {
+        let localData = getLocalAppDataObject();
+        const pulled = await telegramSyncProvider.syncPull(null);
+
+        if (pulled.found && pulled.envelope && pulled.envelope.data) {
+          localData = mergeDriveData(localData, pulled.envelope.data);
+          replaceAllAppDataFromBackup(JSON.stringify(localData));
+        }
+
+        await telegramSyncProvider.syncPush(localData, { force: true });
+        const latestAuth = getStoredTelegramAuth();
+        setStoredAuth(latestAuth);
+        setSyncStatus('synced');
+
+        // Also keep unified sync settings updated if Telegram is active or no active provider was chosen yet
+        try {
+          const rawSync = localStorage.getItem('jivanos_unified_sync_settings_v2');
+          const parsedSync = rawSync ? JSON.parse(rawSync) : {};
+          const nextActive =
+            !parsedSync.activeProvider || parsedSync.activeProvider === 'none'
+              ? 'telegram'
+              : parsedSync.activeProvider;
+          localStorage.setItem(
+            'jivanos_unified_sync_settings_v2',
+            JSON.stringify({
+              ...parsedSync,
+              activeProvider: nextActive,
+              status: 'synced',
+              lastSyncedAt: latestAuth?.lastSyncedAt || new Date().toISOString(),
+              lastError: null,
+            })
+          );
+          window.dispatchEvent(new CustomEvent('jivanos:unified-sync-state-changed'));
+        } catch {}
+
+        if (showToast) {
+          showAndroidToast('Synced with Telegram (items merged)', 2400, 'success');
+        }
+      } catch (err: any) {
+        const msg = err?.message || 'Telegram sync failed.';
+        setSyncStatus('error');
+        setErrorMessage(msg);
+        if (showToast) {
+          showAndroidToast(msg, 3200, 'error');
+        }
+      }
+    },
+    [getLocalAppDataObject, replaceAllAppDataFromBackup]
+  );
+
   const runConnectAndDetect = async () => {
     if (isConnecting || isVerifying || !tokenInput.trim()) return;
     setIsConnecting(true);
@@ -184,6 +238,7 @@ export const TelegramSyncSection: React.FC<TelegramSyncSectionProps> = ({
       setSyncStatus('idle');
       setErrorMessage(null);
       showAndroidToast(`Connected ${account.name}`, 2800, 'success');
+      await performSilentJoplinTelegramSync(false);
     } catch (err: any) {
       const msg = sanitizeTelegramError(err?.message || 'Could not connect Telegram bot.');
       setSetupError(msg);
@@ -207,36 +262,7 @@ export const TelegramSyncSection: React.FC<TelegramSyncSectionProps> = ({
 
   const handleSyncNow = async () => {
     if (syncStatus === 'syncing') return;
-    setSyncStatus('syncing');
-    setErrorMessage(null);
-    try {
-      const localLastSyncedAt = getStoredTelegramAuth()?.lastSyncedAt || null;
-      const remoteInfo = await telegramSyncProvider.getLastSyncInfo();
-
-      if (remoteInfo && isRemoteNewerThanLocal(remoteInfo.lastModified, localLastSyncedAt)) {
-        const remote = await telegramSyncProvider.restore();
-        if (remote.found && remote.envelope) {
-          setConflictState({
-            remoteEnvelope: remote.envelope,
-            remoteLastModified: remote.lastModified || remote.envelope.updatedAt,
-            remoteSizeBytes: remote.fileSizeBytes,
-          });
-          setSyncStatus('idle');
-          return;
-        }
-      }
-
-      const localData = getLocalAppDataObject();
-      await telegramSyncProvider.backup(localData);
-      setStoredAuth(getStoredTelegramAuth());
-      setSyncStatus('synced');
-      showAndroidToast('Backup sent to your Telegram bot', 2600, 'success');
-    } catch (err: any) {
-      const msg = err?.message || 'Telegram backup failed.';
-      setSyncStatus('error');
-      setErrorMessage(msg);
-      showAndroidToast(msg, 3200, 'error');
-    }
+    await performSilentJoplinTelegramSync(true);
   };
 
   const handleCheckRestore = async () => {

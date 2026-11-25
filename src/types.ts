@@ -105,6 +105,7 @@ export interface InboxItem {
   isArchived?: boolean;
   isStarred?: boolean;
   convertedTo?: 'task' | 'goal';
+  updatedAt?: string;
 }
 
 export type ScheduleCategory =
@@ -139,6 +140,7 @@ export interface ScheduleItem {
   icon?: string;
   color?: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface WorkflowStage {
@@ -187,6 +189,7 @@ export interface DoseLog {
   loggedAt: string;
   status: 'taken' | 'skipped' | 'snoozed';
   notes?: string;
+  updatedAt?: string;
 }
 
 export interface MedicationCustomDateTime {
@@ -216,6 +219,7 @@ export interface Medication {
   archivedAt?: string;
   reminderType?: ReminderType;
   customDateTimes?: MedicationCustomDateTime[];
+  updatedAt?: string;
 }
 
 export interface HydrationLog {
@@ -265,6 +269,7 @@ export interface ListGroup {
   color?: string;
   collapsed?: boolean;
   order?: number;
+  updatedAt?: string;
 }
 
 export interface TodoList {
@@ -278,6 +283,7 @@ export interface TodoList {
   defaultPriority?: Priority;
   order?: number;
   createdAt?: string;
+  updatedAt?: string;
 }
 
 export type SmartListPreset =
@@ -430,6 +436,7 @@ export interface RoutineItem {
   incrementStep?: number;
   archived?: boolean;
   archivedAt?: string;
+  updatedAt?: string;
 }
 
 export interface Routine {
@@ -439,6 +446,7 @@ export interface Routine {
   timeOfDay: 'morning' | 'afternoon' | 'evening' | 'custom';
   color?: string;
   items: RoutineItem[];
+  updatedAt?: string;
 }
 
 export interface HabitStep {
@@ -492,6 +500,7 @@ export interface Habit {
   fontSize?: number | string;
   fontType?: 'sans' | 'mono' | 'serif' | 'rounded';
   isBold?: boolean;
+  updatedAt?: string;
 }
 
 export type GoalCategory = 'career' | 'health' | 'finance' | 'personal' | 'learning' | string;
@@ -523,6 +532,7 @@ export interface Goal {
   archived?: boolean;
   archivedAt?: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface AppTag {
@@ -531,6 +541,7 @@ export interface AppTag {
   color?: string;
   description?: string;
   createdAt?: string;
+  updatedAt?: string;
 }
 
 export type BillCategory =
@@ -577,6 +588,7 @@ export interface Bill {
   isBold?: boolean;
   archived?: boolean;
   archivedAt?: string;
+  updatedAt?: string;
 }
 
 export interface AppLockConfig {

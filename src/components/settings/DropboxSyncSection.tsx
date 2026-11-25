@@ -173,7 +173,8 @@ export const DropboxSyncSection: React.FC<DropboxSyncSectionProps> = ({
     }
   }, [getLocalAppDataObject]);
 
-  // Compare remote lastModified vs local lastSyncedAt before restore/sync
+  // Silent Joplin-style bidirectional sync (pull + item-level merge + push) for after-connect & sync-now;
+  // only explicit 'restore-check' opens the restore modal.
   const runSyncOrInspect = useCallback(
     async (mode: 'after-connect' | 'sync-now' | 'restore-check') => {
       setSyncStatus('syncing');
@@ -182,11 +183,9 @@ export const DropboxSyncSection: React.FC<DropboxSyncSectionProps> = ({
         const localLastSyncedAt = getStoredDropboxSyncMeta().lastSyncedAt;
         const remote = await dropboxSyncProvider.restore();
 
-        if (remote.found && remote.envelope) {
-          const remoteLastModified = remote.lastModified || remote.envelope.updatedAt || '';
-          const remoteIsNewer = isRemoteNewerThanLocal(remoteLastModified, localLastSyncedAt);
-
-          if (remoteIsNewer || mode === 'restore-check') {
+        if (mode === 'restore-check') {
+          if (remote.found && remote.envelope) {
+            const remoteLastModified = remote.lastModified || remote.envelope.updatedAt || '';
             setSyncStatus(localLastSyncedAt ? 'synced' : 'idle');
             setConflictState({
               remoteEnvelope: remote.envelope,
@@ -196,25 +195,25 @@ export const DropboxSyncSection: React.FC<DropboxSyncSectionProps> = ({
             });
             return;
           }
-        }
-
-        if (mode === 'restore-check') {
           setSyncStatus(localLastSyncedAt ? 'synced' : 'idle');
           showAndroidToast('No backup found in /Apps/JivanOS/backup.json yet', 2800, 'default');
           return;
         }
 
-        if (mode === 'sync-now') {
-          const localData = getLocalAppDataObject();
-          await dropboxSyncProvider.backup(localData);
-          setMeta(getStoredDropboxSyncMeta());
-          setSyncStatus('synced');
-          showAndroidToast('Synced to Dropbox (/Apps/JivanOS/backup.json)', 2800, 'success');
-          return;
+        // Silent Joplin-style bidirectional merge & push
+        let localData = getLocalAppDataObject();
+        if (remote.found && remote.envelope && remote.envelope.data) {
+          localData = mergeDriveData(localData, remote.envelope.data);
+          replaceAllAppDataFromBackup(JSON.stringify(localData));
         }
 
-        // after-connect with no newer cloud backup
-        setSyncStatus(localLastSyncedAt ? 'synced' : 'idle');
+        await dropboxSyncProvider.backup(localData);
+        setMeta(getStoredDropboxSyncMeta());
+        setSyncStatus('synced');
+
+        if (mode === 'sync-now') {
+          showAndroidToast('Synced with Dropbox (items merged)', 2400, 'success');
+        }
       } catch (err: any) {
         const msg = err?.message || 'Unable to sync with Dropbox.';
         updateStoredDropboxSyncMeta({ lastError: msg });
@@ -223,7 +222,7 @@ export const DropboxSyncSection: React.FC<DropboxSyncSectionProps> = ({
         showAndroidToast(msg, 3400, 'error');
       }
     },
-    [getLocalAppDataObject]
+    [getLocalAppDataObject, replaceAllAppDataFromBackup]
   );
 
   // 1. CONNECT DROPBOX (Native Android / Desktop direct, Web/Preview opens zero-config PKCE modal)

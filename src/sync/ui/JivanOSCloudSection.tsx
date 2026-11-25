@@ -288,30 +288,22 @@ export const JivanOSCloudSection: React.FC<JivanOSCloudSectionProps> = ({
     setSyncStatus('syncing');
     setErrorMessage(null);
     try {
-      const localLastSyncedAt = getStoredCloudMeta().lastSyncedAt;
-      const remote = await firestoreSyncProvider.restore();
-
-      if (remote.found && remote.envelope) {
-        const remoteLastModified = remote.lastModified || remote.envelope.updatedAt;
-        const remoteIsNewer = isRemoteNewerThanLocal(remoteLastModified, localLastSyncedAt);
-        if (remoteIsNewer) {
-          setConflictState({
-            remoteEnvelope: remote.envelope,
-            remoteLastModified,
-            remoteSizeBytes: remote.fileSizeBytes,
-            localLastSyncedAt,
-          });
-          setSyncStatus('idle');
-          return;
+      let localData = getLocalAppDataObject();
+      try {
+        const remote = await firestoreSyncProvider.restore();
+        if (remote.found && remote.envelope && remote.envelope.data) {
+          localData = mergeDriveData(localData, remote.envelope.data);
+          replaceAllAppDataFromBackup(JSON.stringify(localData));
         }
+      } catch {
+        // Proceed to push if no remote document exists yet
       }
 
-      const localData = getLocalAppDataObject();
       await firestoreSyncProvider.backup(localData);
       setMeta(getStoredCloudMeta());
       setSyncStatus('synced');
       await refreshSyncHistory();
-      showAndroidToast('Synced to JivanOS Cloud', 2400, 'success');
+      showAndroidToast('Synced with JivanOS Cloud (items merged)', 2400, 'success');
     } catch (err: any) {
       const msg = err?.message || 'JivanOS Cloud sync failed.';
       updateStoredCloudMeta({ lastError: msg });

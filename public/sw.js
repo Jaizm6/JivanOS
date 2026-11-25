@@ -1,8 +1,10 @@
 // JivanOS Service Worker & Notification Handler
 // Supports background notifications, FCM push payload delivery, and notification action clicks
 
-const CACHE_NAME = 'jivanos-v3';
+const CACHE_NAME = 'jivanos-v4';
 const PRECACHE_ASSETS = [
+  '/',
+  '/index.html',
   '/manifest.json',
   '/icon.svg',
   '/pwa-192x192.png',
@@ -11,7 +13,16 @@ const PRECACHE_ASSETS = [
   '/apple-touch-icon.png'
 ];
 
+const IS_TAURI_ORIGIN =
+  self.location.hostname.includes('tauri') ||
+  self.location.protocol === 'tauri:' ||
+  self.location.protocol === 'asset:';
+
 self.addEventListener('install', event => {
+  if (IS_TAURI_ORIGIN) {
+    self.skipWaiting();
+    return;
+  }
   event.waitUntil(
     caches.open(CACHE_NAME).then(cache => cache.addAll(PRECACHE_ASSETS)).catch(() => {})
   );
@@ -19,6 +30,16 @@ self.addEventListener('install', event => {
 });
 
 self.addEventListener('activate', event => {
+  if (IS_TAURI_ORIGIN) {
+    event.waitUntil(
+      caches
+        .keys()
+        .then(keys => Promise.all(keys.map(k => caches.delete(k))))
+        .then(() => self.registration.unregister())
+        .catch(() => {})
+    );
+    return;
+  }
   event.waitUntil(
     caches.keys().then(keys => {
       return Promise.all(
@@ -28,8 +49,9 @@ self.addEventListener('activate', event => {
   );
 });
 
-// Fast, non-blocking fetch handler that never intercepts Vite dev/HMR modules or API calls
+// Fast, non-blocking fetch handler that never intercepts Tauri desktop, Vite dev/HMR modules, or API calls
 self.addEventListener('fetch', event => {
+  if (IS_TAURI_ORIGIN) return;
   if (event.request.method !== 'GET') return;
   const url = new URL(event.request.url);
 
@@ -49,13 +71,22 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // Navigation requests: network-first with fast offline fallback
+  // Navigation requests: network-first with cached index.html fallback (never returns a blank 503 Offline text page)
   if (event.request.mode === 'navigate') {
     event.respondWith(
-      fetch(event.request).catch(async () => {
-        const cached = await caches.match('/index.html') || await caches.match('/');
-        return cached || new Response('Offline', { status: 503, statusText: 'Offline' });
-      })
+      fetch(event.request)
+        .then(networkResponse => {
+          if (networkResponse && networkResponse.status === 200) {
+            const copy = networkResponse.clone();
+            caches.open(CACHE_NAME).then(cache => cache.put('/index.html', copy)).catch(() => {});
+          }
+          return networkResponse;
+        })
+        .catch(async () => {
+          const cached = (await caches.match('/index.html')) || (await caches.match('/'));
+          if (cached) return cached;
+          return fetch(event.request);
+        })
     );
     return;
   }

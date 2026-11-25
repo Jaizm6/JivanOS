@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Check, CloudDownload, GitMerge, Upload } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import {
   ActiveSyncProviderId,
@@ -19,7 +18,6 @@ import {
 } from './unifiedSyncBackupEngine';
 import {
   DriveBackupEnvelope,
-  formatRelativeSyncTime,
   mergeDriveData,
 } from '../utils/googleDriveSync';
 import { googleDriveSyncProvider } from './providers/GoogleDriveProvider';
@@ -50,13 +48,6 @@ export function triggerUnifiedBackupNow(password?: string): void {
   }
 }
 
-interface OlderCloudPromptState {
-  providerLabel: string;
-  remoteEnvelope: DriveBackupEnvelope;
-  remoteUpdatedAt: string;
-  localUpdatedAt: string;
-}
-
 const PROVIDER_LABELS: Record<ActiveSyncProviderId, string> = {
   none: 'None',
   firebase: 'JivanOS Cloud',
@@ -73,13 +64,19 @@ export const UnifiedSyncBackupCoordinator: React.FC = () => {
   const {
     tasks,
     habits,
+    routines,
     medications,
     doseLogs,
     bills,
     goals,
+    scheduleItems,
+    inboxItems,
     quotes,
     tags,
     todoLists,
+    listGroups,
+    deletedIds,
+    profile,
     exportEncryptedJSON,
     replaceAllAppDataFromBackup,
     firebaseUser,
@@ -87,12 +84,27 @@ export const UnifiedSyncBackupCoordinator: React.FC = () => {
     syncDriveNow,
   } = useApp();
 
-  const [olderCloudPrompt, setOlderCloudPrompt] = useState<OlderCloudPromptState | null>(null);
+  // Keep latest AppContext methods/objects in a stable ref so callbacks never recreate on every render
+  const appApiRef = useRef({
+    exportEncryptedJSON,
+    replaceAllAppDataFromBackup,
+    firebaseUser,
+    joplinSyncSettings,
+    syncDriveNow,
+  });
+  appApiRef.current = {
+    exportEncryptedJSON,
+    replaceAllAppDataFromBackup,
+    firebaseUser,
+    joplinSyncSettings,
+    syncDriveNow,
+  };
 
   const isUploadingRef = useRef(false);
   const isPullingRef = useRef(false);
   const pendingReuploadRef = useRef(false);
   const hasUnsyncedChangesRef = useRef(false);
+  const hashCheckTimerRef = useRef<number | null>(null);
   const debounceTimerRef = useRef<number | null>(null);
   const telegramCooldownTimerRef = useRef<number | null>(null);
   const lastObservedHashRef = useRef<string | null>(null);
@@ -100,18 +112,18 @@ export const UnifiedSyncBackupCoordinator: React.FC = () => {
 
   const getLocalDataObject = useCallback((): Record<string, unknown> => {
     try {
-      return JSON.parse(exportEncryptedJSON()) as Record<string, unknown>;
+      return JSON.parse(appApiRef.current.exportEncryptedJSON()) as Record<string, unknown>;
     } catch {
       return {};
     }
-  }, [exportEncryptedJSON]);
+  }, []);
 
   /**
    * SEND (Push) to the ONE active sync provider.
    * If more edits arrive during an upload, uploads again immediately when it finishes.
    */
   const runSyncPush = useCallback(
-    async (options?: { manual?: boolean; fromBackground?: boolean }) => {
+    async (options?: { manual?: boolean; fromBackground?: boolean; payloadOverride?: Record<string, unknown> }) => {
       const settings = getUnifiedSyncSettings();
       const providerId = settings.activeProvider;
       if (providerId === 'none') return;
@@ -137,7 +149,7 @@ export const UnifiedSyncBackupCoordinator: React.FC = () => {
       saveUnifiedSyncSettings({ status: 'syncing', lastError: null });
 
       try {
-        const payload = getLocalDataObject();
+        const payload = options?.payloadOverride || getLocalDataObject();
         let syncedIso = new Date().toISOString();
 
         if (providerId === 'telegram') {
@@ -145,7 +157,6 @@ export const UnifiedSyncBackupCoordinator: React.FC = () => {
             force: Boolean(options?.manual),
           });
           if (res.rateLimited && res.nextAllowedInMs) {
-            // Queue push for when the 5-minute Telegram cooldown expires
             hasUnsyncedChangesRef.current = true;
             saveUnifiedSyncSettings({
               status: 'waiting',
@@ -181,7 +192,7 @@ export const UnifiedSyncBackupCoordinator: React.FC = () => {
           const res = await megaSyncProvider.backup(payload);
           syncedIso = res.lastModified || syncedIso;
         } else if (providerId === 'webdav' || providerId === 's3') {
-          await syncDriveNow(providerId);
+          await appApiRef.current.syncDriveNow(providerId);
         }
 
         hasUnsyncedChangesRef.current = false;
@@ -205,21 +216,19 @@ export const UnifiedSyncBackupCoordinator: React.FC = () => {
         }
       } finally {
         isUploadingRef.current = false;
-        // If more edits arrived during the upload, upload again immediately!
         if (pendingReuploadRef.current) {
           pendingReuploadRef.current = false;
           void runSyncPush({ manual: false });
         }
       }
     },
-    [getLocalDataObject, syncDriveNow]
+    [getLocalDataObject]
   );
 
   /**
    * RECEIVE (Pull) from the ONE active sync provider:
-   * - On app open, on return to foreground, and every N minutes while app is open.
-   * - Merges per item by updatedAt.
-   * - Asks before replacing local data with an older cloud copy.
+   * - Replicates Joplin Sync: pulls remote state, merges per item by `id`, `updatedAt`, and `deletedIds` tombstones
+   *   silently without interrupting the user with a conflict dialog, then pushes the merged state if needed.
    */
   const runSyncPull = useCallback(
     async (options?: { manual?: boolean }) => {
@@ -251,11 +260,11 @@ export const UnifiedSyncBackupCoordinator: React.FC = () => {
           const pulled = await pullFromSyncthingFolder(localData);
           if (pulled.peerFilesMerged > 0) {
             applyingRemoteDataRef.current = true;
-            replaceAllAppDataFromBackup(JSON.stringify(pulled.mergedData));
+            appApiRef.current.replaceAllAppDataFromBackup(JSON.stringify(pulled.mergedData));
             lastObservedHashRef.current = computeBackupContentHash(pulled.mergedData);
             window.setTimeout(() => {
               applyingRemoteDataRef.current = false;
-            }, 300);
+            }, 350);
           }
           await pushToSyncthingFolder(pulled.mergedData);
           saveUnifiedSyncSettings({
@@ -279,13 +288,12 @@ export const UnifiedSyncBackupCoordinator: React.FC = () => {
         let remoteModifiedIso: string | null = null;
 
         if (providerId === 'telegram') {
-          // Telegram as SYNC: NEVER uses getUpdates. Uses getChat -> pinned_message -> getFile if newer.
           const pulled = await telegramSyncProvider.syncPull(
             options?.manual ? null : settings.lastSyncedAt
           );
           if (pulled.skippedNotNewer) {
-            if (options?.manual) {
-              await runSyncPush({ manual: true });
+            if (options?.manual || hasUnsyncedChangesRef.current) {
+              await runSyncPush({ manual: options?.manual, payloadOverride: localData });
             }
             return;
           }
@@ -324,51 +332,45 @@ export const UnifiedSyncBackupCoordinator: React.FC = () => {
           remoteEnvelope = res.envelope;
           remoteModifiedIso = res.lastModified;
         } else if (providerId === 'webdav' || providerId === 's3') {
+          await appApiRef.current.syncDriveNow(providerId);
+          saveUnifiedSyncSettings({
+            status: 'synced',
+            lastSyncedAt: new Date().toISOString(),
+            lastError: null,
+          });
           if (options?.manual) {
-            await runSyncPush({ manual: true });
+            showAndroidToast(`Synced with ${PROVIDER_LABELS[providerId]}`, 2400, 'success');
           }
           return;
         }
 
+        let mergedPayload = localData;
+        let didMergeRemote = false;
+
         if (remoteEnvelope && remoteEnvelope.data) {
-          const remoteTs = Date.parse(remoteModifiedIso || remoteEnvelope.updatedAt || '');
-          const localEditTs = Date.parse(settings.lastLocalEditAt || '');
-
-          // If cloud copy is older than local unsynced edits during a manual or initial pull, ask before replacing
-          if (
-            Number.isFinite(remoteTs) &&
-            Number.isFinite(localEditTs) &&
-            remoteTs + 5000 < localEditTs &&
-            hasUnsyncedChangesRef.current
-          ) {
-            setOlderCloudPrompt({
-              providerLabel: PROVIDER_LABELS[providerId],
-              remoteEnvelope,
-              remoteUpdatedAt: remoteModifiedIso || remoteEnvelope.updatedAt,
-              localUpdatedAt: settings.lastLocalEditAt || new Date().toISOString(),
-            });
-            saveUnifiedSyncSettings({ status: 'waiting' });
-            return;
-          }
-
-          // Merge per item by updatedAt
-          const merged = mergeDriveData(localData, remoteEnvelope.data);
+          // Joplin-style conflict-free per-item LWW + tombstone merge
+          mergedPayload = mergeDriveData(localData, remoteEnvelope.data);
+          didMergeRemote = true;
           applyingRemoteDataRef.current = true;
-          replaceAllAppDataFromBackup(JSON.stringify(merged));
-          lastObservedHashRef.current = computeBackupContentHash(merged);
+          appApiRef.current.replaceAllAppDataFromBackup(JSON.stringify(mergedPayload));
+          lastObservedHashRef.current = computeBackupContentHash(mergedPayload);
           window.setTimeout(() => {
             applyingRemoteDataRef.current = false;
-          }, 300);
+          }, 350);
 
           saveUnifiedSyncSettings({
             status: hasUnsyncedChangesRef.current ? 'waiting' : 'synced',
-            lastSyncedAt: remoteModifiedIso || remoteEnvelope.updatedAt || new Date().toISOString(),
+            lastSyncedAt:
+              remoteModifiedIso || remoteEnvelope.updatedAt || new Date().toISOString(),
             lastError: null,
           });
         }
 
-        if (options?.manual || hasUnsyncedChangesRef.current) {
-          await runSyncPush({ manual: options?.manual });
+        if (options?.manual || hasUnsyncedChangesRef.current || didMergeRemote) {
+          await runSyncPush({
+            manual: options?.manual,
+            payloadOverride: mergedPayload,
+          });
         }
       } catch (err: any) {
         const msg = err?.message || 'Sync pull failed.';
@@ -383,77 +385,99 @@ export const UnifiedSyncBackupCoordinator: React.FC = () => {
         isPullingRef.current = false;
       }
     },
-    [getLocalDataObject, replaceAllAppDataFromBackup, runSyncPush]
+    [getLocalDataObject, runSyncPush]
   );
 
-  // 1. Debounced Send (~30 seconds after last edit)
+  // 1. Non-blocking Debounced Change Detection & Send (~30 seconds after last edit)
   useEffect(() => {
     if (applyingRemoteDataRef.current) return;
-    const currentData = getLocalDataObject();
-    const hash = computeBackupContentHash(currentData);
 
-    // Initialize baseline hash on first mount without triggering an edit push
-    if (lastObservedHashRef.current === null) {
+    if (hashCheckTimerRef.current !== null) {
+      window.clearTimeout(hashCheckTimerRef.current);
+    }
+
+    // Offload JSON serialization & hash comparison to a 1.2s quiet timer so UI stays 60fps
+    hashCheckTimerRef.current = window.setTimeout(() => {
+      hashCheckTimerRef.current = null;
+      if (applyingRemoteDataRef.current) return;
+
+      const currentData = getLocalDataObject();
+      const hash = computeBackupContentHash(currentData);
+
+      // Initialize baseline hash on first mount without triggering an edit push
+      if (lastObservedHashRef.current === null) {
+        lastObservedHashRef.current = hash;
+        return;
+      }
+
+      if (hash === lastObservedHashRef.current) return;
       lastObservedHashRef.current = hash;
-      return;
-    }
 
-    if (hash === lastObservedHashRef.current) return;
-    lastObservedHashRef.current = hash;
+      const nowIso = new Date().toISOString();
+      hasUnsyncedChangesRef.current = true;
+      const settings = getUnifiedSyncSettings();
+      if (settings.activeProvider === 'none') {
+        saveUnifiedSyncSettings({ lastLocalEditAt: nowIso });
+        return;
+      }
 
-    const nowIso = new Date().toISOString();
-    hasUnsyncedChangesRef.current = true;
-    const settings = getUnifiedSyncSettings();
-    if (settings.activeProvider === 'none') {
-      saveUnifiedSyncSettings({ lastLocalEditAt: nowIso });
-      return;
-    }
+      if (isUploadingRef.current) {
+        pendingReuploadRef.current = true;
+        saveUnifiedSyncSettings({
+          status: 'waiting',
+          lastLocalEditAt: nowIso,
+        });
+        return;
+      }
 
-    if (isUploadingRef.current) {
-      pendingReuploadRef.current = true;
       saveUnifiedSyncSettings({
         status: 'waiting',
         lastLocalEditAt: nowIso,
       });
-      return;
-    }
 
-    saveUnifiedSyncSettings({
-      status: 'waiting',
-      lastLocalEditAt: nowIso,
-    });
+      if (debounceTimerRef.current !== null) {
+        window.clearTimeout(debounceTimerRef.current);
+      }
+      debounceTimerRef.current = window.setTimeout(() => {
+        debounceTimerRef.current = null;
+        void runSyncPush({ manual: false });
+      }, 30000); // ~30 seconds after last edit
+    }, 1200);
 
-    if (debounceTimerRef.current !== null) {
-      window.clearTimeout(debounceTimerRef.current);
-    }
-    debounceTimerRef.current = window.setTimeout(() => {
-      debounceTimerRef.current = null;
-      void runSyncPush({ manual: false });
-    }, 30000); // ~30 seconds after last edit
+    return () => {
+      if (hashCheckTimerRef.current !== null) {
+        window.clearTimeout(hashCheckTimerRef.current);
+        hashCheckTimerRef.current = null;
+      }
+    };
   }, [
     tasks,
     habits,
+    routines,
     medications,
     doseLogs,
     bills,
     goals,
+    scheduleItems,
+    inboxItems,
     quotes,
     tags,
     todoLists,
+    listGroups,
+    deletedIds,
+    profile.updatedAt,
     getLocalDataObject,
     runSyncPush,
   ]);
 
   // 2. Receive on app open, on return to foreground, and Send when going to background
   useEffect(() => {
-    // Initial pull on app open
     const initTimer = window.setTimeout(() => {
       void runSyncPull({ manual: false });
-    }, 1500);
+    }, 1800);
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
-        // Send when the app goes to the background
         if (debounceTimerRef.current !== null) {
           window.clearTimeout(debounceTimerRef.current);
           debounceTimerRef.current = null;
@@ -462,7 +486,6 @@ export const UnifiedSyncBackupCoordinator: React.FC = () => {
           void runSyncPush({ manual: false, fromBackground: true });
         }
       } else if (document.visibilityState === 'visible') {
-        // Receive on return to the foreground
         void runSyncPull({ manual: false });
       }
     };
@@ -527,9 +550,9 @@ export const UnifiedSyncBackupCoordinator: React.FC = () => {
         rawData: getLocalDataObject(),
         password: detail.password,
         isManual: true,
-        firebaseUser,
-        joplinSyncSettings,
-        syncDriveNow,
+        firebaseUser: appApiRef.current.firebaseUser,
+        joplinSyncSettings: appApiRef.current.joplinSyncSettings,
+        syncDriveNow: appApiRef.current.syncDriveNow,
       });
       if (res.ran) {
         const failedCount = Object.values(res.results).filter((r) => r && !r.ok).length;
@@ -556,7 +579,7 @@ export const UnifiedSyncBackupCoordinator: React.FC = () => {
       window.removeEventListener(TRIGGER_UNIFIED_SYNC_NOW_EVENT, onTriggerSyncNow);
       window.removeEventListener(TRIGGER_UNIFIED_BACKUP_NOW_EVENT, onTriggerBackupNow);
     };
-  }, [firebaseUser, getLocalDataObject, joplinSyncSettings, runSyncPull, syncDriveNow]);
+  }, [getLocalDataObject, runSyncPull]);
 
   // 5. BACKUP Schedule & Catch-up on app open (runs missed scheduled backup when app opens)
   const [backupConfigTick, setBackupConfigTick] = useState(0);
@@ -586,19 +609,17 @@ export const UnifiedSyncBackupCoordinator: React.FC = () => {
         await executeMultiDestinationBackup({
           rawData: getLocalDataObject(),
           isManual: false,
-          firebaseUser,
-          joplinSyncSettings,
-          syncDriveNow,
+          firebaseUser: appApiRef.current.firebaseUser,
+          joplinSyncSettings: appApiRef.current.joplinSyncSettings,
+          syncDriveNow: appApiRef.current.syncDriveNow,
         });
       }
     };
 
-    // Catch-up check shortly after app opens
     const catchUpTimer = window.setTimeout(() => {
       void checkAndRunScheduledBackup();
-    }, 3500);
+    }, 4500);
 
-    // Periodic check while app is open
     const intervalTimer = window.setInterval(() => {
       void checkAndRunScheduledBackup();
     }, 60000);
@@ -607,96 +628,7 @@ export const UnifiedSyncBackupCoordinator: React.FC = () => {
       window.clearTimeout(catchUpTimer);
       window.clearInterval(intervalTimer);
     };
-  }, [backupConfigTick, firebaseUser, getLocalDataObject, joplinSyncSettings, syncDriveNow]);
+  }, [backupConfigTick, getLocalDataObject]);
 
-  if (!olderCloudPrompt) return null;
-
-  return (
-    <div
-      className="fixed inset-0 z-[140] flex items-center justify-center bg-black/55 p-4"
-      role="dialog"
-      aria-modal="true"
-    >
-      <div className="w-full max-w-md rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-2xl p-5 space-y-4">
-        <div className="flex items-start gap-3">
-          <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-950/70 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
-            <AlertTriangle className="w-5 h-5" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <h3 className="text-sm font-bold text-slate-900 dark:text-zinc-100">
-              Older Cloud Copy Found on {olderCloudPrompt.providerLabel}
-            </h3>
-            <p className="text-xs text-slate-600 dark:text-zinc-400 mt-1 leading-relaxed">
-              The cloud copy was updated{' '}
-              <span className="font-semibold text-slate-800 dark:text-zinc-200">
-                {formatRelativeSyncTime(olderCloudPrompt.remoteUpdatedAt)}
-              </span>
-              , which is older than your latest edits on this device (
-              <span className="font-semibold text-slate-800 dark:text-zinc-200">
-                {formatRelativeSyncTime(olderCloudPrompt.localUpdatedAt)}
-              </span>
-              ). How would you like to proceed?
-            </p>
-          </div>
-        </div>
-
-        <div className="space-y-2 pt-1">
-          <button
-            type="button"
-            onClick={async () => {
-              const promptData = olderCloudPrompt;
-              setOlderCloudPrompt(null);
-              const merged = mergeDriveData(getLocalDataObject(), promptData.remoteEnvelope.data);
-              applyingRemoteDataRef.current = true;
-              replaceAllAppDataFromBackup(JSON.stringify(merged));
-              window.setTimeout(() => {
-                applyingRemoteDataRef.current = false;
-              }, 300);
-              await runSyncPush({ manual: true });
-            }}
-            className="w-full h-10 px-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer"
-          >
-            <GitMerge className="w-4 h-4" />
-            <span>Merge Per Item by Updated Time (Recommended)</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={async () => {
-              setOlderCloudPrompt(null);
-              await runSyncPush({ manual: true });
-            }}
-            className="w-full h-10 px-3.5 rounded-xl bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-800 dark:text-zinc-100 text-xs font-semibold flex items-center justify-center gap-2 transition cursor-pointer"
-          >
-            <Upload className="w-4 h-4" />
-            <span>Keep Local Data &amp; Overwrite Cloud</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              const promptData = olderCloudPrompt;
-              setOlderCloudPrompt(null);
-              applyingRemoteDataRef.current = true;
-              replaceAllAppDataFromBackup(JSON.stringify(promptData.remoteEnvelope.data));
-              window.setTimeout(() => {
-                applyingRemoteDataRef.current = false;
-              }, 300);
-              hasUnsyncedChangesRef.current = false;
-              saveUnifiedSyncSettings({
-                status: 'synced',
-                lastSyncedAt: promptData.remoteUpdatedAt,
-                lastError: null,
-              });
-              showAndroidToast('Replaced local data with cloud copy', 2400, 'default');
-            }}
-            className="w-full h-10 px-3.5 rounded-xl border border-rose-200 dark:border-rose-900/60 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-400 text-xs font-semibold flex items-center justify-center gap-2 transition cursor-pointer"
-          >
-            <CloudDownload className="w-4 h-4" />
-            <span>Replace Local Data with Older Cloud Copy</span>
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+  return null;
 };

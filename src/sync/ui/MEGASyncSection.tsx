@@ -215,27 +215,21 @@ export const MEGASyncSection: React.FC<MEGASyncSectionProps> = ({
     setSyncStatus('syncing');
     setErrorMessage(null);
     try {
-      const localLastSyncedAt = getStoredMegaAuth()?.lastSyncedAt || null;
-      const remoteInfo = await megaSyncProvider.getLastSyncInfo();
-
-      if (remoteInfo && isRemoteNewerThanLocal(remoteInfo.lastModified, localLastSyncedAt)) {
+      let localData = getLocalAppDataObject();
+      try {
         const remote = await megaSyncProvider.restore();
-        if (remote.found && remote.envelope) {
-          setConflictState({
-            remoteEnvelope: remote.envelope,
-            remoteLastModified: remote.lastModified || remote.envelope.updatedAt,
-            remoteSizeBytes: remote.fileSizeBytes,
-          });
-          setSyncStatus('idle');
-          return;
+        if (remote.found && remote.envelope && remote.envelope.data) {
+          localData = mergeDriveData(localData, remote.envelope.data);
+          replaceAllAppDataFromBackup(JSON.stringify(localData));
         }
+      } catch {
+        // Proceed to push if no remote file exists yet
       }
 
-      const localData = getLocalAppDataObject();
       await megaSyncProvider.backup(localData);
       setStoredAuth(getStoredMegaAuth());
       setSyncStatus('synced');
-      showAndroidToast('Encrypted backup synced to MEGA', 2600, 'success');
+      showAndroidToast('Synced with MEGA (items merged)', 2400, 'success');
     } catch (err: any) {
       const msg = err?.message || 'MEGA sync failed.';
       setSessionActive(hasActiveMegaSession());

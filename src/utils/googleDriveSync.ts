@@ -688,7 +688,16 @@ export function isRemoteNewerThanLocal(
 
 function getItemTimestampMs(item: any): number {
   if (!item || typeof item !== 'object') return 0;
-  const candidates = [item.updatedAt, item.completedAt, item.loggedAt, item.createdAt, item.lastUpdated];
+  const candidates = [
+    item.updatedAt,
+    item.completedAt,
+    item.loggedAt,
+    item.paidAt,
+    item.paidDate,
+    item.archivedAt,
+    item.lastUpdated,
+    item.createdAt,
+  ];
   for (const c of candidates) {
     if (typeof c === 'string' && c) {
       const parsed = Date.parse(c);
@@ -698,13 +707,36 @@ function getItemTimestampMs(item: any): number {
   return 0;
 }
 
+function extractDeletedIdSet(rawDeleted: unknown): Set<string> {
+  const set = new Set<string>();
+  if (Array.isArray(rawDeleted)) {
+    for (const id of rawDeleted) {
+      if (typeof id === 'string' && id.trim()) {
+        set.add(id.trim());
+      }
+    }
+  } else if (rawDeleted && typeof rawDeleted === 'object') {
+    for (const [k, v] of Object.entries(rawDeleted as Record<string, unknown>)) {
+      // Handle accidental array-to-object conversion {"0": "task_123"} as well as {"task_123": "2026-..."}
+      if (/^\d+$/.test(k) && typeof v === 'string' && v.trim()) {
+        set.add(v.trim());
+      } else if (k.trim()) {
+        set.add(k.trim());
+      }
+    }
+  }
+  return set;
+}
+
 /**
- * Union two arrays of objects, deduplicating by `id`, resolving conflicts
- * with last-write-wins by `updatedAt` (falling back to completedAt/loggedAt/createdAt).
+ * Union two arrays of objects, deduplicating by `id`, filtering out tombstone `deletedSet`,
+ * and resolving conflicts with Joplin-style last-write-wins by `updatedAt`
+ * (plus habit completionHistory dictionary merging).
  */
 export function mergeCollectionByIdLWW<T extends Record<string, any>>(
   localItems: T[] | undefined,
-  remoteItems: T[] | undefined
+  remoteItems: T[] | undefined,
+  deletedSet?: Set<string>
 ): T[] {
   const localArr = Array.isArray(localItems) ? localItems : [];
   const remoteArr = Array.isArray(remoteItems) ? remoteItems : [];
@@ -713,32 +745,60 @@ export function mergeCollectionByIdLWW<T extends Record<string, any>>(
   const noIdItems: T[] = [];
 
   for (const item of localArr) {
-    const id = item && typeof item.id === 'string' ? item.id : null;
+    if (!item || typeof item !== 'object') continue;
+    const id = typeof item.id === 'string' ? item.id : null;
     if (!id) {
       noIdItems.push(item);
       continue;
     }
+    if (deletedSet?.has(id)) continue;
     byId.set(id, item);
   }
 
   for (const remoteItem of remoteArr) {
-    const id = remoteItem && typeof remoteItem.id === 'string' ? remoteItem.id : null;
+    if (!remoteItem || typeof remoteItem !== 'object') continue;
+    const id = typeof remoteItem.id === 'string' ? remoteItem.id : null;
     if (!id) {
       noIdItems.push(remoteItem);
       continue;
     }
+    if (deletedSet?.has(id)) continue;
+
     const existingLocal = byId.get(id);
     if (!existingLocal) {
       byId.set(id, remoteItem);
     } else {
       const localTs = getItemTimestampMs(existingLocal);
       const remoteTs = getItemTimestampMs(remoteItem);
-      // Last-write-wins by updatedAt per item
-      if (remoteTs > localTs) {
+
+      // Special handling for habits / routine items with completionHistory maps
+      const hasCompletionHistory =
+        (existingLocal.completionHistory && typeof existingLocal.completionHistory === 'object') ||
+        (remoteItem.completionHistory && typeof remoteItem.completionHistory === 'object');
+
+      if (hasCompletionHistory) {
+        const mergedHistory =
+          remoteTs >= localTs
+            ? { ...(existingLocal.completionHistory || {}), ...(remoteItem.completionHistory || {}) }
+            : { ...(remoteItem.completionHistory || {}), ...(existingLocal.completionHistory || {}) };
+        const winner = remoteTs >= localTs ? remoteItem : existingLocal;
+        const loser = remoteTs >= localTs ? existingLocal : remoteItem;
+        byId.set(id, {
+          ...loser,
+          ...winner,
+          completionHistory: mergedHistory,
+          bestStreak: Math.max(
+            Number(existingLocal.bestStreak || 0),
+            Number(remoteItem.bestStreak || 0)
+          ),
+        } as T);
+      } else if (remoteTs > localTs) {
         byId.set(id, remoteItem);
-      } else if (remoteTs === localTs) {
-        // Tie-breaker: merge keys preserving local edits while picking up any missing remote fields
-        byId.set(id, { ...remoteItem, ...existingLocal });
+      } else if (localTs > remoteTs) {
+        byId.set(id, existingLocal);
+      } else {
+        // Equal timestamp tie-breaker: prefer incoming remote fields on top of local
+        byId.set(id, { ...existingLocal, ...remoteItem });
       }
     }
   }
@@ -766,7 +826,9 @@ const KNOWN_ARRAY_COLLECTIONS = [
 ] as const;
 
 /**
- * Merge Both: union all lists, deduplicate by item ID, last-write-wins by updatedAt per item.
+ * Joplin-Style Item-Level LWW + Tombstone Merge:
+ * - Unions all entity collections, removes any ID in `deletedIds`, resolves per-item edits by `updatedAt`.
+ * - Preserves `deletedIds` as `string[]` so AppContext tombstone state stays valid.
  */
 export function mergeDriveData(
   localData: Record<string, any>,
@@ -775,18 +837,29 @@ export function mergeDriveData(
   const safeLocal = localData && typeof localData === 'object' ? localData : {};
   const safeRemote = remoteData && typeof remoteData === 'object' ? remoteData : {};
 
-  const merged: Record<string, any> = {
-    ...safeRemote,
-    ...safeLocal,
-    version: Math.max(Number(safeLocal.version || 2), Number(safeRemote.version || 2)),
-    exportedAt: new Date().toISOString(),
-  };
+  // Build unified tombstone set from both local and remote deletedIds
+  const localDeletedSet = extractDeletedIdSet(safeLocal.deletedIds);
+  const remoteDeletedSet = extractDeletedIdSet(safeRemote.deletedIds);
+  const deletedSet = new Set<string>([...localDeletedSet, ...remoteDeletedSet]);
+
+  const localExportedTs = safeLocal.exportedAt ? Date.parse(String(safeLocal.exportedAt)) : 0;
+  const remoteExportedTs = safeRemote.exportedAt ? Date.parse(String(safeRemote.exportedAt)) : 0;
+  const preferRemoteScalar =
+    Number.isFinite(remoteExportedTs) &&
+    (!Number.isFinite(localExportedTs) || remoteExportedTs >= localExportedTs);
+
+  const merged: Record<string, any> = preferRemoteScalar
+    ? { ...safeLocal, ...safeRemote }
+    : { ...safeRemote, ...safeLocal };
+
+  merged.version = Math.max(Number(safeLocal.version || 2), Number(safeRemote.version || 2));
+  merged.exportedAt = new Date().toISOString();
 
   // Merge all known + any additional array-of-objects collections dynamically
   const allCollectionKeys = new Set<string>(KNOWN_ARRAY_COLLECTIONS);
   for (const key of [...Object.keys(safeLocal), ...Object.keys(safeRemote)]) {
     if (Array.isArray(safeLocal[key]) || Array.isArray(safeRemote[key])) {
-      if (key !== 'favoriteQuoteIds' && key !== 'widgets') {
+      if (key !== 'favoriteQuoteIds' && key !== 'widgets' && key !== 'deletedIds') {
         allCollectionKeys.add(key);
       }
     }
@@ -794,18 +867,41 @@ export function mergeDriveData(
 
   for (const key of allCollectionKeys) {
     if (safeLocal[key] !== undefined || safeRemote[key] !== undefined) {
-      merged[key] = mergeCollectionByIdLWW(safeLocal[key], safeRemote[key]);
+      merged[key] = mergeCollectionByIdLWW(safeLocal[key], safeRemote[key], deletedSet);
     }
   }
 
-  // Merge profile by updatedAt LWW
+  // Also support legacy `schedule` array alias if present
+  if (
+    (!Array.isArray(merged.scheduleItems) || merged.scheduleItems.length === 0) &&
+    (Array.isArray(safeLocal.schedule) || Array.isArray(safeRemote.schedule))
+  ) {
+    merged.scheduleItems = mergeCollectionByIdLWW(
+      safeLocal.scheduleItems || safeLocal.schedule,
+      safeRemote.scheduleItems || safeRemote.schedule,
+      deletedSet
+    );
+  }
+
+  // Merge profile by updatedAt LWW (preserving non-Guest profile details)
   if (safeLocal.profile || safeRemote.profile) {
-    const localProfTs = getItemTimestampMs(safeLocal.profile);
-    const remoteProfTs = getItemTimestampMs(safeRemote.profile);
-    merged.profile =
-      remoteProfTs > localProfTs
-        ? { ...(safeLocal.profile || {}), ...(safeRemote.profile || {}) }
-        : { ...(safeRemote.profile || {}), ...(safeLocal.profile || {}) };
+    const localProf = safeLocal.profile || {};
+    const remoteProf = safeRemote.profile || {};
+    const localProfTs = getItemTimestampMs(localProf);
+    const remoteProfTs = getItemTimestampMs(remoteProf);
+    const isLocalGuest = (!localProf.name || localProf.name === 'Guest') && !localProf.nickname && !localProf.bio;
+    const isRemoteGuest = (!remoteProf.name || remoteProf.name === 'Guest') && !remoteProf.nickname && !remoteProf.bio;
+
+    if (isLocalGuest && !isRemoteGuest) {
+      merged.profile = { ...localProf, ...remoteProf };
+    } else if (!isLocalGuest && isRemoteGuest) {
+      merged.profile = { ...remoteProf, ...localProf };
+    } else {
+      merged.profile =
+        remoteProfTs >= localProfTs
+          ? { ...localProf, ...remoteProf }
+          : { ...remoteProf, ...localProf };
+    }
   }
 
   // Merge quoteLibrary (custom quotes, edits, deletions, timestamped favourites, categories)
@@ -814,7 +910,6 @@ export function mergeDriveData(
     merged.quoteLibrary = mergedQuoteLibrary;
     merged.favoriteQuoteIds = deriveFavoriteIdsFromQuoteSyncData(mergedQuoteLibrary);
   } else if (Array.isArray(safeLocal.favoriteQuoteIds) || Array.isArray(safeRemote.favoriteQuoteIds)) {
-    // Legacy fallback when neither side has quoteLibrary
     const favSet = new Set<string>([
       ...(Array.isArray(safeRemote.favoriteQuoteIds) ? safeRemote.favoriteQuoteIds : []),
       ...(Array.isArray(safeLocal.favoriteQuoteIds) ? safeLocal.favoriteQuoteIds : []),
@@ -822,37 +917,38 @@ export function mergeDriveData(
     merged.favoriteQuoteIds = Array.from(favSet);
   }
 
-  // Merge hydration (take newer date or higher intake for same day)
+  // Merge hydration (take newer date or merge todayLogs / logs for same day)
   if (safeLocal.hydration && safeRemote.hydration) {
-    const localDate = String(safeLocal.hydration.date || '');
-    const remoteDate = String(safeRemote.hydration.date || '');
+    const localDate = String(safeLocal.hydration.date || safeLocal.hydration.lastResetDate || '');
+    const remoteDate = String(safeRemote.hydration.date || safeRemote.hydration.lastResetDate || '');
     if (remoteDate > localDate) {
       merged.hydration = safeRemote.hydration;
-    } else if (remoteDate === localDate) {
+    } else if (localDate > remoteDate) {
+      merged.hydration = safeLocal.hydration;
+    } else {
       merged.hydration = {
-        ...safeLocal.hydration,
+        ...(preferRemoteScalar ? safeLocal.hydration : safeRemote.hydration),
+        ...(preferRemoteScalar ? safeRemote.hydration : safeLocal.hydration),
         currentMl: Math.max(
           Number(safeLocal.hydration.currentMl || 0),
           Number(safeRemote.hydration.currentMl || 0)
         ),
-        logs: mergeCollectionByIdLWW(safeLocal.hydration.logs, safeRemote.hydration.logs),
+        todayLogs: mergeCollectionByIdLWW(
+          safeLocal.hydration.todayLogs,
+          safeRemote.hydration.todayLogs,
+          deletedSet
+        ),
+        logs: mergeCollectionByIdLWW(
+          safeLocal.hydration.logs,
+          safeRemote.hydration.logs,
+          deletedSet
+        ),
       };
-    } else {
-      merged.hydration = safeLocal.hydration;
     }
   }
 
-  // Merge deletedIds tombstone map keeping latest timestamp per id
-  if (safeLocal.deletedIds || safeRemote.deletedIds) {
-    const nextDeleted: Record<string, string> = { ...(safeRemote.deletedIds || {}) };
-    for (const [id, ts] of Object.entries(safeLocal.deletedIds || {})) {
-      const existing = nextDeleted[id];
-      if (!existing || String(ts) > String(existing)) {
-        nextDeleted[id] = String(ts);
-      }
-    }
-    merged.deletedIds = nextDeleted;
-  }
+  // Always preserve deletedIds as string[] (up to last 500 tombstones)
+  merged.deletedIds = Array.from(deletedSet).slice(-500);
 
   return merged;
 }
