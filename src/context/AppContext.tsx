@@ -34,6 +34,8 @@ import {
   TaskStatus,
   ThemeStyle,
   TodoList,
+  TrashBinItem,
+  TrashItemType,
   UserProfile,
   WorkflowStage,
 } from '../types';
@@ -170,6 +172,10 @@ interface AppContextType {
   // Inbox & Universal Capture
   inboxItems: InboxItem[];
   deletedIds: string[];
+  trashBin: TrashBinItem[];
+  restoreFromTrash: (binId: string) => boolean;
+  permanentlyDeleteFromTrash: (binId: string) => void;
+  emptyTrashBin: () => void;
   addInboxItem: (item: Omit<InboxItem, 'id' | 'createdAt'>) => void;
   updateInboxItem: (id: string, updates: Partial<InboxItem>) => void;
   deleteInboxItem: (id: string) => void;
@@ -1472,6 +1478,102 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       } catch {}
       return next;
     });
+  }, []);
+
+  const removeDeletedId = useCallback((id: string) => {
+    if (!id) return;
+    setDeletedIds(prev => {
+      if (!prev.includes(id)) return prev;
+      const next = prev.filter(item => item !== id);
+      try {
+        localStorage.setItem(`${LOCAL_STORAGE_KEY}_deleted_ids`, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  }, []);
+
+  // 30-day Recycle Bin (automatically vanishes after 30 days)
+  const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+  const TRASH_BIN_STORAGE_KEY = `${LOCAL_STORAGE_KEY}_trash_bin`;
+
+  const pruneExpiredTrashItems = useCallback((items: TrashBinItem[]): TrashBinItem[] => {
+    const nowMs = Date.now();
+    return items.filter(item => {
+      if (!item || typeof item !== 'object' || !item.id || !item.itemId) return false;
+      const expMs = Date.parse(item.expiresAt);
+      if (Number.isFinite(expMs) && expMs <= nowMs) return false;
+      return true;
+    });
+  }, []);
+
+  const [trashBin, setTrashBin] = useState<TrashBinItem[]>(() => {
+    try {
+      const saved = localStorage.getItem(TRASH_BIN_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          const nowMs = Date.now();
+          const active = parsed.filter(
+            (item: any): item is TrashBinItem =>
+              Boolean(item && typeof item === 'object' && item.id && item.itemId) &&
+              (!Number.isFinite(Date.parse(item.expiresAt)) || Date.parse(item.expiresAt) > nowMs)
+          );
+          if (active.length !== parsed.length) {
+            localStorage.setItem(TRASH_BIN_STORAGE_KEY, JSON.stringify(active));
+          }
+          return active;
+        }
+      }
+    } catch {}
+    return [];
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(TRASH_BIN_STORAGE_KEY, JSON.stringify(trashBin));
+    } catch {}
+  }, [trashBin, TRASH_BIN_STORAGE_KEY]);
+
+  // Periodically purge any items that crossed the 30-day retention window
+  useEffect(() => {
+    const purge = () => {
+      setTrashBin(prev => {
+        const next = pruneExpiredTrashItems(prev);
+        return next.length === prev.length ? prev : next;
+      });
+    };
+    const timer = window.setInterval(purge, 60 * 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, [pruneExpiredTrashItems]);
+
+  const moveToTrashBin = useCallback(
+    (type: TrashItemType, payload: any, title: string, subtitle?: string) => {
+      if (!payload || typeof payload !== 'object') return;
+      const itemId = String(payload.id || `${type}_${Date.now()}`);
+      const nowMs = Date.now();
+      const deletedAt = new Date(nowMs).toISOString();
+      const expiresAt = new Date(nowMs + TRASH_RETENTION_MS).toISOString();
+      const entry: TrashBinItem = {
+        id: `bin_${type}_${itemId}_${nowMs}`,
+        itemId,
+        type,
+        title: (title || 'Untitled item').trim(),
+        subtitle,
+        deletedAt,
+        expiresAt,
+        payload,
+      };
+      setTrashBin(prev => [entry, ...pruneExpiredTrashItems(prev).filter(i => i.itemId !== itemId)].slice(0, 300));
+    },
+    [TRASH_RETENTION_MS, pruneExpiredTrashItems]
+  );
+
+  const permanentlyDeleteFromTrash = useCallback((binId: string) => {
+    setTrashBin(prev => prev.filter(item => item.id !== binId));
+  }, []);
+
+  const emptyTrashBin = useCallback(() => {
+    setTrashBin([]);
   }, []);
 
   // Strip any Google Workspace OAuth access tokens (must remain memory-only) and stale Firebase oAuthClientId before persisting
@@ -2933,6 +3035,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const deleteMedication = (id: string) => {
+    const existing = medications.find(m => m.id === id);
+    if (existing) {
+      moveToTrashBin('medication', existing, existing.name, existing.dosage);
+    }
     recordDeletedId(id);
     setMedications(prev => prev.filter(m => m.id !== id));
   };
@@ -3396,6 +3502,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const deleteListGroup = (id: string) => {
+    const existing = listGroups.find(g => g.id === id);
+    if (existing) {
+      moveToTrashBin('list_group', existing, existing.name);
+    }
     recordDeletedId(id);
     setListGroups(prev => prev.filter(g => g.id !== id));
   };
@@ -3421,6 +3531,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const deleteTodoList = (id: string) => {
+    const existing = todoLists.find(l => l.id === id);
+    if (existing) {
+      moveToTrashBin('list', existing, existing.name);
+    }
     recordDeletedId(id);
     setTodoLists(prev => prev.filter(l => l.id !== id));
     if (selectedListId === id) setSelectedListId('all');
@@ -3474,6 +3588,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const deleteInboxItem = (id: string) => {
+    const existing = inboxItems.find(item => item.id === id);
+    if (existing) {
+      moveToTrashBin('inbox', existing, existing.title, existing.contextTag);
+    }
     recordDeletedId(id);
     setInboxItems(prev => prev.filter(item => item.id !== id));
   };
@@ -3580,6 +3698,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const deleteTask = (id: string) => {
+    const existing = tasks.find(t => t.id === id);
+    if (existing) {
+      moveToTrashBin('task', existing, existing.title, existing.dueDate || existing.project);
+    }
     recordDeletedId(id);
     setTasks(prev => prev.filter(t => t.id !== id));
   };
@@ -3837,6 +3959,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const deleteScheduleItem = (id: string) => {
+    const existing = scheduleItems.find(s => s.id === id);
+    if (existing) {
+      moveToTrashBin('schedule', existing, existing.title, `${existing.date} ${existing.startTime}`);
+    }
     recordDeletedId(id);
     setScheduleItems(prev => prev.filter(s => s.id !== id));
   };
@@ -3989,6 +4115,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const deleteGoal = (id: string) => {
+    const existing = goals.find(g => g.id === id);
+    if (existing) {
+      moveToTrashBin('goal', existing, existing.title, existing.targetDate);
+    }
     recordDeletedId(id);
     const nowIso = new Date().toISOString();
     setGoals(prev => prev.filter(g => g.id !== id));
@@ -3997,7 +4127,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       prev.map(t => (t.goalId === id ? { ...t, goalId: undefined, updatedAt: nowIso } : t))
     );
     soundEngine.playClick();
-    pushNotification('Goal Deleted', 'Life goal was removed.', 'system');
+    pushNotification('Goal Deleted', 'Life goal moved to Bin (kept 30 days).', 'system');
   };
 
   // Projects derived from Goals for unified task architecture
@@ -4089,6 +4219,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setTags(prev => {
       prev.forEach(t => {
         if (t.name.toLowerCase() === trimmed) {
+          moveToTrashBin('tag', t, `#${t.name}`, t.description);
           recordDeletedId(t.id);
         }
       });
@@ -4108,8 +4239,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     );
 
     soundEngine.playClick();
-    pushNotification('Tag Deleted', `Tag #${trimmed} removed from registry and tasks.`, 'task');
-  }, [pushNotification]);
+    pushNotification('Tag Deleted', `Tag #${trimmed} moved to Bin.`, 'task');
+  }, [pushNotification, moveToTrashBin, recordDeletedId]);
 
   const toggleGoalMilestone = (goalId: string, milestoneId: string) => {
     const nowIso = new Date().toISOString();
@@ -4165,6 +4296,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const deleteBill = (id: string) => {
+    const existing = bills.find(b => b.id === id);
+    if (existing) {
+      moveToTrashBin('bill', existing, existing.title, existing.dueDate);
+    }
     recordDeletedId(id);
     setBills(prev => prev.filter(b => b.id !== id));
   };
@@ -4850,13 +4985,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const deleteHabit = (id: string) => {
+    const existing = habits.find(h => h.id === id);
+    if (existing) {
+      moveToTrashBin('habit', existing, existing.name, existing.category);
+    }
     recordDeletedId(id);
     setHabits(prev => prev.filter(h => h.id !== id));
     setRoutines(prev =>
       prev.map(r => ({
         ...r,
         updatedAt: new Date().toISOString(),
-        items: r.items.filter(i => i.id !== id && i.title.toLowerCase().trim() !== (habits.find(h => h.id === id)?.name.toLowerCase().trim() || ''))
+        items: r.items.filter(i => i.id !== id && i.title.toLowerCase().trim() !== (existing?.name.toLowerCase().trim() || ''))
       }))
     );
   };
@@ -5409,6 +5548,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const deleteQuote = (id: string) => {
+    const existing = quotes.find(q => q.id === id);
+    if (existing) {
+      moveToTrashBin('quote', existing, existing.text.slice(0, 80), existing.author);
+    }
     const now = new Date().toISOString();
     setQuotes(prev => prev.filter(q => q.id !== id));
     setDeletedQuoteIds(prev => (prev.includes(id) ? prev : [...prev, id]));
@@ -5439,6 +5582,63 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       console.error(e);
     }
   };
+
+  const restoreFromTrash = useCallback((binId: string): boolean => {
+    const entry = trashBin.find(item => item.id === binId);
+    if (!entry || !entry.payload) return false;
+    const nowIso = new Date().toISOString();
+    const restoredPayload = { ...entry.payload, updatedAt: nowIso };
+    const targetId = String(restoredPayload.id || entry.itemId);
+
+    removeDeletedId(targetId);
+
+    if (entry.type === 'task') {
+      setTasks(prev => (prev.some(t => t.id === targetId) ? prev : [restoredPayload as TaskItem, ...prev]));
+    } else if (entry.type === 'habit') {
+      setHabits(prev => (prev.some(h => h.id === targetId) ? prev : [restoredPayload as Habit, ...prev]));
+    } else if (entry.type === 'medication') {
+      setMedications(prev => (prev.some(m => m.id === targetId) ? prev : [restoredPayload as Medication, ...prev]));
+    } else if (entry.type === 'goal') {
+      setGoals(prev => (prev.some(g => g.id === targetId) ? prev : [restoredPayload as Goal, ...prev]));
+    } else if (entry.type === 'bill') {
+      setBills(prev => (prev.some(b => b.id === targetId) ? prev : [restoredPayload as Bill, ...prev]));
+    } else if (entry.type === 'schedule') {
+      setScheduleItems(prev =>
+        prev.some(s => s.id === targetId)
+          ? prev
+          : [...prev, restoredPayload as ScheduleItem].sort((a, b) => a.startTime.localeCompare(b.startTime))
+      );
+    } else if (entry.type === 'tag') {
+      setTags(prev => (prev.some(t => t.id === targetId || t.name.toLowerCase() === String(restoredPayload.name || '').toLowerCase()) ? prev : [...prev, restoredPayload as AppTag]));
+    } else if (entry.type === 'list') {
+      setTodoLists(prev => (prev.some(l => l.id === targetId) ? prev : [...prev, restoredPayload as TodoList]));
+    } else if (entry.type === 'list_group') {
+      setListGroups(prev => (prev.some(g => g.id === targetId) ? prev : [...prev, restoredPayload as ListGroup]));
+    } else if (entry.type === 'inbox') {
+      setInboxItems(prev => (prev.some(i => i.id === targetId) ? prev : [restoredPayload as InboxItem, ...prev]));
+    } else if (entry.type === 'quote') {
+      setQuotes(prev => (prev.some(q => q.id === targetId) ? prev : [restoredPayload as QuoteItem, ...prev]));
+      setDeletedQuoteIds(prev => prev.filter(id => id !== targetId));
+      try {
+        const meta = loadQuoteMeta();
+        if (meta.deleted && meta.deleted[targetId]) {
+          delete meta.deleted[targetId];
+          saveQuoteMeta(meta);
+        }
+        const savedDeleted = localStorage.getItem(QUOTE_DELETED_KEY);
+        if (savedDeleted) {
+          const arr = JSON.parse(savedDeleted);
+          if (Array.isArray(arr)) {
+            localStorage.setItem(QUOTE_DELETED_KEY, JSON.stringify(arr.filter((x: string) => x !== targetId)));
+          }
+        }
+      } catch {}
+    }
+
+    setTrashBin(prev => prev.filter(item => item.id !== binId));
+    soundEngine.playSuccessChime();
+    return true;
+  }, [trashBin, removeDeletedId]);
 
   const resetQuotesToDefault = () => {
     try {
@@ -6073,6 +6273,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       favoriteQuoteIds,
       quoteLibrary,
       deletedIds,
+      trashBin,
       exportedAt: new Date().toISOString(),
     });
   };
@@ -6627,6 +6828,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           localStorage.setItem(`${LOCAL_STORAGE_KEY}_deleted_ids`, JSON.stringify(normalizedDeletedIds));
         } catch {}
       }
+      if (Array.isArray(data.trashBin)) {
+        const cleanedBin = pruneExpiredTrashItems(data.trashBin);
+        setTrashBin(cleanedBin);
+        try {
+          localStorage.setItem(TRASH_BIN_STORAGE_KEY, JSON.stringify(cleanedBin));
+        } catch {}
+      }
       if (Array.isArray(data.medications)) {
         setMedications(data.medications);
         try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_meds`, JSON.stringify(data.medications)); } catch {}
@@ -6793,6 +7001,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         : [];
       setDeletedIds(nextDeletedIds);
       try { localStorage.setItem(`${LOCAL_STORAGE_KEY}_deleted_ids`, JSON.stringify(nextDeletedIds)); } catch {}
+
+      const nextTrashBin: TrashBinItem[] = Array.isArray(data.trashBin)
+        ? pruneExpiredTrashItems(data.trashBin)
+        : [];
+      setTrashBin(nextTrashBin);
+      try { localStorage.setItem(TRASH_BIN_STORAGE_KEY, JSON.stringify(nextTrashBin)); } catch {}
 
       const nextMeds: Medication[] = Array.isArray(data.medications) ? data.medications : [];
       setMedications(nextMeds);
@@ -7349,6 +7563,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         triggerUndo,
         selectedDate,
         setSelectedDate,
+        trashBin,
+        restoreFromTrash,
+        permanentlyDeleteFromTrash,
+        emptyTrashBin,
       }}
     >
       {children}

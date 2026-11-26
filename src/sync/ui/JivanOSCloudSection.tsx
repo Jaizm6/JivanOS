@@ -1,39 +1,30 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  Cloud,
-  RefreshCw,
-  Check,
-  X,
   AlertTriangle,
   CloudDownload,
-  GitMerge,
-  Smartphone,
-  LogOut,
-  ExternalLink,
+  CreditCard,
   Download,
-  Sparkles,
-  Mail,
-  Lock,
   Eye,
   EyeOff,
+  GitMerge,
   History,
+  Lock,
+  Mail,
   Radio,
+  Smartphone,
+  Sparkles,
+  X,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { showAndroidToast } from '../../components/common/AndroidToast';
 import { resendEmailVerification } from '../../lib/firebase';
 import {
   DriveBackupEnvelope,
-  computeInitials,
   formatDriveFileSize,
   formatRelativeSyncTime,
-  isRemoteNewerThanLocal,
   mergeDriveData,
 } from '../../utils/googleDriveSync';
-import {
-  JIVANOS_SUBSCRIBE_URL,
-  useSubscription,
-} from '../hooks/useSubscription';
+import { useSubscription } from '../hooks/useSubscription';
 import {
   CloudSyncHistoryItem,
   JIVANOS_CLOUD_STATE_EVENT,
@@ -42,12 +33,13 @@ import {
   getStoredCloudMeta,
   updateStoredCloudMeta,
 } from '../providers/FirestoreSyncProvider';
-
 import {
   SyncProviderMenuItem,
   SyncProviderRow,
   SyncRowStatus,
 } from '../../components/settings/SyncProviderRow';
+import { activateSyncProviderIfNone } from '../unifiedSyncBackupEngine';
+import { JivanOSPaymentModal } from './JivanOSPaymentModal';
 
 interface CloudConflictState {
   remoteEnvelope: DriveBackupEnvelope;
@@ -59,6 +51,12 @@ interface CloudConflictState {
 export interface JivanOSCloudSectionProps {
   isFirst?: boolean;
   isLast?: boolean;
+  onBackupNow?: () => void;
+  isBackingUp?: boolean;
+  onOpenSyncOptions?: () => void;
+  onOpenBackupOptions?: (onRestore?: () => void) => void;
+  isActiveSyncProvider?: boolean;
+  isBackupEnabled?: boolean;
 }
 
 const JivanOSMark: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) => (
@@ -105,6 +103,12 @@ const GoogleLogoSmall: React.FC = () => (
 export const JivanOSCloudSection: React.FC<JivanOSCloudSectionProps> = ({
   isFirst = false,
   isLast = false,
+  onBackupNow,
+  isBackingUp = false,
+  onOpenSyncOptions,
+  onOpenBackupOptions,
+  isActiveSyncProvider = false,
+  isBackupEnabled = false,
 }) => {
   const { exportEncryptedJSON, replaceAllAppDataFromBackup } = useApp();
   const sub = useSubscription();
@@ -125,6 +129,9 @@ export const JivanOSCloudSection: React.FC<JivanOSCloudSectionProps> = ({
   const [conflictState, setConflictState] = useState<CloudConflictState | null>(null);
   const [isResolvingConflict, setIsResolvingConflict] = useState(false);
   const [isExportingLastBackup, setIsExportingLastBackup] = useState(false);
+
+  // Payment & Billing modal state
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
 
   // Auth Sheet state (Google + Email/Password)
   const [authSheetMode, setAuthSheetMode] = useState<'trial' | 'signin' | null>(null);
@@ -234,9 +241,18 @@ export const JivanOSCloudSection: React.FC<JivanOSCloudSectionProps> = ({
     setIsAuthenticating(true);
     setAuthSheetError(null);
     try {
-      await firestoreSyncProvider.connect({ method: 'google' });
+      const activateTrialNow = authSheetMode === 'trial';
+      await firestoreSyncProvider.connect({
+        method: 'google',
+        activateTrial: activateTrialNow,
+      });
       setAuthSheetMode(null);
-      showAndroidToast('Signed in to JivanOS Cloud', 2600, 'success');
+      if (activateTrialNow) {
+        activateSyncProviderIfNone('firebase');
+        showAndroidToast('Signed in & 14-day free trial activated!', 2800, 'success');
+      } else {
+        showAndroidToast('Signed in to JivanOS Cloud (Free Account)', 2600, 'success');
+      }
       await refreshSyncHistory();
     } catch (err: any) {
       setAuthSheetError(err?.message || 'Google sign-in failed.');
@@ -251,16 +267,18 @@ export const JivanOSCloudSection: React.FC<JivanOSCloudSectionProps> = ({
     setIsAuthenticating(true);
     setAuthSheetError(null);
     try {
+      const activateTrialNow = authSheetMode === 'trial';
       await firestoreSyncProvider.connect({
         method: emailTab === 'signup' ? 'email-signup' : 'email-signin',
         email: emailInput,
         password: passwordInput,
         displayName: nameInput,
+        activateTrial: activateTrialNow,
       });
       setAuthSheetMode(null);
       setPasswordInput('');
       if (emailTab === 'signup') {
-        showAndroidToast('Account created! Check your email to verify & activate trial.', 4000, 'success');
+        showAndroidToast('Account created! Verify your email to continue.', 3600, 'success');
       } else {
         showAndroidToast('Signed in to JivanOS Cloud', 2600, 'success');
       }
@@ -415,8 +433,11 @@ export const JivanOSCloudSection: React.FC<JivanOSCloudSectionProps> = ({
   const isUnverified = Boolean(sub.user && !sub.emailVerified);
   const isCheckingSub = Boolean(sub.user && sub.emailVerified && sub.loading);
   const isEntitled = Boolean(sub.user && sub.emailVerified && !sub.loading && sub.isPremium);
+  const isFreeAccount = Boolean(
+    sub.user && sub.emailVerified && !sub.loading && sub.status === 'none'
+  );
   const isExpiredOrPaywall = Boolean(
-    sub.user && sub.emailVerified && !sub.loading && !sub.isPremium
+    sub.user && sub.emailVerified && !sub.loading && sub.status === 'expired'
   );
 
   // Derive compact status & label
@@ -429,6 +450,9 @@ export const JivanOSCloudSection: React.FC<JivanOSCloudSectionProps> = ({
   } else if (isCheckingSub) {
     rowStatus = 'syncing';
     statusLabel = 'Checking…';
+  } else if (isFreeAccount) {
+    rowStatus = 'connected';
+    statusLabel = 'Free Plan';
   } else if (isExpiredOrPaywall) {
     rowStatus = 'expired';
     statusLabel = 'Expired';
@@ -444,29 +468,40 @@ export const JivanOSCloudSection: React.FC<JivanOSCloudSectionProps> = ({
       statusLabel = `Trial · ${sub.trialDaysRemaining}d left`;
     } else {
       rowStatus = 'synced';
-      statusLabel = 'Active ✓';
+      statusLabel = sub.plan === 'yearly' ? 'Pro Yearly' : 'Pro Active';
     }
   }
 
   // Compact metadata line when signed in
   const metaLine = isUnverified
-    ? 'Verify inbox to activate 14-day free trial'
+    ? 'Verify inbox to activate cloud sync'
     : isCheckingSub
       ? 'Checking subscription status…'
-      : isExpiredOrPaywall
-        ? 'Sync paused · Your last backup is safe'
-        : sub.status === 'trial'
-          ? isListening
-            ? `Syncing in real-time · ${lastSyncLabel}`
-            : lastSyncLabel
-          : `${lastSyncLabel}${isListening ? ' · Real-time live' : ''}${
-              meta.lastFileSizeBytes !== null
-                ? ` · ${formatDriveFileSize(meta.lastFileSizeBytes)}`
-                : ''
-            }`;
+      : isFreeAccount
+        ? 'Free Account · Start 14-day trial or upgrade to Pro for real-time cloud sync'
+        : isExpiredOrPaywall
+          ? 'Sync paused · Your last backup is safe'
+          : sub.status === 'trial'
+            ? isListening
+              ? `Real-time live · ${lastSyncLabel}`
+              : lastSyncLabel
+            : `${lastSyncLabel}${isListening ? ' · Real-time live' : ''}${
+                meta.lastFileSizeBytes !== null
+                  ? ` · ${formatDriveFileSize(meta.lastFileSizeBytes)}`
+                  : ''
+              }`;
 
   // Overflow menu items for signed-in states
   const extraMenuItems: SyncProviderMenuItem[] = [];
+  if (isSignedIn) {
+    extraMenuItems.push({
+      id: 'plans-billing',
+      label: isEntitled ? 'Manage Plan & Payment' : 'Upgrade to Pro (₹99/mo · ₹499/yr)',
+      sublabel: sub.status === 'active' ? 'Pro' : sub.status === 'trial' ? 'Trial' : 'Free',
+      icon: <CreditCard className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />,
+      onClick: () => setIsPaymentModalOpen(true),
+    });
+  }
   if (isEntitled) {
     extraMenuItems.push({
       id: 'realtime-toggle',
@@ -490,15 +525,16 @@ export const JivanOSCloudSection: React.FC<JivanOSCloudSectionProps> = ({
       });
     }
     extraMenuItems.push({
-      id: 'manage-sub',
-      label: sub.status === 'trial' ? 'Upgrade (₹99/mo · ₹499/yr)' : 'Manage Subscription',
-      icon: <ExternalLink className="w-3.5 h-3.5 text-[#4F46E5] dark:text-indigo-400 shrink-0" />,
-      href: JIVANOS_SUBSCRIBE_URL,
-      onClick: () => {},
+      id: 'switch-to-free',
+      label: 'Pause Pro / Switch to Free Plan',
+      onClick: () => {
+        sub.deactivateTrialOrResetToFree();
+        showAndroidToast('Switched to Free Account tier', 2200, 'default');
+      },
     });
   }
 
-  // Compact expandable content for unverified / expired / optional history drawer
+  // Compact expandable content for unverified / free account / expired / optional history drawer
   let expandedContent: React.ReactNode = null;
   if (isUnverified) {
     expandedContent = (
@@ -508,7 +544,7 @@ export const JivanOSCloudSection: React.FC<JivanOSCloudSectionProps> = ({
           onClick={async () => {
             const verified = await sub.refreshUserVerification();
             if (verified) {
-              showAndroidToast('Email verified! Activating JivanOS Cloud...', 2600, 'success');
+              showAndroidToast('Email verified!', 2600, 'success');
             } else {
               showAndroidToast('Still waiting for email verification.', 2600, 'default');
             }
@@ -533,18 +569,48 @@ export const JivanOSCloudSection: React.FC<JivanOSCloudSectionProps> = ({
         </button>
       </div>
     );
+  } else if (isFreeAccount) {
+    expandedContent = (
+      <div className="pt-2 border-t border-slate-200/70 dark:border-zinc-800 flex flex-wrap items-center gap-2">
+        {sub.canStartTrial && (
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                await sub.activateTrialIfNeeded();
+                activateSyncProviderIfNone('firebase');
+                showAndroidToast('14-Day Free Trial activated!', 2600, 'success');
+              } catch (err: any) {
+                showAndroidToast(err?.message || 'Could not start trial', 2800, 'error');
+              }
+            }}
+            className="h-8 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Activate 14-Day Free Trial</span>
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => setIsPaymentModalOpen(true)}
+          className="h-8 px-3 rounded-lg border border-indigo-300 dark:border-indigo-800 bg-white dark:bg-zinc-900 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 text-xs font-semibold inline-flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap"
+        >
+          <CreditCard className="w-3.5 h-3.5" />
+          <span>Upgrade to Pro (₹99/mo · ₹499/yr)</span>
+        </button>
+      </div>
+    );
   } else if (isExpiredOrPaywall) {
     expandedContent = (
       <div className="pt-2 border-t border-rose-200/80 dark:border-rose-900/50 flex flex-wrap items-center gap-2">
-        <a
-          href={JIVANOS_SUBSCRIBE_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="h-8 px-3 rounded-lg bg-[#4F46E5] hover:bg-[#4338CA] text-white text-xs font-semibold transition inline-flex items-center gap-1.5 whitespace-nowrap"
+        <button
+          type="button"
+          onClick={() => setIsPaymentModalOpen(true)}
+          className="h-8 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold transition inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
         >
-          <span>Renew — ₹99/mo</span>
-          <ExternalLink className="w-3 h-3" />
-        </a>
+          <CreditCard className="w-3.5 h-3.5" />
+          <span>Renew Pro — ₹99/mo · ₹499/yr</span>
+        </button>
         <button
           type="button"
           disabled={isExportingLastBackup}
@@ -585,12 +651,12 @@ export const JivanOSCloudSection: React.FC<JivanOSCloudSectionProps> = ({
     <>
       <SyncProviderRow
         name="JivanOS Cloud"
-        description="Real-time sync · 14-day free trial"
-        extraLine={!isSignedIn ? '₹99/month · ₹499/year' : undefined}
+        description="Real-time encrypted sync · 14-day free trial"
+        extraLine={!isSignedIn ? '₹99/mo · ₹499/yr · Free plan until you upgrade' : undefined}
         badge={
           !isSignedIn ? (
             <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10.5px] font-semibold bg-indigo-50 dark:bg-indigo-950/70 text-[#4F46E5] dark:text-indigo-300 shrink-0">
-              Premium
+              Pro
             </span>
           ) : undefined
         }
@@ -605,30 +671,50 @@ export const JivanOSCloudSection: React.FC<JivanOSCloudSectionProps> = ({
         metaLine={isSignedIn ? metaLine : undefined}
         disconnectedActions={
           !isSignedIn ? (
-            <>
-              <button
-                type="button"
-                id="btn-jivanos-cloud-start-trial"
-                onClick={() => handleOpenAuthSheet('trial')}
-                className="h-8 px-3 rounded-lg bg-[#4F46E5] hover:bg-[#4338CA] active:scale-[0.98] text-white text-xs font-semibold transition inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
-              >
-                <Sparkles className="w-3.5 h-3.5 shrink-0" />
-                <span>Start Free Trial</span>
-              </button>
+            <div className="w-full sm:w-auto grid grid-cols-3 sm:flex items-center gap-1.5">
               <button
                 type="button"
                 id="btn-jivanos-cloud-signin"
                 onClick={() => handleOpenAuthSheet('signin')}
-                className="h-8 px-2.5 rounded-lg border border-slate-300 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-800 text-xs font-medium text-indigo-700 dark:text-indigo-300 transition cursor-pointer whitespace-nowrap"
+                className="h-8 px-2.5 sm:px-3 rounded-lg bg-[#4F46E5] hover:bg-[#4338CA] active:scale-[0.98] text-white text-xs font-semibold transition inline-flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap"
               >
-                Sign In
+                <span>Sign In</span>
               </button>
-            </>
+              <button
+                type="button"
+                id="btn-jivanos-cloud-start-trial"
+                onClick={() => handleOpenAuthSheet('trial')}
+                className="h-8 px-2 sm:px-2.5 rounded-lg border border-indigo-300 dark:border-indigo-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 text-xs font-semibold text-indigo-700 dark:text-indigo-300 transition inline-flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap"
+              >
+                <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                <span>Free Trial</span>
+              </button>
+              <button
+                type="button"
+                id="btn-jivanos-cloud-plans"
+                onClick={() => setIsPaymentModalOpen(true)}
+                className="h-8 px-2 sm:px-2.5 rounded-lg border border-slate-300 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-800 text-xs font-medium text-slate-700 dark:text-zinc-200 transition inline-flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap"
+              >
+                <CreditCard className="w-3.5 h-3.5 shrink-0" />
+                <span>Plans &amp; Pay</span>
+              </button>
+            </div>
           ) : undefined
         }
         onSyncNow={isEntitled ? handleSyncNow : undefined}
+        onBackupNow={isEntitled ? onBackupNow : undefined}
+        onOpenSyncOptions={isEntitled ? onOpenSyncOptions : undefined}
+        onOpenBackupOptions={
+          isEntitled && onOpenBackupOptions
+            ? () => onOpenBackupOptions()
+            : undefined
+        }
+        isActiveSyncProvider={isActiveSyncProvider}
+        isBackupEnabled={isBackupEnabled}
         syncButtonId="btn-jivanos-cloud-sync-now"
+        backupButtonId="btn-jivanos-cloud-backup"
         isSyncing={syncStatus === 'syncing'}
+        isBackingUp={isBackingUp}
         onRetry={isEntitled ? handleSyncNow : undefined}
         extraMenuItems={extraMenuItems}
         onDisconnect={isSignedIn ? handleSignOut : undefined}
@@ -638,6 +724,34 @@ export const JivanOSCloudSection: React.FC<JivanOSCloudSectionProps> = ({
         expandedContent={expandedContent}
         isFirst={isFirst}
         isLast={isLast}
+      />
+
+      {/* Built-in Plans, Trial & Payment Gateway Modal */}
+      <JivanOSPaymentModal
+        isOpen={isPaymentModalOpen}
+        onClose={() => setIsPaymentModalOpen(false)}
+        userEmail={displayEmail}
+        currentStatus={sub.status}
+        currentPlan={sub.plan}
+        expiresAt={sub.expiresAt}
+        trialDaysRemaining={sub.trialDaysRemaining}
+        canStartTrial={sub.canStartTrial}
+        onStartExplicitTrial={async () => {
+          if (!isSignedIn) {
+            setIsPaymentModalOpen(false);
+            handleOpenAuthSheet('trial');
+            return;
+          }
+          await sub.activateTrialIfNeeded();
+          activateSyncProviderIfNone('firebase');
+        }}
+        onActivatePro={(plan, method, referenceId) => {
+          sub.activateProSubscription(plan, method, referenceId);
+          if (isSignedIn) {
+            activateSyncProviderIfNone('firebase');
+          }
+        }}
+        onResetToFree={isSignedIn ? sub.deactivateTrialOrResetToFree : undefined}
       />
 
       {/* Sign-In / Free Trial Sheet (Google + Email/Password) */}
@@ -665,8 +779,8 @@ export const JivanOSCloudSection: React.FC<JivanOSCloudSectionProps> = ({
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5">
                   {authSheetMode === 'trial'
-                    ? 'No credit card required · ₹99/month or ₹499/year after trial'
-                    : 'Access your real-time JivanOS Cloud sync'}
+                    ? 'Explicit opt-in · ₹99/month or ₹499/year after trial'
+                    : 'Sign in on Free Plan or access your Pro subscription (never auto-starts trial)'}
                 </p>
               </div>
               <button
@@ -686,7 +800,11 @@ export const JivanOSCloudSection: React.FC<JivanOSCloudSectionProps> = ({
               className="w-full min-h-[48px] px-4 py-3 rounded-full bg-white dark:bg-zinc-800 hover:bg-slate-50 dark:hover:bg-zinc-700 text-slate-800 dark:text-zinc-100 border border-slate-300 dark:border-zinc-700 text-sm font-semibold shadow-2xs transition flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-60"
             >
               <GoogleLogoSmall />
-              <span>Continue with Google</span>
+              <span>
+                {authSheetMode === 'trial'
+                  ? 'Continue with Google & Start Trial'
+                  : 'Sign In with Google (Free / Pro)'}
+              </span>
             </button>
 
             <div className="flex items-center gap-3 text-[11px] text-slate-400">
@@ -784,15 +902,17 @@ export const JivanOSCloudSection: React.FC<JivanOSCloudSectionProps> = ({
                 {isAuthenticating
                   ? 'Please wait…'
                   : emailTab === 'signup'
-                  ? 'Create Account & Start Trial'
-                  : 'Sign In'}
+                    ? authSheetMode === 'trial'
+                      ? 'Create Account & Start Trial'
+                      : 'Create Free Account'
+                    : 'Sign In'}
               </button>
             </form>
           </div>
         </div>
       )}
 
-      {/* Conflict Resolution Dialog (Restore from Cloud / Keep This Device / Merge Both) */}
+      {/* Conflict Resolution Dialog */}
       {conflictState && (
         <div
           role="alertdialog"

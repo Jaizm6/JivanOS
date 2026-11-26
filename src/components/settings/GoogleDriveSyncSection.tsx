@@ -33,6 +33,7 @@ import {
 import { googleDriveSyncProvider } from '../../sync/providers/GoogleDriveProvider';
 import { getCachedDesktopOAuthAccount } from '../../sync/desktop/DesktopSyncTransport';
 import { isDesktop } from '../../desktop/KeychainService';
+import { activateSyncProviderIfNone } from '../../sync/unifiedSyncBackupEngine';
 
 import { SyncProviderRow } from './SyncProviderRow';
 
@@ -46,6 +47,12 @@ interface ConflictDialogState {
 export interface GoogleDriveSyncSectionProps {
   isFirst?: boolean;
   isLast?: boolean;
+  onBackupNow?: () => void;
+  isBackingUp?: boolean;
+  onOpenSyncOptions?: () => void;
+  onOpenBackupOptions?: (onRestore?: () => void) => void;
+  isActiveSyncProvider?: boolean;
+  isBackupEnabled?: boolean;
 }
 
 const GoogleLogoSvg: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) => (
@@ -76,6 +83,12 @@ const GoogleLogoSvg: React.FC<{ className?: string }> = ({ className = 'w-5 h-5'
 export const GoogleDriveSyncSection: React.FC<GoogleDriveSyncSectionProps> = ({
   isFirst = false,
   isLast = false,
+  onBackupNow,
+  isBackingUp = false,
+  onOpenSyncOptions,
+  onOpenBackupOptions,
+  isActiveSyncProvider = false,
+  isBackupEnabled = false,
 }) => {
   const { exportEncryptedJSON, replaceAllAppDataFromBackup } = useApp();
 
@@ -229,8 +242,9 @@ export const GoogleDriveSyncSection: React.FC<GoogleDriveSyncSectionProps> = ({
     try {
       const connectedAcc = await googleDriveSyncProvider.connect();
       setAccount(connectedAcc);
+      activateSyncProviderIfNone('gdrive');
       showAndroidToast(`Connected as ${connectedAcc.email || connectedAcc.name}`, 2800, 'success');
-      // Automatically check if a newer cloud backup exists before overwriting anything
+      // Automatically merge & sync without conflict popups
       await inspectRemoteBeforeSync('after-connect');
     } catch (err: any) {
       const msg = err?.message || 'Could not connect to Google Drive.';
@@ -388,8 +402,19 @@ export const GoogleDriveSyncSection: React.FC<GoogleDriveSyncSectionProps> = ({
         connectButtonId="btn-m3-connect-google-drive"
         onConnect={handleConnect}
         onSyncNow={isConnected ? () => inspectRemoteBeforeSync('sync-now') : undefined}
+        onBackupNow={isConnected ? onBackupNow : undefined}
+        onOpenSyncOptions={isConnected ? onOpenSyncOptions : undefined}
+        onOpenBackupOptions={
+          isConnected && onOpenBackupOptions
+            ? () => onOpenBackupOptions(() => inspectRemoteBeforeSync('restore-check'))
+            : undefined
+        }
+        isActiveSyncProvider={isActiveSyncProvider}
+        isBackupEnabled={isBackupEnabled}
         syncButtonId="btn-m3-drive-sync-now"
+        backupButtonId="btn-m3-drive-backup"
         isSyncing={syncStatus === 'syncing'}
+        isBackingUp={isBackingUp}
         onRetry={() => (isConnected ? inspectRemoteBeforeSync('sync-now') : handleConnect())}
         autoSyncInterval={activeInterval}
         onSelectInterval={isConnected ? handleSelectInterval : undefined}

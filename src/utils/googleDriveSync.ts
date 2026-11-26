@@ -27,8 +27,8 @@ import {
   mergeQuoteSyncData,
 } from './quoteSync';
 import {
-  auth,
   connectGoogleDriveWithFirebase,
+  gdriveAuth,
   getInMemoryGDriveDisplayName,
   getInMemoryGDriveEmail,
   getInMemoryGDriveToken,
@@ -219,10 +219,10 @@ export function getConnectedDriveAccount(): DriveAccountInfo | null {
   // Check in-memory web token cache
   const webToken = getInMemoryGDriveToken();
   if (webToken) {
-    const email = getInMemoryGDriveEmail() || auth.currentUser?.email || '';
+    const email = getInMemoryGDriveEmail() || gdriveAuth.currentUser?.email || '';
     const name =
       getInMemoryGDriveDisplayName() ||
-      auth.currentUser?.displayName ||
+      gdriveAuth.currentUser?.displayName ||
       (email ? email.split('@')[0] : 'Google User');
     currentConnectedAccount = {
       connected: true,
@@ -859,7 +859,7 @@ export function mergeDriveData(
   const allCollectionKeys = new Set<string>(KNOWN_ARRAY_COLLECTIONS);
   for (const key of [...Object.keys(safeLocal), ...Object.keys(safeRemote)]) {
     if (Array.isArray(safeLocal[key]) || Array.isArray(safeRemote[key])) {
-      if (key !== 'favoriteQuoteIds' && key !== 'widgets' && key !== 'deletedIds') {
+      if (key !== 'favoriteQuoteIds' && key !== 'widgets' && key !== 'deletedIds' && key !== 'trashBin') {
         allCollectionKeys.add(key);
       }
     }
@@ -869,6 +869,29 @@ export function mergeDriveData(
     if (safeLocal[key] !== undefined || safeRemote[key] !== undefined) {
       merged[key] = mergeCollectionByIdLWW(safeLocal[key], safeRemote[key], deletedSet);
     }
+  }
+
+  // Merge 30-day Recycle Bin (trashBin) without filtering by deletedSet; prune expired (>30d) items
+  if (Array.isArray(safeLocal.trashBin) || Array.isArray(safeRemote.trashBin)) {
+    const nowMs = Date.now();
+    const activeIds = new Set<string>();
+    for (const key of KNOWN_ARRAY_COLLECTIONS) {
+      const arr = merged[key];
+      if (Array.isArray(arr)) {
+        for (const entry of arr) {
+          if (entry && typeof entry.id === 'string') activeIds.add(entry.id);
+        }
+      }
+    }
+    const mergedBin = mergeCollectionByIdLWW(safeLocal.trashBin, safeRemote.trashBin);
+    merged.trashBin = mergedBin.filter((entry: any) => {
+      if (!entry || typeof entry !== 'object' || !entry.id) return false;
+      const expMs = entry.expiresAt ? Date.parse(String(entry.expiresAt)) : 0;
+      if (expMs > 0 && expMs <= nowMs) return false;
+      // If item was restored and exists in an active collection, drop it from bin
+      if (typeof entry.itemId === 'string' && activeIds.has(entry.itemId)) return false;
+      return true;
+    });
   }
 
   // Also support legacy `schedule` array alias if present

@@ -34,6 +34,7 @@ import {
 } from '../providers/MEGASyncProvider';
 
 import { SyncProviderRow } from '../../components/settings/SyncProviderRow';
+import { activateSyncProviderIfNone } from '../unifiedSyncBackupEngine';
 
 const MEGA_RED = '#D9272E';
 
@@ -46,6 +47,12 @@ interface MegaConflictState {
 export interface MEGASyncSectionProps {
   isFirst?: boolean;
   isLast?: boolean;
+  onBackupNow?: () => void;
+  isBackingUp?: boolean;
+  onOpenSyncOptions?: () => void;
+  onOpenBackupOptions?: (onRestore?: () => void) => void;
+  isActiveSyncProvider?: boolean;
+  isBackupEnabled?: boolean;
 }
 
 const MegaLogoSvg: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) => (
@@ -61,6 +68,12 @@ const MegaLogoSvg: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }
 export const MEGASyncSection: React.FC<MEGASyncSectionProps> = ({
   isFirst = false,
   isLast = false,
+  onBackupNow,
+  isBackingUp = false,
+  onOpenSyncOptions,
+  onOpenBackupOptions,
+  isActiveSyncProvider = false,
+  isBackupEnabled = false,
 }) => {
   const { exportEncryptedJSON, replaceAllAppDataFromBackup } = useApp();
 
@@ -170,6 +183,7 @@ export const MEGASyncSection: React.FC<MEGASyncSectionProps> = ({
       setSessionActive(true);
       setSyncStatus('idle');
       setErrorMessage(null);
+      activateSyncProviderIfNone('mega');
       showAndroidToast(`Connected MEGA as ${account.email}`, 2800, 'success');
     } catch (err: any) {
       setFormError(err?.message || 'Could not connect to MEGA.');
@@ -503,8 +517,19 @@ export const MEGASyncSection: React.FC<MEGASyncSectionProps> = ({
           setShowInlineForm((v) => !v);
         }}
         onSyncNow={isConnected ? handleSyncNow : undefined}
+        onBackupNow={isConnected ? onBackupNow : undefined}
+        onOpenSyncOptions={isConnected ? onOpenSyncOptions : undefined}
+        onOpenBackupOptions={
+          isConnected && onOpenBackupOptions
+            ? () => onOpenBackupOptions(handleCheckRestore)
+            : undefined
+        }
+        isActiveSyncProvider={isActiveSyncProvider}
+        isBackupEnabled={isBackupEnabled}
         syncButtonId="btn-mega-sync-now"
+        backupButtonId="btn-mega-backup"
         isSyncing={syncStatus === 'syncing'}
+        isBackingUp={isBackingUp}
         onRetry={handleSyncNow}
         autoSyncInterval={activeInterval}
         onSelectInterval={isConnected ? handleSelectInterval : undefined}

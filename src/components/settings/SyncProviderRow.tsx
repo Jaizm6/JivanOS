@@ -4,9 +4,12 @@ import {
   Check,
   ChevronRight,
   CloudDownload,
+  HardDriveDownload,
+  Loader2,
   LogOut,
   MoreHorizontal,
   RefreshCw,
+  SlidersHorizontal,
   X,
 } from 'lucide-react';
 import type { AutoSyncIntervalMinutes } from '../../utils/googleDriveSync';
@@ -51,8 +54,15 @@ export interface SyncProviderRowProps {
   onConnect?: () => void;
   disconnectedActions?: React.ReactNode;
   onSyncNow?: () => void;
+  onBackupNow?: () => void;
+  onOpenSyncOptions?: () => void;
+  onOpenBackupOptions?: () => void;
+  isActiveSyncProvider?: boolean;
+  isBackupEnabled?: boolean;
   syncButtonId?: string;
+  backupButtonId?: string;
   isSyncing?: boolean;
+  isBackingUp?: boolean;
   onRetry?: () => void;
   autoSyncInterval?: AutoSyncIntervalMinutes;
   onSelectInterval?: (interval: AutoSyncIntervalMinutes) => void;
@@ -69,20 +79,12 @@ export interface SyncProviderRowProps {
   isLast?: boolean;
 }
 
-const DROPDOWN_INTERVALS: { label: string; value: AutoSyncIntervalMinutes }[] = [
-  { label: '15m', value: 15 },
-  { label: '30m', value: 30 },
-  { label: '1h', value: 60 },
-  { label: 'Manual', value: 0 },
-];
-
 export const SyncProviderRow: React.FC<SyncProviderRowProps> = ({
   id,
   name,
   description,
   logo,
   logoBgClass = 'bg-slate-100 dark:bg-zinc-800',
-  brandColor,
   isConnected,
   status,
   statusLabel,
@@ -97,11 +99,16 @@ export const SyncProviderRow: React.FC<SyncProviderRowProps> = ({
   onConnect,
   disconnectedActions,
   onSyncNow,
+  onBackupNow,
+  onOpenSyncOptions,
+  onOpenBackupOptions,
+  isActiveSyncProvider = false,
+  isBackupEnabled = false,
   syncButtonId,
+  backupButtonId,
   isSyncing = false,
+  isBackingUp = false,
   onRetry,
-  autoSyncInterval,
-  onSelectInterval,
   onRestore,
   onDisconnect,
   disconnectLabel = 'Disconnect',
@@ -110,21 +117,25 @@ export const SyncProviderRow: React.FC<SyncProviderRowProps> = ({
   expandedContent,
   isExpanded = false,
   highlightTint,
-  prominent = false,
   isFirst = false,
   isLast = false,
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
-  const [ripple, setRipple] = useState<{ x: number; y: number; key: number } | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const rowRef = useRef<HTMLDivElement | null>(null);
 
   const shouldTint = highlightTint ?? isConnected;
   const hasMenu = Boolean(
-    onSelectInterval || onRestore || onDisconnect || extraMenuItems.length > 0
+    onRestore ||
+      onDisconnect ||
+      onOpenSyncOptions ||
+      onOpenBackupOptions ||
+      extraMenuItems.length > 0
+  );
+  const cleanConnectLabel = connectLabel.replace(/\s*→$/, '');
+  const hasActionButtons = Boolean(
+    onSyncNow || onOpenSyncOptions || onBackupNow || onOpenBackupOptions
   );
 
-  // Close floating overflow menu on outside tap, Escape, or when another SyncProviderRow opens its menu
   useEffect(() => {
     if (!menuOpen) return;
     const handlePointerDown = (e: MouseEvent | TouchEvent) => {
@@ -153,24 +164,13 @@ export const SyncProviderRow: React.FC<SyncProviderRowProps> = ({
     };
   }, [menuOpen]);
 
-  const triggerRipple = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!rowRef.current) return;
-    const rect = rowRef.current.getBoundingClientRect();
-    setRipple({
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top,
-      key: Date.now(),
-    });
-    window.setTimeout(() => setRipple(null), 420);
-  };
-
-  const renderStatusChip = () => {
-    const baseChip =
-      'inline-flex items-center gap-1 h-7 px-2.5 rounded-lg text-[11.5px] font-semibold whitespace-nowrap shrink-0 leading-none';
-
+  const renderStatusText = () => {
     if (status === 'syncing') {
       return (
-        <span role="status" className={`${baseChip} bg-blue-600 text-white animate-pulse`}>
+        <span
+          role="status"
+          className="inline-flex items-center gap-1 text-[11.5px] font-semibold text-indigo-600 dark:text-indigo-400 whitespace-nowrap shrink-0"
+        >
           <RefreshCw className="w-3 h-3 animate-spin" />
           <span>{statusLabel || 'Syncing…'}</span>
         </span>
@@ -186,11 +186,11 @@ export const SyncProviderRow: React.FC<SyncProviderRowProps> = ({
             else if (onSyncNow) onSyncNow();
             else if (onConnect) onConnect();
           }}
-          className={`${baseChip} bg-rose-600 hover:bg-rose-700 text-white cursor-pointer transition`}
+          className="inline-flex items-center gap-1 text-[11.5px] font-semibold text-rose-600 dark:text-rose-400 hover:underline cursor-pointer whitespace-nowrap shrink-0"
           title="Tap to retry"
         >
-          <X className="w-3 h-3" />
-          <span>{statusLabel || 'Error'}</span>
+          <X className="w-3.5 h-3.5" />
+          <span>{statusLabel || 'Retry'}</span>
         </button>
       );
     }
@@ -198,133 +198,155 @@ export const SyncProviderRow: React.FC<SyncProviderRowProps> = ({
       return (
         <span
           role="status"
-          className={`${baseChip} bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-200/80 dark:border-amber-800/70`}
+          className="text-[11.5px] font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap shrink-0"
         >
-          <span>{statusLabel || 'Trial'}</span>
+          {statusLabel || 'Trial'}
         </span>
       );
     }
     if (status === 'expired') {
       return (
-        <span role="status" className={`${baseChip} bg-rose-600 text-white`}>
-          <span>{statusLabel || 'Expired'}</span>
+        <span
+          role="status"
+          className="text-[11.5px] font-semibold text-rose-600 dark:text-rose-400 whitespace-nowrap shrink-0"
+        >
+          {statusLabel || 'Expired'}
         </span>
       );
     }
-    if (status === 'synced') {
-      return (
-        <span role="status" className={`${baseChip} bg-emerald-600 text-white`}>
-          <Check className="w-3 h-3" />
-          <span>{statusLabel || 'Synced ✓'}</span>
-        </span>
-      );
-    }
-    if (status === 'connected') {
+    if (status === 'synced' || status === 'connected') {
       return (
         <span
           role="status"
-          className={`${baseChip} bg-[#4F46E5] text-white`}
+          className="inline-flex items-center gap-1 text-[11.5px] font-semibold text-emerald-600 dark:text-emerald-400 whitespace-nowrap shrink-0"
         >
-          <Check className="w-3 h-3" />
-          <span>{statusLabel || 'Active'}</span>
+          <Check className="w-3.5 h-3.5" />
+          <span>{statusLabel || 'Connected'}</span>
         </span>
       );
     }
     return null;
   };
 
-  const radiusClasses = `${isFirst ? 'rounded-t-xl' : ''} ${isLast ? 'rounded-b-xl' : ''}`;
+  const radiusClasses = `${isFirst ? 'rounded-t-2xl' : ''} ${isLast ? 'rounded-b-2xl' : ''}`;
 
-  const handleRowSurfaceClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    triggerRipple(e);
+  const handleRowSurfaceClick = () => {
     if (!isConnected && onConnect && !disconnectedActions) {
       onConnect();
     }
   };
 
+  const handleSyncButtonClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onSyncNow) {
+      onSyncNow();
+    } else if (onOpenSyncOptions) {
+      onOpenSyncOptions();
+    }
+  };
+
+  const handleBackupButtonClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onBackupNow) {
+      onBackupNow();
+    } else if (onOpenBackupOptions) {
+      onOpenBackupOptions();
+    }
+  };
+
+  const renderSyncBackupButtons = (idPrefix: string) => (
+    <>
+      {(onSyncNow || onOpenSyncOptions) && (
+        <button
+          type="button"
+          id={syncButtonId ? `${syncButtonId}${idPrefix}` : undefined}
+          disabled={isSyncing}
+          onClick={handleSyncButtonClick}
+          title={`Sync ${name} now`}
+          className={`h-7.5 px-3 rounded-lg border text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition cursor-pointer whitespace-nowrap disabled:opacity-60 ${
+            isActiveSyncProvider
+              ? 'border-indigo-300 dark:border-indigo-700 bg-indigo-50/90 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100/90 dark:hover:bg-indigo-900/60'
+              : 'border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800'
+          }`}
+        >
+          <RefreshCw
+            className={`w-3.5 h-3.5 shrink-0 ${isSyncing ? 'animate-spin' : ''}`}
+          />
+          <span>{isSyncing ? 'Syncing…' : 'Sync'}</span>
+        </button>
+      )}
+
+      {(onBackupNow || onOpenBackupOptions) && (
+        <button
+          type="button"
+          id={backupButtonId ? `${backupButtonId}${idPrefix}` : undefined}
+          disabled={isBackingUp}
+          onClick={handleBackupButtonClick}
+          title={`Back up to ${name} now`}
+          className={`h-7.5 px-3 rounded-lg border text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition cursor-pointer whitespace-nowrap disabled:opacity-60 ${
+            isBackupEnabled
+              ? 'border-emerald-300 dark:border-emerald-800 bg-emerald-50/90 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100/90 dark:hover:bg-emerald-900/60'
+              : 'border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800'
+          }`}
+        >
+          {isBackingUp ? (
+            <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" />
+          ) : (
+            <HardDriveDownload className="w-3.5 h-3.5 shrink-0" />
+          )}
+          <span>{isBackingUp ? 'Backing up…' : 'Backup'}</span>
+        </button>
+      )}
+    </>
+  );
+
   return (
     <motion.div
       id={id}
       layout="position"
-      transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-      style={
-        shouldTint
-          ? { borderLeftWidth: 3, borderLeftColor: brandColor }
-          : undefined
-      }
+      transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
       className={`relative transition-colors ${menuOpen ? 'z-50' : 'z-0'} ${radiusClasses} ${
         shouldTint
-          ? 'bg-[#E8E7FF]/45 dark:bg-indigo-950/25'
-          : 'bg-white dark:bg-zinc-900 hover:bg-slate-50/75 dark:hover:bg-zinc-800/40'
+          ? 'bg-indigo-50/40 dark:bg-indigo-950/15'
+          : 'bg-white dark:bg-zinc-900 hover:bg-slate-50/70 dark:hover:bg-zinc-800/35'
       }`}
     >
-      {/* Main Compact Row Surface */}
       <div
-        ref={rowRef}
         onClick={handleRowSurfaceClick}
-        className={`relative px-4 transition-colors ${
-          isConnected
-            ? 'min-h-[80px] py-2.5'
-            : prominent
-              ? 'min-h-[76px] py-2.5'
-              : 'min-h-[64px] py-2'
-        } flex items-center gap-3 ${
+        className={`px-4 py-3 ${
           !isConnected && onConnect && !disconnectedActions ? 'cursor-pointer' : ''
         }`}
       >
-        {/* Subtle Material touch ripple clipped cleanly inside row surface */}
-        <span
-          aria-hidden="true"
-          className={`pointer-events-none absolute inset-0 overflow-hidden ${radiusClasses}`}
-        >
-          {ripple && (
-            <motion.span
-              key={ripple.key}
-              initial={{ opacity: 0.22, scale: 0 }}
-              animate={{ opacity: 0, scale: 2.6 }}
-              transition={{ duration: 0.4, ease: 'easeOut' }}
-              style={{
-                left: ripple.x - 48,
-                top: ripple.y - 48,
-                width: 96,
-                height: 96,
-              }}
-              className="absolute rounded-full bg-indigo-500/25 dark:bg-indigo-400/25"
-            />
-          )}
-        </span>
-
-        {/* 32×32dp Logo Badge */}
-        <div
-          className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 relative z-10 ${logoBgClass}`}
-        >
-          {logo}
-        </div>
-
-        {/* Center Info Column */}
         {!isConnected ? (
-          <div className="min-w-0 flex-1 relative z-10">
-            <div className="flex items-center justify-between gap-2.5">
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <span className="text-[14px] font-medium leading-tight text-slate-900 dark:text-zinc-100 truncate">
-                    {name}
-                  </span>
-                  {badge}
+          /* DISCONNECTED: Clean single-line row — [Logo] Name / desc   [Connect] */
+          <div className="space-y-2.5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                <div
+                  className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${logoBgClass}`}
+                >
+                  {logo}
                 </div>
-                <p className="text-[12px] leading-snug text-slate-500 dark:text-zinc-400 truncate mt-0.5">
-                  {description}
-                </p>
-                {extraLine && (
-                  <p className="text-[11.5px] leading-snug text-slate-500 dark:text-zinc-400 truncate mt-0.5 tabular-nums">
-                    {extraLine}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-[14px] font-semibold leading-tight text-slate-900 dark:text-zinc-100 truncate">
+                      {name}
+                    </span>
+                    {badge}
+                  </div>
+                  <p className="text-[12px] leading-snug text-slate-500 dark:text-zinc-400 truncate mt-0.5">
+                    {description}
                   </p>
-                )}
+                  {extraLine && (
+                    <p className="text-[11.5px] leading-snug text-slate-400 dark:text-zinc-500 truncate mt-0.5 tabular-nums">
+                      {extraLine}
+                    </p>
+                  )}
+                </div>
               </div>
 
-              {/* Right CTA (Disconnected) */}
               {!disconnectedActions && onConnect && (
-                <div className="shrink-0 relative z-10">
+                <div className="shrink-0">
                   {connectVariant === 'chevron' ? (
                     <button
                       type="button"
@@ -335,7 +357,7 @@ export const SyncProviderRow: React.FC<SyncProviderRowProps> = ({
                         onConnect();
                       }}
                       aria-label={`Connect ${name}`}
-                      className="w-8 h-8 rounded-lg inline-flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 transition cursor-pointer"
+                      className="w-10 h-10 rounded-xl inline-flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 transition cursor-pointer"
                     >
                       <ChevronRight className="w-4 h-4" />
                     </button>
@@ -348,19 +370,18 @@ export const SyncProviderRow: React.FC<SyncProviderRowProps> = ({
                         e.stopPropagation();
                         onConnect();
                       }}
-                      className="h-8 px-3 rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:bg-slate-100 dark:hover:bg-zinc-800 active:scale-[0.98] disabled:opacity-55 text-[12px] font-medium text-slate-700 dark:text-zinc-200 inline-flex items-center gap-1 transition cursor-pointer whitespace-nowrap"
+                      className="min-h-[36px] px-3.5 rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:bg-slate-100 dark:hover:bg-zinc-800 active:scale-[0.98] disabled:opacity-55 text-[12.5px] font-semibold text-slate-800 dark:text-zinc-100 inline-flex items-center justify-center transition cursor-pointer whitespace-nowrap"
                     >
-                      <span>{connectLabel}</span>
+                      {cleanConnectLabel}
                     </button>
                   )}
                 </div>
               )}
             </div>
 
-            {/* Custom compact disconnected actions row (e.g., JivanOS Cloud Start Free Trial + Sign In) */}
             {disconnectedActions && (
               <div
-                className="flex items-center gap-2 mt-2"
+                className="flex flex-wrap items-center gap-1.5 sm:pl-12"
                 onClick={(e) => e.stopPropagation()}
               >
                 {disconnectedActions}
@@ -368,51 +389,46 @@ export const SyncProviderRow: React.FC<SyncProviderRowProps> = ({
             )}
           </div>
         ) : (
-          /* CONNECTED STATE (~80dp compact layout) */
-          <div className="min-w-0 flex-1 relative z-10 space-y-1">
-            {/* Top row: Provider Name + Status Chip */}
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-1.5 min-w-0">
-                <span className="text-[14px] font-medium leading-tight text-slate-900 dark:text-zinc-100 truncate">
-                  {name}
-                </span>
-                {badge}
-              </div>
-              {renderStatusChip()}
-            </div>
-
-            {/* Bottom row: Account + Last Synced on left, [Sync] [···] 32dp icon buttons on right */}
-            <div className="flex items-end justify-between gap-2">
-              <div className="min-w-0 flex-1">
-                {accountLabel && (
-                  <div className="text-[12px] leading-snug text-slate-700 dark:text-zinc-300 truncate">
-                    {accountLabel}
+          /* CONNECTED: Responsive layout that never truncates provider name on mobile */
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2.5">
+              {/* Left: Provider Logo + Full Name + Badge + Account/Sync Meta */}
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                <div
+                  className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${logoBgClass}`}
+                >
+                  {logo}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-[14px] font-semibold leading-tight text-slate-900 dark:text-zinc-100 truncate">
+                      {name}
+                    </span>
+                    {badge}
                   </div>
-                )}
-                {metaLine && (
-                  <div className="text-[11.5px] leading-snug text-slate-500 dark:text-zinc-400 truncate tabular-nums">
-                    {metaLine}
-                  </div>
-                )}
+                  {(accountLabel || metaLine) && (
+                    <div className="text-[11.5px] leading-snug text-slate-500 dark:text-zinc-400 truncate mt-0.5 tabular-nums">
+                      {accountLabel && metaLine
+                        ? `${accountLabel} · ${metaLine}`
+                        : accountLabel || metaLine}
+                    </div>
+                  )}
+                </div>
               </div>
 
+              {/* Right: Desktop inline [Sync] & [Backup] + Status + [···] */}
               <div
-                className="flex items-center gap-1 shrink-0"
+                className="flex items-center gap-1.5 shrink-0"
                 onClick={(e) => e.stopPropagation()}
               >
-                {onSyncNow && (
-                  <button
-                    type="button"
-                    id={syncButtonId}
-                    onClick={onSyncNow}
-                    disabled={isSyncing}
-                    title={`Sync ${name} now`}
-                    aria-label={`Sync ${name} now`}
-                    className="w-8 h-8 rounded-lg bg-white/85 dark:bg-zinc-900/80 border border-slate-200/90 dark:border-zinc-700 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 hover:border-indigo-300 dark:hover:border-indigo-700 text-slate-700 dark:text-zinc-200 disabled:opacity-55 inline-flex items-center justify-center transition cursor-pointer"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-                  </button>
+                {/* Inline on sm+ screens where there is plenty of horizontal space */}
+                {hasActionButtons && (
+                  <div className="hidden sm:flex items-center gap-1.5 mr-1">
+                    {renderSyncBackupButtons('')}
+                  </div>
                 )}
+
+                {renderStatusText()}
 
                 {hasMenu && (
                   <div ref={menuRef} className="relative z-50">
@@ -435,7 +451,7 @@ export const SyncProviderRow: React.FC<SyncProviderRowProps> = ({
                       aria-expanded={menuOpen}
                       aria-label={`More options for ${name}`}
                       title="More options"
-                      className="w-8 h-8 rounded-lg bg-white/85 dark:bg-zinc-900/80 border border-slate-200/90 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-600 dark:text-zinc-300 inline-flex items-center justify-center transition cursor-pointer"
+                      className="w-8 h-8 rounded-lg hover:bg-slate-200/70 dark:hover:bg-zinc-800 text-slate-500 dark:text-zinc-400 inline-flex items-center justify-center transition cursor-pointer"
                     >
                       <MoreHorizontal className="w-4 h-4" />
                     </button>
@@ -448,9 +464,38 @@ export const SyncProviderRow: React.FC<SyncProviderRowProps> = ({
                           animate={{ opacity: 1, y: 0, scale: 1 }}
                           exit={{ opacity: 0, y: -4, scale: 0.97 }}
                           transition={{ duration: 0.14 }}
-                          className="absolute right-0 top-9 z-[100] w-56 rounded-xl border border-[#E5E7EB] dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-xl py-1.5"
+                          className="absolute right-0 top-9 z-[100] w-56 rounded-xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-xl py-1.5"
                         >
-                          {/* Extra custom menu items */}
+                          {onOpenSyncOptions && (
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => {
+                                setMenuOpen(false);
+                                onOpenSyncOptions();
+                              }}
+                              className="w-full px-3 py-2 text-left text-xs font-medium text-slate-700 dark:text-zinc-200 hover:bg-slate-50 dark:hover:bg-zinc-800 flex items-center gap-2 transition cursor-pointer"
+                            >
+                              <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                              <span>Sync rules…</span>
+                            </button>
+                          )}
+
+                          {onOpenBackupOptions && (
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => {
+                                setMenuOpen(false);
+                                onOpenBackupOptions();
+                              }}
+                              className="w-full px-3 py-2 text-left text-xs font-medium text-slate-700 dark:text-zinc-200 hover:bg-slate-50 dark:hover:bg-zinc-800 flex items-center gap-2 transition cursor-pointer"
+                            >
+                              <HardDriveDownload className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                              <span>Backup rules…</span>
+                            </button>
+                          )}
+
                           {extraMenuItems.map((item) =>
                             item.href ? (
                               <a
@@ -493,7 +538,6 @@ export const SyncProviderRow: React.FC<SyncProviderRowProps> = ({
                             )
                           )}
 
-                          {/* Optional Restore from Cloud */}
                           {onRestore && (
                             <button
                               type="button"
@@ -509,11 +553,13 @@ export const SyncProviderRow: React.FC<SyncProviderRowProps> = ({
                             </button>
                           )}
 
-                          {/* Red Disconnect Action */}
                           {onDisconnect && (
                             <div
                               className={
-                                onRestore || extraMenuItems.length > 0
+                                onRestore ||
+                                onOpenSyncOptions ||
+                                onOpenBackupOptions ||
+                                extraMenuItems.length > 0
                                   ? 'mt-1 pt-1 border-t border-slate-100 dark:border-zinc-800'
                                   : ''
                               }
@@ -539,20 +585,30 @@ export const SyncProviderRow: React.FC<SyncProviderRowProps> = ({
                 )}
               </div>
             </div>
+
+            {/* Mobile compact [Sync] & [Backup] buttons aligned cleanly under provider title (never squishing Name or stretching full-width) */}
+            {hasActionButtons && (
+              <div
+                className="flex sm:hidden items-center gap-2 pl-12"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {renderSyncBackupButtons('-mobile')}
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      {/* Compact inline error banner if present */}
+      {/* Inline error banner if present */}
       {errorMessage && (
-        <div className="px-4 pb-2.5">
-          <div className="rounded-lg bg-rose-50 dark:bg-rose-950/50 border border-rose-200/80 dark:border-rose-900/70 px-3 py-1.5 text-[11.5px] text-rose-700 dark:text-rose-300 leading-snug">
+        <div className="px-4 pb-3">
+          <div className="rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200/80 dark:border-rose-900/70 px-3 py-2 text-[11.5px] text-rose-700 dark:text-rose-300 leading-snug">
             {errorMessage}
           </div>
         </div>
       )}
 
-      {/* Smoothly expandable inline panel (WebDAV form, MEGA login/resume, S3 form, JivanOS Cloud verify/expired/history) */}
+      {/* Expandable inline panel (WebDAV form, MEGA login/resume, S3 form, etc.) */}
       <AnimatePresence initial={false}>
         {isExpanded && expandedContent && (
           <motion.div
@@ -560,7 +616,7 @@ export const SyncProviderRow: React.FC<SyncProviderRowProps> = ({
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
             className="overflow-hidden"
           >
             <div className="px-4 pb-3.5 pt-0.5">{expandedContent}</div>

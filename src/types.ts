@@ -849,5 +849,29 @@ export interface PomodoroSession {
   completedAt: string;
 }
 
+export type TrashItemType =
+  | 'task'
+  | 'habit'
+  | 'medication'
+  | 'goal'
+  | 'bill'
+  | 'schedule'
+  | 'quote'
+  | 'tag'
+  | 'list'
+  | 'list_group'
+  | 'inbox';
+
+export interface TrashBinItem {
+  id: string;
+  itemId: string;
+  type: TrashItemType;
+  title: string;
+  subtitle?: string;
+  deletedAt: string;
+  expiresAt: string; // deletedAt + 30 days
+  payload: any;
+}
+
 export type { QuoteItem } from './data/quotes';
 export type Quote = import('./data/quotes').QuoteItem;

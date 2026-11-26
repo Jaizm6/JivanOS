@@ -37,6 +37,7 @@ import {
 } from '../providers/TelegramSyncProvider';
 
 import { SyncProviderRow } from '../../components/settings/SyncProviderRow';
+import { activateSyncProviderIfNone } from '../unifiedSyncBackupEngine';
 
 interface TelegramConflictState {
   remoteEnvelope: DriveBackupEnvelope;
@@ -47,6 +48,12 @@ interface TelegramConflictState {
 export interface TelegramSyncSectionProps {
   isFirst?: boolean;
   isLast?: boolean;
+  onBackupNow?: () => void;
+  isBackingUp?: boolean;
+  onOpenSyncOptions?: () => void;
+  onOpenBackupOptions?: (onRestore?: () => void) => void;
+  isActiveSyncProvider?: boolean;
+  isBackupEnabled?: boolean;
 }
 
 const TelegramLogoSvg: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) => (
@@ -58,6 +65,12 @@ const TelegramLogoSvg: React.FC<{ className?: string }> = ({ className = 'w-5 h-
 export const TelegramSyncSection: React.FC<TelegramSyncSectionProps> = ({
   isFirst = false,
   isLast = false,
+  onBackupNow,
+  isBackingUp = false,
+  onOpenSyncOptions,
+  onOpenBackupOptions,
+  isActiveSyncProvider = false,
+  isBackupEnabled = false,
 }) => {
   const { exportEncryptedJSON, replaceAllAppDataFromBackup } = useApp();
 
@@ -240,6 +253,7 @@ export const TelegramSyncSection: React.FC<TelegramSyncSectionProps> = ({
       setStoredAuth(getStoredTelegramAuth());
       setSyncStatus('idle');
       setErrorMessage(null);
+      activateSyncProviderIfNone('telegram');
       showAndroidToast(`Connected ${account.name}`, 2800, 'success');
       await performSilentJoplinTelegramSync(false);
     } catch (err: any) {
@@ -393,8 +407,19 @@ export const TelegramSyncSection: React.FC<TelegramSyncSectionProps> = ({
           setIsSetupSheetOpen(true);
         }}
         onSyncNow={isConnected ? handleSyncNow : undefined}
+        onBackupNow={isConnected ? onBackupNow : undefined}
+        onOpenSyncOptions={isConnected ? onOpenSyncOptions : undefined}
+        onOpenBackupOptions={
+          isConnected && onOpenBackupOptions
+            ? () => onOpenBackupOptions(handleCheckRestore)
+            : undefined
+        }
+        isActiveSyncProvider={isActiveSyncProvider}
+        isBackupEnabled={isBackupEnabled}
         syncButtonId="btn-telegram-sync-now"
+        backupButtonId="btn-telegram-backup"
         isSyncing={syncStatus === 'syncing'}
+        isBackingUp={isBackingUp}
         onRetry={handleSyncNow}
         autoSyncInterval={activeInterval}
         onSelectInterval={isConnected ? handleSelectInterval : undefined}

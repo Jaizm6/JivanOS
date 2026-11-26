@@ -22,6 +22,7 @@ import {
   Clock,
   CheckCircle2,
   ReceiptText,
+  Trash2,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { ActiveTab } from '../../types';
@@ -39,6 +40,7 @@ import { JIVANOS_CLOUD_STATE_EVENT } from '../../sync/providers/FirestoreSyncPro
 
 import { JivanLogoMark } from '../common/JivanLogo';
 import { SidebarClockCard } from './SidebarClockCard';
+import { TrashBinModal } from '../common/TrashBinModal';
 export { JivanLogoMark };
 
 export const Sidebar: React.FC = () => {
@@ -69,7 +71,10 @@ export const Sidebar: React.FC = () => {
     firebaseUser,
     joplinSyncSettings,
     setIsAIChatOpen,
+    trashBin,
   } = useApp();
+
+  const [isTrashBinOpen, setIsTrashBinOpen] = useState(false);
 
   // Exclude fixed-course/deadline meds from refill stock alerts
   const lowStockMeds = useMemo(
@@ -994,9 +999,9 @@ export const Sidebar: React.FC = () => {
             </div>
           </div>
 
-          {/* 3. PINNED BOTTOM 2-IN-A-ROW CONTROLS: Theme Toggle | Settings */}
+          {/* 3. PINNED BOTTOM CONTROLS: Theme Toggle | Settings | Tiny Bin */}
           <div className="pt-1.5 border-t border-slate-200/80 dark:border-zinc-800/80 shrink-0">
-            <div className="grid grid-cols-2 gap-1.5">
+            <div className="flex items-center gap-1.5">
               <button
                 type="button"
                 id="btn-sidebar-theme-toggle"
@@ -1009,16 +1014,16 @@ export const Sidebar: React.FC = () => {
                   showAndroidToast(nextTheme === 'dark' ? 'Dark mode' : 'Light mode');
                 }}
                 title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
-                className="py-2.5 px-3 min-h-[44px] rounded-l-[18px] rounded-r-[10px] flex items-center justify-center gap-2 text-xs font-bold transition-all duration-200 active:scale-[0.97] cursor-pointer border bg-white dark:bg-zinc-900/95 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-800 dark:text-zinc-200 border-slate-200/80 dark:border-zinc-800/80 shadow-2xs"
+                className="flex-1 min-w-0 py-2.5 px-2.5 min-h-[44px] rounded-l-[18px] rounded-r-[10px] flex items-center justify-center gap-1.5 text-xs font-bold transition-all duration-200 active:scale-[0.97] cursor-pointer border bg-white dark:bg-zinc-900/95 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-800 dark:text-zinc-200 border-slate-200/80 dark:border-zinc-800/80 shadow-2xs whitespace-nowrap"
               >
                 {theme === 'dark' ? (
                   <>
-                    <Sun className="w-4 h-4 text-amber-500" />
+                    <Sun className="w-4 h-4 text-amber-500 shrink-0" />
                     <span>Light</span>
                   </>
                 ) : (
                   <>
-                    <Moon className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                    <Moon className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
                     <span>Dark</span>
                   </>
                 )}
@@ -1029,19 +1034,45 @@ export const Sidebar: React.FC = () => {
                 id="btn-sidebar-settings"
                 onClick={() => handleNavigate('settings')}
                 title="Open System Settings"
-                className={`py-2.5 px-3 min-h-[44px] rounded-r-[18px] rounded-l-[10px] flex items-center justify-center gap-2 text-xs font-bold transition-all duration-200 active:scale-[0.97] cursor-pointer border ${
+                className={`flex-1 min-w-0 py-2.5 px-2.5 min-h-[44px] rounded-[10px] flex items-center justify-center gap-1.5 text-xs font-bold transition-all duration-200 active:scale-[0.97] cursor-pointer border whitespace-nowrap ${
                   activeTab === 'settings'
                     ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
                     : 'bg-white dark:bg-zinc-900/95 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-800 dark:text-zinc-200 border-slate-200/80 dark:border-zinc-800/80 shadow-2xs'
                 }`}
               >
-                <Settings className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                <Settings
+                  className={`w-4 h-4 shrink-0 ${
+                    activeTab === 'settings' ? 'text-white' : 'text-indigo-600 dark:text-indigo-400'
+                  }`}
+                />
                 <span>Settings</span>
+              </button>
+
+              <button
+                type="button"
+                id="btn-sidebar-bin"
+                onClick={() => setIsTrashBinOpen(true)}
+                title={
+                  trashBin.length > 0
+                    ? `Bin (${trashBin.length} deleted item${trashBin.length === 1 ? '' : 's'} · kept 30 days)`
+                    : 'Bin (30-day deleted items)'
+                }
+                aria-label="Open Bin"
+                className="relative w-11 min-h-[44px] shrink-0 rounded-r-[18px] rounded-l-[10px] flex items-center justify-center transition-all duration-200 active:scale-[0.97] cursor-pointer border bg-white dark:bg-zinc-900/95 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-600 dark:text-zinc-300 hover:text-rose-600 dark:hover:text-rose-400 border-slate-200/80 dark:border-zinc-800/80 shadow-2xs"
+              >
+                <Trash2 className="w-4 h-4" />
+                {trashBin.length > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[16px] h-[16px] px-1 rounded-full bg-rose-600 text-white text-[9.5px] font-bold flex items-center justify-center tabular-nums leading-none">
+                    {trashBin.length > 99 ? '99+' : trashBin.length}
+                  </span>
+                )}
               </button>
             </div>
           </div>
         </div>
       </aside>
+
+      <TrashBinModal isOpen={isTrashBinOpen} onClose={() => setIsTrashBinOpen(false)} />
     </>
   );
 };

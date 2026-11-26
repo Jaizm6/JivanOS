@@ -21,11 +21,13 @@ import {
   firebaseSignOut,
   getDoc,
   getDocs,
+  getUserDataFromFirestore,
   handleFirestoreError,
   limit,
   onSnapshot,
   orderBy,
   query,
+  saveUserDataToFirestore,
   serverTimestamp,
   setDoc,
   signInWithEmail,
@@ -70,11 +72,22 @@ export interface CloudSyncHistoryItem {
   };
 }
 
+export interface LocalProReceipt {
+  plan: 'monthly' | 'yearly';
+  activatedAt: string;
+  expiresAt: string;
+  referenceId: string;
+  method: 'upi' | 'card' | 'license';
+}
+
 export interface StoredJivanCloudMeta {
   lastSyncedAt: string | null;
   lastFileSizeBytes: number | null;
   realtimeEnabled: boolean;
   lastError: string | null;
+  cloudOptInConnected: boolean;
+  trialExplicitlyActivated: boolean;
+  localProReceipt: LocalProReceipt | null;
 }
 
 export interface CloudConnectOptions {
@@ -82,6 +95,7 @@ export interface CloudConnectOptions {
   email?: string;
   password?: string;
   displayName?: string;
+  activateTrial?: boolean;
 }
 
 export type CloudRemoteChangeHandler = (result: SyncRestoreResult, remoteDeviceId: string) => void;
@@ -98,11 +112,21 @@ export function getStoredCloudMeta(): StoredJivanCloudMeta {
     lastFileSizeBytes: null,
     realtimeEnabled: true,
     lastError: null,
+    cloudOptInConnected: false,
+    trialExplicitlyActivated: false,
+    localProReceipt: null,
   };
   try {
     const raw = localStorage.getItem(JIVANOS_CLOUD_META_KEY);
     if (!raw) return defaults;
     const parsed = JSON.parse(raw);
+    const receipt =
+      parsed.localProReceipt &&
+      typeof parsed.localProReceipt === 'object' &&
+      (parsed.localProReceipt.plan === 'monthly' || parsed.localProReceipt.plan === 'yearly') &&
+      typeof parsed.localProReceipt.expiresAt === 'string'
+        ? (parsed.localProReceipt as LocalProReceipt)
+        : null;
     return {
       lastSyncedAt: typeof parsed.lastSyncedAt === 'string' ? parsed.lastSyncedAt : null,
       lastFileSizeBytes:
@@ -110,6 +134,9 @@ export function getStoredCloudMeta(): StoredJivanCloudMeta {
       realtimeEnabled:
         typeof parsed.realtimeEnabled === 'boolean' ? parsed.realtimeEnabled : true,
       lastError: typeof parsed.lastError === 'string' ? parsed.lastError : null,
+      cloudOptInConnected: Boolean(parsed.cloudOptInConnected),
+      trialExplicitlyActivated: Boolean(parsed.trialExplicitlyActivated),
+      localProReceipt: receipt,
     };
   } catch {
     return defaults;
@@ -218,7 +245,8 @@ export class FirestoreSyncProvider implements SyncProvider {
    */
   async checkIsPremium(): Promise<boolean> {
     const user = auth.currentUser;
-    if (!user || !user.emailVerified) {
+    const meta = getStoredCloudMeta();
+    if (!user || !user.emailVerified || !meta.cloudOptInConnected) {
       this.cachedPremium = false;
       this.cachedStatus = 'none';
       return false;
@@ -230,7 +258,13 @@ export class FirestoreSyncProvider implements SyncProvider {
   }
 
   isConnected(): boolean {
-    return Boolean(auth.currentUser && auth.currentUser.emailVerified && this.cachedPremium);
+    const meta = getStoredCloudMeta();
+    return Boolean(
+      auth.currentUser &&
+        auth.currentUser.emailVerified &&
+        meta.cloudOptInConnected &&
+        this.cachedPremium
+    );
   }
 
   async connect(options?: CloudConnectOptions): Promise<SyncAccount> {
@@ -253,10 +287,16 @@ export class FirestoreSyncProvider implements SyncProvider {
       throw new Error('Sign-in was not completed.');
     }
 
+    // Explicitly mark JivanOS Cloud as signed-in by user choice (never triggered by Google Drive)
+    updateStoredCloudMeta({
+      cloudOptInConnected: true,
+      lastError: null,
+    });
+
     if (user.emailVerified) {
-      // Automatically activate 14-day free trial if user has neither subscription nor prior trial
-      const entitlement = await fetchCloudEntitlement(user.uid);
-      if (entitlement.status === 'none') {
+      // Notesnook rule: ONLY activate 14-day free trial if user explicitly requested trial activation
+      if (options?.activateTrial) {
+        updateStoredCloudMeta({ trialExplicitlyActivated: true });
         await ensureFourteenDayTrial(user.uid);
       }
       await this.checkIsPremium();
@@ -278,7 +318,8 @@ export class FirestoreSyncProvider implements SyncProvider {
 
   async silentReAuth(): Promise<SyncAccount | null> {
     const user = auth.currentUser;
-    if (!user) {
+    const meta = getStoredCloudMeta();
+    if (!user || !meta.cloudOptInConnected) {
       this.cachedPremium = false;
       this.cachedStatus = 'none';
       return null;
@@ -296,7 +337,8 @@ export class FirestoreSyncProvider implements SyncProvider {
 
   async backup(data: Record<string, unknown>): Promise<SyncInfo> {
     const user = auth.currentUser;
-    if (!user) {
+    const meta = getStoredCloudMeta();
+    if (!user || !meta.cloudOptInConnected) {
       throw new Error('Sign in to JivanOS Cloud before syncing.');
     }
     if (!user.emailVerified) {
@@ -308,7 +350,7 @@ export class FirestoreSyncProvider implements SyncProvider {
     this.cachedStatus = entitlement.status;
 
     if (!entitlement.isPremium) {
-      throw new Error('JivanOS Cloud requires an active trial or subscription to sync.');
+      throw new Error('JivanOS Cloud requires an active trial or Pro subscription to sync.');
     }
 
     const uid = user.uid;
@@ -326,7 +368,9 @@ export class FirestoreSyncProvider implements SyncProvider {
 
     const backupPath = `users/${uid}/jivanos/backup`;
     const backupRef = doc(db, 'users', uid, 'jivanos', 'backup');
+    const nowIso = new Date().toISOString();
 
+    let savedToSubdoc = false;
     try {
       await setDoc(
         backupRef,
@@ -343,51 +387,64 @@ export class FirestoreSyncProvider implements SyncProvider {
         },
         { merge: true }
       );
+      savedToSubdoc = true;
     } catch (err: any) {
-      updateStoredCloudMeta({ lastError: err?.message || 'Cloud backup failed.' });
-      if (err?.code === 'permission-denied') {
-        handleFirestoreError(err, OperationType.WRITE, backupPath);
+      // If activated via client-side payment/license receipt before webhook writes jivanos/subscription,
+      // save to owner-authorized primary user sync document (/users/{uid})
+      const savedPrimary = await saveUserDataToFirestore(uid, {
+        email: user.email || undefined,
+        payload: JSON.stringify(sanitizedData),
+        clientVersion: 1,
+        provider: 'jivanos_cloud',
+        source: 'auto',
+        timestamp: nowIso,
+        updatedAt: nowIso,
+      });
+      if (!savedPrimary) {
+        updateStoredCloudMeta({ lastError: err?.message || 'Cloud backup failed.' });
+        if (err?.code === 'permission-denied') {
+          handleFirestoreError(err, OperationType.WRITE, backupPath);
+        }
+        throw err;
       }
-      throw err;
     }
 
-    // Record entry in syncHistory subcollection and retain only last 10 records
-    const historyPath = `users/${uid}/jivanos/backup/syncHistory`;
-    try {
-      const historyCol = collection(db, 'users', uid, 'jivanos', 'backup', 'syncHistory');
-      await addDoc(historyCol, {
-        userId: uid,
-        deviceId,
-        deviceName,
-        platform,
-        timestamp: serverTimestamp(),
-        itemCounts: countDataCollections(sanitizedData),
-      });
+    if (savedToSubdoc) {
+      // Record entry in syncHistory subcollection and retain only last 10 records
+      const historyPath = `users/${uid}/jivanos/backup/syncHistory`;
+      try {
+        const historyCol = collection(db, 'users', uid, 'jivanos', 'backup', 'syncHistory');
+        await addDoc(historyCol, {
+          userId: uid,
+          deviceId,
+          deviceName,
+          platform,
+          timestamp: serverTimestamp(),
+          itemCounts: countDataCollections(sanitizedData),
+        });
 
-      // Prune entries older than the 10 most recent
-      const pruneQuery = query(
-        historyCol,
-        where('userId', '==', uid),
-        orderBy('timestamp', 'desc'),
-        limit(25)
-      );
-      const snap = await getDocs(pruneQuery);
-      if (snap.docs.length > 10) {
-        const overflow = snap.docs.slice(10);
-        await Promise.allSettled(overflow.map((d) => deleteDoc(d.ref)));
-      }
-    } catch (err: any) {
-      // Non-fatal if history index is still warming up, but report permission denials
-      if (err?.code === 'permission-denied') {
-        try {
-          handleFirestoreError(err, OperationType.WRITE, historyPath);
-        } catch {
-          // Non-fatal to primary backup
+        const pruneQuery = query(
+          historyCol,
+          where('userId', '==', uid),
+          orderBy('timestamp', 'desc'),
+          limit(25)
+        );
+        const snap = await getDocs(pruneQuery);
+        if (snap.docs.length > 10) {
+          const overflow = snap.docs.slice(10);
+          await Promise.allSettled(overflow.map((d) => deleteDoc(d.ref)));
+        }
+      } catch (err: any) {
+        if (err?.code === 'permission-denied') {
+          try {
+            handleFirestoreError(err, OperationType.WRITE, historyPath);
+          } catch {
+            // Non-fatal to primary backup
+          }
         }
       }
     }
 
-    const nowIso = new Date().toISOString();
     updateStoredCloudMeta({
       lastSyncedAt: nowIso,
       lastFileSizeBytes: approxBytes,
@@ -403,7 +460,8 @@ export class FirestoreSyncProvider implements SyncProvider {
 
   async restore(): Promise<SyncRestoreResult> {
     const user = auth.currentUser;
-    if (!user) {
+    const meta = getStoredCloudMeta();
+    if (!user || !meta.cloudOptInConnected) {
       throw new Error('Sign in to JivanOS Cloud to restore your backup.');
     }
     if (!user.emailVerified) {
@@ -416,32 +474,55 @@ export class FirestoreSyncProvider implements SyncProvider {
 
     try {
       const snap = await getDoc(backupRef);
-      if (!snap.exists()) {
-        return { found: false, envelope: null, lastModified: null, fileSizeBytes: 0 };
+      if (snap.exists()) {
+        const raw = snap.data();
+        const updatedIso = timestampToIso(raw.updatedAt);
+        const payloadData = (raw.data && typeof raw.data === 'object' ? raw.data : {}) as Record<
+          string,
+          any
+        >;
+        const sizeBytes = new Blob([JSON.stringify(payloadData)]).size;
+
+        const envelope: SyncBackupEnvelope = {
+          schemaVersion: 1,
+          app: 'JivanOS',
+          updatedAt: updatedIso,
+          deviceId: typeof raw.deviceId === 'string' ? raw.deviceId : 'jivanos-cloud',
+          data: payloadData,
+        };
+
+        return {
+          found: true,
+          envelope,
+          lastModified: updatedIso,
+          fileSizeBytes: sizeBytes,
+        };
       }
 
-      const raw = snap.data();
-      const updatedIso = timestampToIso(raw.updatedAt);
-      const payloadData = (raw.data && typeof raw.data === 'object' ? raw.data : {}) as Record<
-        string,
-        any
-      >;
-      const sizeBytes = new Blob([JSON.stringify(payloadData)]).size;
+      // Check fallback primary user doc (/users/{uid})
+      const fallbackRaw = await getUserDataFromFirestore(uid);
+      if (fallbackRaw && typeof fallbackRaw.payload === 'string') {
+        const parsedData = JSON.parse(fallbackRaw.payload);
+        const updatedIso =
+          typeof fallbackRaw.updatedAt === 'string'
+            ? fallbackRaw.updatedAt
+            : new Date().toISOString();
+        const sizeBytes = new Blob([fallbackRaw.payload]).size;
+        return {
+          found: true,
+          envelope: {
+            schemaVersion: 1,
+            app: 'JivanOS',
+            updatedAt: updatedIso,
+            deviceId: 'jivanos-cloud',
+            data: parsedData,
+          },
+          lastModified: updatedIso,
+          fileSizeBytes: sizeBytes,
+        };
+      }
 
-      const envelope: SyncBackupEnvelope = {
-        schemaVersion: 1,
-        app: 'JivanOS',
-        updatedAt: updatedIso,
-        deviceId: typeof raw.deviceId === 'string' ? raw.deviceId : 'jivanos-cloud',
-        data: payloadData,
-      };
-
-      return {
-        found: true,
-        envelope,
-        lastModified: updatedIso,
-        fileSizeBytes: sizeBytes,
-      };
+      return { found: false, envelope: null, lastModified: null, fileSizeBytes: 0 };
     } catch (err: any) {
       if (err?.code === 'permission-denied') {
         handleFirestoreError(err, OperationType.GET, backupPath);
@@ -454,8 +535,11 @@ export class FirestoreSyncProvider implements SyncProvider {
     this.stopRealtimeListener();
     this.cachedPremium = false;
     this.cachedStatus = 'none';
+    updateStoredCloudMeta({
+      cloudOptInConnected: false,
+      lastError: null,
+    });
     await firebaseSignOut(auth);
-    updateStoredCloudMeta({ lastError: null });
   }
 
   async getLastSyncInfo(): Promise<SyncInfo | null> {

@@ -59,7 +59,7 @@ export type ActiveSyncProviderId =
   | 'mega'
   | 's3';
 
-export type SyncReceiveIntervalMinutes = 0 | 5 | 15 | 30 | 60 | 720 | 1440;
+export type SyncReceiveIntervalMinutes = 0 | 1 | 2 | 5 | 15 | 30 | 60 | 720 | 1440;
 
 export type UnifiedSyncStatusChip =
   | 'synced'
@@ -70,7 +70,7 @@ export type UnifiedSyncStatusChip =
 export interface UnifiedSyncSettings {
   activeProvider: ActiveSyncProviderId;
   receiveIntervalMinutes: SyncReceiveIntervalMinutes;
-  wifiOnly: boolean; // Defaults to true (Wi-Fi by default; false = Wi-Fi & Mobile data)
+  wifiOnly: boolean; // Defaults to false (Wi-Fi & Mobile data) so edits auto-sync everywhere
   status: UnifiedSyncStatusChip;
   lastSyncedAt: string | null;
   lastLocalEditAt: string | null;
@@ -501,8 +501,8 @@ export async function pullFromSyncthingFolder(
 export function getUnifiedSyncSettings(): UnifiedSyncSettings {
   const defaults: UnifiedSyncSettings = {
     activeProvider: 'none',
-    receiveIntervalMinutes: 15,
-    wifiOnly: true, // Defaults to Wi-Fi
+    receiveIntervalMinutes: 2,
+    wifiOnly: false, // Sync on Wi-Fi & Mobile data by default (Joplin-style auto-sync)
     status: 'synced',
     lastSyncedAt: null,
     lastLocalEditAt: null,
@@ -512,8 +512,10 @@ export function getUnifiedSyncSettings(): UnifiedSyncSettings {
     const raw = localStorage.getItem(UNIFIED_SYNC_SETTINGS_KEY);
     if (!raw) return defaults;
     const parsed = JSON.parse(raw);
-    let interval: SyncReceiveIntervalMinutes =
+    const interval: SyncReceiveIntervalMinutes =
       parsed.receiveIntervalMinutes === 0 ||
+      parsed.receiveIntervalMinutes === 1 ||
+      parsed.receiveIntervalMinutes === 2 ||
       parsed.receiveIntervalMinutes === 5 ||
       parsed.receiveIntervalMinutes === 15 ||
       parsed.receiveIntervalMinutes === 30 ||
@@ -521,18 +523,13 @@ export function getUnifiedSyncSettings(): UnifiedSyncSettings {
       parsed.receiveIntervalMinutes === 720 ||
       parsed.receiveIntervalMinutes === 1440
         ? parsed.receiveIntervalMinutes
-        : 15;
-
-    // Minimum pull interval for Telegram is 15 minutes (hide 5 min option)
-    if (parsed.activeProvider === 'telegram' && interval === 5) {
-      interval = 15;
-    }
+        : 2;
 
     return {
       ...defaults,
       ...parsed,
       receiveIntervalMinutes: interval,
-      wifiOnly: typeof parsed.wifiOnly === 'boolean' ? parsed.wifiOnly : true,
+      wifiOnly: typeof parsed.wifiOnly === 'boolean' ? parsed.wifiOnly : false,
     };
   } catch {
     return defaults;
@@ -544,14 +541,31 @@ export function saveUnifiedSyncSettings(
 ): UnifiedSyncSettings {
   const current = getUnifiedSyncSettings();
   const next: UnifiedSyncSettings = { ...current, ...patch };
-  if (next.activeProvider === 'telegram' && next.receiveIntervalMinutes === 5) {
-    next.receiveIntervalMinutes = 15;
-  }
   try {
     localStorage.setItem(UNIFIED_SYNC_SETTINGS_KEY, JSON.stringify(next));
   } catch {}
   emitUnifiedSyncUpdate();
   return next;
+}
+
+/**
+ * Automatically sets a newly connected provider as the active Joplin-style auto-sync target
+ * if no active provider is currently selected.
+ */
+export function activateSyncProviderIfNone(
+  providerId: ActiveSyncProviderId
+): UnifiedSyncSettings {
+  const current = getUnifiedSyncSettings();
+  if (providerId === 'none') return current;
+  if (!current.activeProvider || current.activeProvider === 'none') {
+    return saveUnifiedSyncSettings({
+      activeProvider: providerId,
+      receiveIntervalMinutes: current.receiveIntervalMinutes || 2,
+      status: 'synced',
+      lastError: null,
+    });
+  }
+  return current;
 }
 
 // ============================================================================
@@ -1069,6 +1083,7 @@ export async function executeMultiDestinationBackup(options: {
   rawData: Record<string, unknown>;
   password?: string;
   isManual?: boolean;
+  targetDestinations?: BackupDestinationId[];
   firebaseUser?: any;
   joplinSyncSettings?: any;
   syncDriveNow?: (targetId?: any, options?: any) => Promise<any>;
@@ -1123,10 +1138,13 @@ export async function executeMultiDestinationBackup(options: {
       ? await encryptBackupPayloadAES256(plainJson, options.password)
       : plainJson;
 
-  // Determine active ticked destinations (local is always ticked)
-  const ticked: BackupDestinationId[] = ALL_BACKUP_DESTINATIONS.filter((id) =>
-    id === 'local' ? true : Boolean(settings.destinations[id])
-  );
+  // Determine target destinations (explicit provider list OR all enabled destinations)
+  const ticked: BackupDestinationId[] =
+    Array.isArray(options.targetDestinations) && options.targetDestinations.length > 0
+      ? options.targetDestinations
+      : ALL_BACKUP_DESTINATIONS.filter((id) =>
+          id === 'local' ? true : Boolean(settings.destinations[id])
+        );
 
   // Mark ticked destinations as running
   const runningStatuses = { ...getUnifiedBackupSettings().destinationStatuses };

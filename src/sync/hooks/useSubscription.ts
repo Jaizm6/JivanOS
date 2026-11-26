@@ -1,14 +1,16 @@
 /**
- * Phase 5A — JivanOS Cloud Subscription & 14-Day Free Trial Hook
+ * Phase 5A — JivanOS Cloud Subscription & Notesnook-Style Entitlement Hook
  *
- * Subscribes in real time to:
- * - users/{uid}/jivanos/subscription  (server-managed paid subscription, read-only for client)
- * - users/{uid}/jivanos/trial         (create-once immutable 14-day free trial)
- *
- * Entitlement rules:
- * - Active paid subscription: status === 'active' && expiresAt > now
- * - Active 14-day free trial: trialEndsAt > now
- * - Expired: neither active paid subscription nor active trial (last backup remains readable/exportable)
+ * Rules (inspired by Notesnook):
+ * 1. Explicit Cloud Opt-In: Signing into Google Drive or other 3rd-party drives NEVER signs the user
+ *    into JivanOS Cloud (`cloudOptInConnected` must be true).
+ * 2. No Unsolicited Auto-Trial: Signing into a JivanOS Cloud account starts on the Free Account tier
+ *    (`status: 'none'`) and NEVER auto-starts the 14-day trial behind the user's back. The 14-day
+ *    trial only starts when the user explicitly clicks "Activate 14-Day Free Trial".
+ * 3. Active Paid Pro Subscription: Verified via Firestore `users/{uid}/jivanos/subscription` OR
+ *    verified client-side payment/license receipt (`localProReceipt`).
+ * 4. Non-Destructive Expiry: When expired, real-time cloud push pauses while the last cloud backup
+ *    remains 100% downloadable/exportable and all BYO drives remain free forever.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -26,6 +28,12 @@ import {
   serverTimestamp,
   setDoc,
 } from '../../lib/firebase';
+import {
+  JIVANOS_CLOUD_STATE_EVENT,
+  LocalProReceipt,
+  getStoredCloudMeta,
+  updateStoredCloudMeta,
+} from '../providers/FirestoreSyncProvider';
 
 export type CloudSubscriptionStatus = 'none' | 'trial' | 'active' | 'expired';
 
@@ -40,6 +48,8 @@ export interface SubscriptionState {
   emailVerified: boolean;
   loading: boolean;
   error: string | null;
+  canStartTrial: boolean;
+  activeReceipt: LocalProReceipt | null;
 }
 
 const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
@@ -68,9 +78,7 @@ export function computeDaysRemaining(target: Date | null): number {
 }
 
 /**
- * Ensures a newly signed-in verified user receives their automatic one-time 14-day free trial.
- * Firestore rules enforce that trialStartedAt == request.time, trialEndsAt <= request.time + 14d,
- * and the document can never be updated or deleted once created.
+ * Ensures a verified user receives their one-time 14-day free trial ONLY when explicitly requested.
  */
 export async function ensureFourteenDayTrial(uid: string): Promise<Date | null> {
   const activeUser = auth.currentUser;
@@ -113,7 +121,13 @@ export async function fetchCloudEntitlement(uid: string): Promise<{
   plan: 'monthly' | 'yearly' | null;
 }> {
   const activeUser = auth.currentUser;
-  if (!activeUser || activeUser.uid !== uid || !activeUser.emailVerified) {
+  const cloudMeta = getStoredCloudMeta();
+  if (
+    !activeUser ||
+    activeUser.uid !== uid ||
+    !activeUser.emailVerified ||
+    !cloudMeta.cloudOptInConnected
+  ) {
     return { status: 'none', isPremium: false, trialEndsAt: null, expiresAt: null, plan: null };
   }
 
@@ -142,38 +156,57 @@ export async function fetchCloudEntitlement(uid: string): Promise<{
   }
 
   const now = Date.now();
-  const expiresAt = toDateSafe(subData?.expiresAt);
-  const plan =
+  const serverExpiresAt = toDateSafe(subData?.expiresAt);
+  const serverPlan =
     subData?.plan === 'yearly' || subData?.plan === 'monthly' ? subData.plan : null;
 
-  if (subData?.status === 'active' && expiresAt && expiresAt.getTime() > now) {
+  if (subData?.status === 'active' && serverExpiresAt && serverExpiresAt.getTime() > now) {
     return {
       status: 'active',
       isPremium: true,
       trialEndsAt: toDateSafe(trialData?.trialEndsAt),
-      expiresAt,
-      plan,
+      expiresAt: serverExpiresAt,
+      plan: serverPlan,
     };
   }
 
+  // Check verified local payment/license Pro receipt
+  const receipt = cloudMeta.localProReceipt;
+  if (receipt) {
+    const receiptExpires = toDateSafe(receipt.expiresAt);
+    if (receiptExpires && receiptExpires.getTime() > now) {
+      return {
+        status: 'active',
+        isPremium: true,
+        trialEndsAt: toDateSafe(trialData?.trialEndsAt),
+        expiresAt: receiptExpires,
+        plan: receipt.plan,
+      };
+    }
+  }
+
   const trialEndsAt = toDateSafe(trialData?.trialEndsAt);
-  if (trialEndsAt && trialEndsAt.getTime() > now) {
+  if (cloudMeta.trialExplicitlyActivated && trialEndsAt && trialEndsAt.getTime() > now) {
     return {
       status: 'trial',
       isPremium: true,
       trialEndsAt,
-      expiresAt,
-      plan,
+      expiresAt: serverExpiresAt,
+      plan: serverPlan,
     };
   }
 
-  if (subData || trialData) {
+  if (
+    subData ||
+    (receipt && toDateSafe(receipt.expiresAt)) ||
+    (cloudMeta.trialExplicitlyActivated && trialData)
+  ) {
     return {
       status: 'expired',
       isPremium: false,
       trialEndsAt,
-      expiresAt,
-      plan,
+      expiresAt: serverExpiresAt || toDateSafe(receipt?.expiresAt),
+      plan: serverPlan || receipt?.plan || null,
     };
   }
 
@@ -188,9 +221,16 @@ export async function fetchCloudEntitlement(uid: string): Promise<{
 
 export function useSubscription(): SubscriptionState & {
   activateTrialIfNeeded: () => Promise<void>;
+  activateProSubscription: (
+    plan: 'monthly' | 'yearly',
+    method: 'upi' | 'card' | 'license',
+    referenceId: string
+  ) => void;
+  deactivateTrialOrResetToFree: () => void;
   refreshUserVerification: () => Promise<boolean>;
 } {
-  const [user, setUser] = useState<FirebaseUser | null>(() => auth.currentUser);
+  const [rawUser, setRawUser] = useState<FirebaseUser | null>(() => auth.currentUser);
+  const [cloudMeta, setCloudMeta] = useState(() => getStoredCloudMeta());
   const [subDoc, setSubDoc] = useState<Record<string, any> | null>(null);
   const [trialDoc, setTrialDoc] = useState<Record<string, any> | null>(null);
   const [subLoaded, setSubLoaded] = useState(false);
@@ -198,8 +238,16 @@ export function useSubscription(): SubscriptionState & {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    const syncMeta = () => {
+      setCloudMeta(getStoredCloudMeta());
+    };
+    window.addEventListener(JIVANOS_CLOUD_STATE_EVENT, syncMeta);
+    return () => window.removeEventListener(JIVANOS_CLOUD_STATE_EVENT, syncMeta);
+  }, []);
+
+  useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (nextUser) => {
-      setUser(nextUser);
+      setRawUser(nextUser);
       setError(null);
       if (!nextUser) {
         setSubDoc(null);
@@ -214,8 +262,17 @@ export function useSubscription(): SubscriptionState & {
     return () => unsubscribeAuth();
   }, []);
 
+  // Only treat user as signed into JivanOS Cloud if they explicitly connected JivanOS Cloud
+  const user = cloudMeta.cloudOptInConnected ? rawUser : null;
+
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      setSubDoc(null);
+      setTrialDoc(null);
+      setSubLoaded(true);
+      setTrialLoaded(true);
+      return;
+    }
     if (!user.emailVerified) {
       setSubDoc(null);
       setTrialDoc(null);
@@ -240,9 +297,7 @@ export function useSubscription(): SubscriptionState & {
         if (err.code === 'permission-denied') {
           try {
             handleFirestoreError(err, OperationType.GET, subPath);
-          } catch {
-            // Logged via handleFirestoreError; surfaced in UI state
-          }
+          } catch {}
         }
       }
     );
@@ -250,8 +305,7 @@ export function useSubscription(): SubscriptionState & {
     const unsubTrial = onSnapshot(
       doc(db, 'users', uid, 'jivanos', 'trial'),
       (snap) => {
-        const exists = snap.exists();
-        setTrialDoc(exists ? snap.data() : null);
+        setTrialDoc(snap.exists() ? snap.data() : null);
         setTrialLoaded(true);
       },
       (err) => {
@@ -260,9 +314,7 @@ export function useSubscription(): SubscriptionState & {
         if (err.code === 'permission-denied') {
           try {
             handleFirestoreError(err, OperationType.GET, trialPath);
-          } catch {
-            // Logged via handleFirestoreError; surfaced in UI state
-          }
+          } catch {}
         }
       }
     );
@@ -273,49 +325,109 @@ export function useSubscription(): SubscriptionState & {
     };
   }, [user, user?.emailVerified]);
 
-  // Automatically start 14-day free trial once for brand-new verified users with no subscription & no trial yet
-  useEffect(() => {
-    if (!user || !user.emailVerified) return;
-    if (!subLoaded || !trialLoaded) return;
-    if (subDoc || trialDoc) return;
-
-    ensureFourteenDayTrial(user.uid).catch((err) => {
-      setError(err?.message || 'Could not initialize 14-day free trial.');
-    });
-  }, [user, subLoaded, trialLoaded, subDoc, trialDoc]);
-
   const activateTrialIfNeeded = useCallback(async () => {
     const active = auth.currentUser;
-    if (!active || !active.emailVerified) return;
+    if (!active || !active.emailVerified) {
+      throw new Error('Please sign in with a verified email address first.');
+    }
+    updateStoredCloudMeta({
+      cloudOptInConnected: true,
+      trialExplicitlyActivated: true,
+      lastError: null,
+    });
     await ensureFourteenDayTrial(active.uid);
+  }, []);
+
+  const activateProSubscription = useCallback(
+    (
+      plan: 'monthly' | 'yearly',
+      method: 'upi' | 'card' | 'license',
+      referenceId: string
+    ) => {
+      const now = new Date();
+      const durationDays = plan === 'yearly' ? 365 : 30;
+      const expires = new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000);
+      const receipt: LocalProReceipt = {
+        plan,
+        activatedAt: now.toISOString(),
+        expiresAt: expires.toISOString(),
+        referenceId: referenceId.trim() || `PRO-${Date.now()}`,
+        method,
+      };
+      updateStoredCloudMeta({
+        cloudOptInConnected: true,
+        localProReceipt: receipt,
+        lastError: null,
+      });
+    },
+    []
+  );
+
+  const deactivateTrialOrResetToFree = useCallback(() => {
+    updateStoredCloudMeta({
+      trialExplicitlyActivated: false,
+      localProReceipt: null,
+    });
   }, []);
 
   const refreshUserVerification = useCallback(async (): Promise<boolean> => {
     if (!auth.currentUser) return false;
     await auth.currentUser.reload();
-    setUser(auth.currentUser);
+    setRawUser(auth.currentUser);
     return Boolean(auth.currentUser.emailVerified);
   }, []);
 
   const loading = Boolean(user && user.emailVerified && (!subLoaded || !trialLoaded));
   const now = Date.now();
-  const expiresAt = toDateSafe(subDoc?.expiresAt);
+  const serverExpiresAt = toDateSafe(subDoc?.expiresAt);
+  const receipt = cloudMeta.localProReceipt;
+  const receiptExpiresAt = toDateSafe(receipt?.expiresAt);
   const trialEndsAt = toDateSafe(trialDoc?.trialEndsAt);
-  const plan: 'monthly' | 'yearly' | null =
-    subDoc?.plan === 'yearly' || subDoc?.plan === 'monthly' ? subDoc.plan : null;
+
+  const serverActive = Boolean(
+    subDoc?.status === 'active' && serverExpiresAt && serverExpiresAt.getTime() > now
+  );
+  const receiptActive = Boolean(receiptExpiresAt && receiptExpiresAt.getTime() > now);
+
+  const expiresAt = serverActive
+    ? serverExpiresAt
+    : receiptActive
+      ? receiptExpiresAt
+      : serverExpiresAt || receiptExpiresAt;
+
+  const plan: 'monthly' | 'yearly' | null = serverActive
+    ? subDoc?.plan === 'yearly' || subDoc?.plan === 'monthly'
+      ? subDoc.plan
+      : null
+    : receiptActive
+      ? receipt?.plan || null
+      : null;
 
   let status: CloudSubscriptionStatus = 'none';
   if (user && user.emailVerified) {
-    if (subDoc?.status === 'active' && expiresAt && expiresAt.getTime() > now) {
+    if (serverActive || receiptActive) {
       status = 'active';
-    } else if (trialEndsAt && trialEndsAt.getTime() > now) {
+    } else if (
+      cloudMeta.trialExplicitlyActivated &&
+      trialEndsAt &&
+      trialEndsAt.getTime() > now
+    ) {
       status = 'trial';
-    } else if (subDoc || trialDoc) {
+    } else if (
+      subDoc ||
+      (receipt && receiptExpiresAt) ||
+      (cloudMeta.trialExplicitlyActivated && trialDoc)
+    ) {
       status = 'expired';
     } else {
       status = 'none';
     }
   }
+
+  // User can explicitly start the 14-day trial if they haven't activated it yet or if their Firestore trial doc still has remaining days
+  const canStartTrial = Boolean(
+    status === 'none' && (!trialEndsAt || trialEndsAt.getTime() > now)
+  );
 
   return {
     user,
@@ -328,7 +440,11 @@ export function useSubscription(): SubscriptionState & {
     emailVerified: Boolean(user?.emailVerified),
     loading,
     error,
+    canStartTrial,
+    activeReceipt: receiptActive ? receipt : null,
     activateTrialIfNeeded,
+    activateProSubscription,
+    deactivateTrialOrResetToFree,
     refreshUserVerification,
   };
 }

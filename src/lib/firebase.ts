@@ -95,12 +95,19 @@ export const googleDriveProvider = new GoogleAuthProvider();
 GOOGLE_DRIVE_SCOPES.forEach((scope) => googleDriveProvider.addScope(scope));
 googleDriveProvider.setCustomParameters({ prompt: 'select_account' });
 
+// Dedicated secondary Firebase App & Auth instance strictly for Google Drive OAuth token acquisition.
+// This guarantees that signing into Google Drive NEVER signs the user into JivanOS Cloud (primary `auth`).
+const gdriveOAuthApp =
+  getApps().find((a) => a.name === 'jivanos-gdrive-oauth') ||
+  initializeApp(firebaseConfig, 'jivanos-gdrive-oauth');
+export const gdriveAuth = getAuth(gdriveOAuthApp);
+
 // Strict in-memory cache for Google Workspace OAuth access tokens (never stored in localStorage/sessionStorage)
 let cachedGDriveAccessToken: string | null = null;
 let cachedGDriveEmail: string | null = null;
 let cachedGDriveDisplayName: string | null = null;
 
-onAuthStateChanged(auth, (user) => {
+onAuthStateChanged(gdriveAuth, (user) => {
   if (!user) {
     cachedGDriveAccessToken = null;
     cachedGDriveEmail = null;
@@ -140,6 +147,7 @@ export function clearInMemoryGDriveToken(): void {
 export async function revokeWebGDriveToken(): Promise<void> {
   const token = cachedGDriveAccessToken;
   clearInMemoryGDriveToken();
+  await firebaseSignOut(gdriveAuth).catch(() => {});
   if (!token) return;
   try {
     await fetch(`https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(token)}`, {
@@ -216,8 +224,8 @@ export async function signInWithGoogle(): Promise<FirebaseUser | null> {
 }
 
 /**
- * Connect Google Drive via Firebase Auth GoogleAuthProvider using least-privilege drive.appdata scope ONLY.
- * Avoids redirect_uri_mismatch on dynamic preview URLs and keeps the access token strictly in memory.
+ * Connect Google Drive via dedicated gdriveAuth instance using least-privilege drive.appdata scope ONLY.
+ * Never logs the user into JivanOS Cloud (primary `auth`).
  */
 export async function connectGoogleDriveWithFirebase(): Promise<{
   accessToken: string;
@@ -232,7 +240,7 @@ export async function connectGoogleDriveWithFirebase(): Promise<{
   }
 
   try {
-    const result = await signInWithPopup(auth, googleDriveProvider);
+    const result = await signInWithPopup(gdriveAuth, googleDriveProvider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
     if (!credential?.accessToken) {
       throw new Error(

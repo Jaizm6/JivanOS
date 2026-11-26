@@ -58,14 +58,14 @@ export function getRealSyncOverview(
 ): RealSyncOverview {
   const connected: ConnectedProviderSummary[] = [];
 
-  // 1. JivanOS Cloud (Firebase)
-  if (firebaseUser && firebaseUser.emailVerified) {
-    const meta = getStoredCloudMeta();
+  // 1. JivanOS Cloud (Firebase) — only when explicitly connected via JivanOS Cloud (never auto-connected by Google Drive)
+  const cloudMeta = getStoredCloudMeta();
+  if (firebaseUser && firebaseUser.emailVerified && cloudMeta.cloudOptInConnected) {
     connected.push({
       id: 'firebase',
       label: 'JivanOS Cloud',
       accountLabel: firebaseUser.email || firebaseUser.displayName || 'Signed in',
-      lastSyncedAt: meta.lastSyncedAt || null,
+      lastSyncedAt: cloudMeta.lastSyncedAt || null,
       brandColor: '#4F46E5',
     });
   }

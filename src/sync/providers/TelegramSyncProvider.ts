@@ -45,7 +45,7 @@ export const TELEGRAM_NO_BACKUP_FOUND_MESSAGE =
 
 const DIRECT_TIMEOUT_MS = 12000;
 
-export const TELEGRAM_SYNC_MIN_PUSH_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+export const TELEGRAM_SYNC_MIN_PUSH_INTERVAL_MS = 10 * 1000; // 10 seconds (safe for Telegram Bot API, instant Joplin-style sync)
 
 export interface StoredTelegramAuth {
   botToken: string;

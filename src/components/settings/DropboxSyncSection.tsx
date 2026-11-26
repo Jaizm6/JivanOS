@@ -38,6 +38,7 @@ import {
 import { dropboxSyncProvider } from '../../sync/providers/DropboxProvider';
 import { getCachedDesktopOAuthAccount } from '../../sync/desktop/DesktopSyncTransport';
 import { isDesktop } from '../../desktop/KeychainService';
+import { activateSyncProviderIfNone } from '../../sync/unifiedSyncBackupEngine';
 
 import { SyncProviderRow } from './SyncProviderRow';
 
@@ -51,6 +52,12 @@ interface DropboxConflictDialogState {
 export interface DropboxSyncSectionProps {
   isFirst?: boolean;
   isLast?: boolean;
+  onBackupNow?: () => void;
+  isBackingUp?: boolean;
+  onOpenSyncOptions?: () => void;
+  onOpenBackupOptions?: (onRestore?: () => void) => void;
+  isActiveSyncProvider?: boolean;
+  isBackupEnabled?: boolean;
 }
 
 const DropboxLogoSvg: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) => (
@@ -62,6 +69,12 @@ const DropboxLogoSvg: React.FC<{ className?: string }> = ({ className = 'w-5 h-5
 export const DropboxSyncSection: React.FC<DropboxSyncSectionProps> = ({
   isFirst = false,
   isLast = false,
+  onBackupNow,
+  isBackingUp = false,
+  onOpenSyncOptions,
+  onOpenBackupOptions,
+  isActiveSyncProvider = false,
+  isBackupEnabled = false,
 }) => {
   const { exportEncryptedJSON, replaceAllAppDataFromBackup } = useApp();
 
@@ -235,6 +248,7 @@ export const DropboxSyncSection: React.FC<DropboxSyncSectionProps> = ({
       const connectedAcc = await dropboxSyncProvider.connect();
       setAccount(connectedAcc);
       setIsConnectSheetOpen(false);
+      activateSyncProviderIfNone('dropbox');
       showAndroidToast(`Connected Dropbox as ${connectedAcc.email || connectedAcc.name}`, 2800, 'success');
       await runSyncOrInspect('after-connect');
     } catch (err: any) {
@@ -277,6 +291,7 @@ export const DropboxSyncSection: React.FC<DropboxSyncSectionProps> = ({
       setManualCodeInput('');
       setIsConnectSheetOpen(false);
       setErrorMessage(null);
+      activateSyncProviderIfNone('dropbox');
       showAndroidToast(`Connected Dropbox as ${connectedAcc.email || connectedAcc.name}`, 2800, 'success');
       await runSyncOrInspect('after-connect');
     } catch (err: any) {
@@ -426,8 +441,19 @@ export const DropboxSyncSection: React.FC<DropboxSyncSectionProps> = ({
         connectButtonId="btn-m3-connect-dropbox"
         onConnect={handleConnect}
         onSyncNow={isConnected ? () => runSyncOrInspect('sync-now') : undefined}
+        onBackupNow={isConnected ? onBackupNow : undefined}
+        onOpenSyncOptions={isConnected ? onOpenSyncOptions : undefined}
+        onOpenBackupOptions={
+          isConnected && onOpenBackupOptions
+            ? () => onOpenBackupOptions(() => runSyncOrInspect('restore-check'))
+            : undefined
+        }
+        isActiveSyncProvider={isActiveSyncProvider}
+        isBackupEnabled={isBackupEnabled}
         syncButtonId="btn-m3-dropbox-sync-now"
+        backupButtonId="btn-m3-dropbox-backup"
         isSyncing={syncStatus === 'syncing'}
+        isBackingUp={isBackingUp}
         onRetry={() => (isConnected ? runSyncOrInspect('sync-now') : handleConnect())}
         autoSyncInterval={activeInterval}
         onSelectInterval={isConnected ? handleSelectInterval : undefined}
