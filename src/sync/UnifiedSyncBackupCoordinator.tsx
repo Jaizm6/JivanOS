@@ -22,10 +22,20 @@ import {
 import {
   DRIVE_SYNC_STATE_EVENT,
   DriveBackupEnvelope,
+  getStoredDriveSyncMeta,
   mergeDriveData,
+  updateStoredDriveSyncMeta,
 } from '../utils/googleDriveSync';
-import { DROPBOX_SYNC_STATE_EVENT } from '../utils/dropboxSync';
-import { TELEGRAM_SYNC_STATE_EVENT, telegramSyncProvider } from './providers/TelegramSyncProvider';
+import {
+  DROPBOX_SYNC_STATE_EVENT,
+  getStoredDropboxSyncMeta,
+  updateStoredDropboxSyncMeta,
+} from '../utils/dropboxSync';
+import {
+  TELEGRAM_SYNC_STATE_EVENT,
+  getStoredTelegramAuth,
+  telegramSyncProvider,
+} from './providers/TelegramSyncProvider';
 import { MEGA_SYNC_STATE_EVENT, megaSyncProvider } from './providers/MEGASyncProvider';
 import { JIVANOS_CLOUD_STATE_EVENT, firestoreSyncProvider } from './providers/FirestoreSyncProvider';
 import { googleDriveSyncProvider } from './providers/GoogleDriveProvider';
@@ -116,10 +126,23 @@ export const UnifiedSyncBackupCoordinator: React.FC = () => {
   const isUploadingRef = useRef(false);
   const isPullingRef = useRef(false);
   const pendingReuploadRef = useRef(false);
-  const hasUnsyncedChangesRef = useRef(false);
+  const hasUnsyncedChangesRef = useRef(
+    (() => {
+      try {
+        const s = getUnifiedSyncSettings();
+        return Boolean(
+          s.lastLocalEditAt &&
+            (!s.lastSyncedAt || Date.parse(s.lastLocalEditAt) > Date.parse(s.lastSyncedAt))
+        );
+      } catch {
+        return false;
+      }
+    })()
+  );
   const hashCheckTimerRef = useRef<number | null>(null);
   const debounceTimerRef = useRef<number | null>(null);
   const telegramCooldownTimerRef = useRef<number | null>(null);
+  const remoteApplyTimerRef = useRef<number | null>(null);
   const lastObservedHashRef = useRef<string | null>(null);
   const applyingRemoteDataRef = useRef(false);
 
@@ -335,11 +358,16 @@ export const UnifiedSyncBackupCoordinator: React.FC = () => {
           const pulled = await pullFromSyncthingFolder(localData);
           if (pulled.peerFilesMerged > 0) {
             applyingRemoteDataRef.current = true;
+            if (remoteApplyTimerRef.current !== null) {
+              window.clearTimeout(remoteApplyTimerRef.current);
+            }
             appApiRef.current.replaceAllAppDataFromBackup(JSON.stringify(pulled.mergedData));
             lastObservedHashRef.current = computeBackupContentHash(pulled.mergedData);
-            window.setTimeout(() => {
+            remoteApplyTimerRef.current = window.setTimeout(() => {
+              lastObservedHashRef.current = computeBackupContentHash(getLocalDataObject());
               applyingRemoteDataRef.current = false;
-            }, 350);
+              remoteApplyTimerRef.current = null;
+            }, 900);
           }
           await pushToSyncthingFolder(pulled.mergedData);
           hasUnsyncedChangesRef.current = false;
@@ -364,8 +392,9 @@ export const UnifiedSyncBackupCoordinator: React.FC = () => {
         let remoteModifiedIso: string | null = null;
 
         if (providerId === 'telegram') {
+          const tgLastSynced = getStoredTelegramAuth()?.lastSyncedAt || null;
           const pulled = await telegramSyncProvider.syncPull(
-            options?.manual || options?.pushAfterMerge ? null : settings.lastSyncedAt
+            options?.manual || options?.pushAfterMerge ? null : tgLastSynced
           );
           if (pulled.skippedNotNewer) {
             if (options?.manual || options?.pushAfterMerge || hasUnsyncedChangesRef.current) {
@@ -381,26 +410,26 @@ export const UnifiedSyncBackupCoordinator: React.FC = () => {
           remoteModifiedIso = pulled.lastModified;
         } else if (providerId === 'gdrive') {
           const info = await googleDriveSyncProvider.getLastSyncInfo();
-          if (
+          const driveLastSynced = getStoredDriveSyncMeta().lastSyncedAt;
+          const remoteChanged = Boolean(
             info?.lastModified &&
-            (!settings.lastSyncedAt ||
-              Date.parse(info.lastModified) > Date.parse(settings.lastSyncedAt) ||
-              options?.manual ||
-              options?.pushAfterMerge)
-          ) {
+              (!driveLastSynced ||
+                Date.parse(info.lastModified) !== Date.parse(driveLastSynced))
+          );
+          if (remoteChanged || options?.manual || options?.pushAfterMerge) {
             const res = await googleDriveSyncProvider.restore();
             remoteEnvelope = res.envelope;
             remoteModifiedIso = res.lastModified;
           }
         } else if (providerId === 'dropbox') {
           const info = await dropboxSyncProvider.getLastSyncInfo();
-          if (
+          const dbxLastSynced = getStoredDropboxSyncMeta().lastSyncedAt;
+          const remoteChanged = Boolean(
             info?.lastModified &&
-            (!settings.lastSyncedAt ||
-              Date.parse(info.lastModified) > Date.parse(settings.lastSyncedAt) ||
-              options?.manual ||
-              options?.pushAfterMerge)
-          ) {
+              (!dbxLastSynced ||
+                Date.parse(info.lastModified) !== Date.parse(dbxLastSynced))
+          );
+          if (remoteChanged || options?.manual || options?.pushAfterMerge) {
             const res = await dropboxSyncProvider.restore();
             remoteEnvelope = res.envelope;
             remoteModifiedIso = res.lastModified;
@@ -429,26 +458,41 @@ export const UnifiedSyncBackupCoordinator: React.FC = () => {
 
         let mergedPayload = localData;
         let didChangeLocal = false;
+        let localContributedToRemote = false;
 
         if (remoteEnvelope && remoteEnvelope.data) {
           const beforeHash = computeBackupContentHash(localData);
+          const remoteHash = computeBackupContentHash(remoteEnvelope.data);
           mergedPayload = mergeDriveData(localData, remoteEnvelope.data);
           const afterHash = computeBackupContentHash(mergedPayload);
           didChangeLocal = beforeHash !== afterHash;
+          localContributedToRemote = afterHash !== remoteHash;
 
           if (didChangeLocal) {
             applyingRemoteDataRef.current = true;
+            if (remoteApplyTimerRef.current !== null) {
+              window.clearTimeout(remoteApplyTimerRef.current);
+            }
             appApiRef.current.replaceAllAppDataFromBackup(JSON.stringify(mergedPayload));
             lastObservedHashRef.current = afterHash;
-            window.setTimeout(() => {
+            remoteApplyTimerRef.current = window.setTimeout(() => {
+              lastObservedHashRef.current = computeBackupContentHash(getLocalDataObject());
               applyingRemoteDataRef.current = false;
-            }, 350);
+              remoteApplyTimerRef.current = null;
+            }, 900);
+          }
+
+          const resolvedSyncIso =
+            remoteModifiedIso || remoteEnvelope.updatedAt || new Date().toISOString();
+          if (providerId === 'gdrive') {
+            updateStoredDriveSyncMeta({ lastSyncedAt: resolvedSyncIso, lastError: null });
+          } else if (providerId === 'dropbox') {
+            updateStoredDropboxSyncMeta({ lastSyncedAt: resolvedSyncIso, lastError: null });
           }
 
           saveUnifiedSyncSettings({
             status: hasUnsyncedChangesRef.current ? 'waiting' : 'synced',
-            lastSyncedAt:
-              remoteModifiedIso || remoteEnvelope.updatedAt || new Date().toISOString(),
+            lastSyncedAt: resolvedSyncIso,
             lastError: null,
           });
         }
@@ -456,7 +500,8 @@ export const UnifiedSyncBackupCoordinator: React.FC = () => {
         const shouldPush =
           Boolean(options?.manual) ||
           Boolean(options?.pushAfterMerge) ||
-          hasUnsyncedChangesRef.current;
+          hasUnsyncedChangesRef.current ||
+          localContributedToRemote;
 
         if (shouldPush) {
           await runSyncPush({
@@ -607,6 +652,10 @@ export const UnifiedSyncBackupCoordinator: React.FC = () => {
     window.addEventListener('pagehide', handlePageHide);
     return () => {
       window.clearTimeout(initTimer);
+      if (remoteApplyTimerRef.current !== null) {
+        window.clearTimeout(remoteApplyTimerRef.current);
+        remoteApplyTimerRef.current = null;
+      }
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('focus', handleWindowFocus);
       window.removeEventListener('online', handleOnline);

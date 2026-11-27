@@ -473,52 +473,90 @@ export class FirestoreSyncProvider implements SyncProvider {
     const backupRef = doc(db, 'users', uid, 'jivanos', 'backup');
 
     try {
-      const snap = await getDoc(backupRef);
+      const [snap, fallbackRaw] = await Promise.all([
+        getDoc(backupRef),
+        getUserDataFromFirestore(uid).catch(() => null),
+      ]);
+
+      let primaryEnvelope: SyncBackupEnvelope | null = null;
+      let primaryIso: string | null = null;
+      let primarySize = 0;
+
       if (snap.exists()) {
         const raw = snap.data();
-        const updatedIso = timestampToIso(raw.updatedAt);
+        primaryIso = timestampToIso(raw.updatedAt);
         const payloadData = (raw.data && typeof raw.data === 'object' ? raw.data : {}) as Record<
           string,
           any
         >;
-        const sizeBytes = new Blob([JSON.stringify(payloadData)]).size;
-
-        const envelope: SyncBackupEnvelope = {
+        primarySize = new Blob([JSON.stringify(payloadData)]).size;
+        primaryEnvelope = {
           schemaVersion: 1,
           app: 'JivanOS',
-          updatedAt: updatedIso,
+          updatedAt: primaryIso,
           deviceId: typeof raw.deviceId === 'string' ? raw.deviceId : 'jivanos-cloud',
           data: payloadData,
         };
+      }
 
+      let fallbackEnvelope: SyncBackupEnvelope | null = null;
+      let fallbackIso: string | null = null;
+      let fallbackSize = 0;
+
+      if (fallbackRaw && typeof fallbackRaw.payload === 'string') {
+        try {
+          const parsedData = JSON.parse(fallbackRaw.payload);
+          fallbackIso =
+            typeof fallbackRaw.updatedAt === 'string'
+              ? fallbackRaw.updatedAt
+              : new Date(0).toISOString();
+          fallbackSize = new Blob([fallbackRaw.payload]).size;
+          fallbackEnvelope = {
+            schemaVersion: 1,
+            app: 'JivanOS',
+            updatedAt: fallbackIso,
+            deviceId: 'jivanos-cloud',
+            data: parsedData,
+          };
+        } catch {
+          fallbackEnvelope = null;
+        }
+      }
+
+      if (primaryEnvelope && !fallbackEnvelope) {
         return {
           found: true,
-          envelope,
-          lastModified: updatedIso,
-          fileSizeBytes: sizeBytes,
+          envelope: primaryEnvelope,
+          lastModified: primaryIso,
+          fileSizeBytes: primarySize,
         };
       }
 
-      // Check fallback primary user doc (/users/{uid})
-      const fallbackRaw = await getUserDataFromFirestore(uid);
-      if (fallbackRaw && typeof fallbackRaw.payload === 'string') {
-        const parsedData = JSON.parse(fallbackRaw.payload);
-        const updatedIso =
-          typeof fallbackRaw.updatedAt === 'string'
-            ? fallbackRaw.updatedAt
-            : new Date().toISOString();
-        const sizeBytes = new Blob([fallbackRaw.payload]).size;
+      if (!primaryEnvelope && fallbackEnvelope) {
         return {
           found: true,
-          envelope: {
-            schemaVersion: 1,
-            app: 'JivanOS',
-            updatedAt: updatedIso,
-            deviceId: 'jivanos-cloud',
-            data: parsedData,
-          },
-          lastModified: updatedIso,
-          fileSizeBytes: sizeBytes,
+          envelope: fallbackEnvelope,
+          lastModified: fallbackIso,
+          fileSizeBytes: fallbackSize,
+        };
+      }
+
+      if (primaryEnvelope && fallbackEnvelope) {
+        const primaryMs = primaryIso ? Date.parse(primaryIso) : 0;
+        const fallbackMs = fallbackIso ? Date.parse(fallbackIso) : 0;
+        if (Number.isFinite(fallbackMs) && fallbackMs > primaryMs + 2000) {
+          return {
+            found: true,
+            envelope: fallbackEnvelope,
+            lastModified: fallbackIso,
+            fileSizeBytes: fallbackSize,
+          };
+        }
+        return {
+          found: true,
+          envelope: primaryEnvelope,
+          lastModified: primaryIso,
+          fileSizeBytes: primarySize,
         };
       }
 

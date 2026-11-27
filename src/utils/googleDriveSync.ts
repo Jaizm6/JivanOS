@@ -357,8 +357,13 @@ export async function connectGoogleDrive(): Promise<DriveAccountInfo> {
 }
 
 export async function silentReAuthGoogleDrive(): Promise<DriveAccountInfo | null> {
+  const meta = getStoredDriveSyncMeta();
   const nativePlugin = getNativeDrivePlugin();
   if (nativePlugin) {
+    if (!meta.wasConnected) {
+      currentConnectedAccount = null;
+      return null;
+    }
     try {
       const res = await nativePlugin.silentReAuth();
       if (res?.connected) {
@@ -594,7 +599,6 @@ export async function getLastSyncInfo(): Promise<DriveSyncInfo | null> {
       fileSizeBytes: Number(res.fileSizeBytes || 0),
     };
     updateStoredDriveSyncMeta({
-      lastSyncedAt: info.lastModified,
       lastFileSizeBytes: info.fileSizeBytes,
     });
     return info;
@@ -842,11 +846,26 @@ export function mergeDriveData(
   const remoteDeletedSet = extractDeletedIdSet(safeRemote.deletedIds);
   const deletedSet = new Set<string>([...localDeletedSet, ...remoteDeletedSet]);
 
-  const localExportedTs = safeLocal.exportedAt ? Date.parse(String(safeLocal.exportedAt)) : 0;
-  const remoteExportedTs = safeRemote.exportedAt ? Date.parse(String(safeRemote.exportedAt)) : 0;
-  const preferRemoteScalar =
-    Number.isFinite(remoteExportedTs) &&
-    (!Number.isFinite(localExportedTs) || remoteExportedTs >= localExportedTs);
+  let localMaxContentTs = getItemTimestampMs(safeLocal.profile);
+  let remoteMaxContentTs = getItemTimestampMs(safeRemote.profile);
+  for (const key of KNOWN_ARRAY_COLLECTIONS) {
+    const lArr = safeLocal[key];
+    if (Array.isArray(lArr)) {
+      for (const item of lArr) {
+        const ts = getItemTimestampMs(item);
+        if (ts > localMaxContentTs) localMaxContentTs = ts;
+      }
+    }
+    const rArr = safeRemote[key];
+    if (Array.isArray(rArr)) {
+      for (const item of rArr) {
+        const ts = getItemTimestampMs(item);
+        if (ts > remoteMaxContentTs) remoteMaxContentTs = ts;
+      }
+    }
+  }
+
+  const preferRemoteScalar = remoteMaxContentTs >= localMaxContentTs;
 
   const merged: Record<string, any> = preferRemoteScalar
     ? { ...safeLocal, ...safeRemote }

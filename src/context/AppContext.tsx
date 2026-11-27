@@ -66,6 +66,7 @@ import { contentHashSync, loadQuoteWasm } from '../utils/quoteWasm';
 import { isCustomQuote } from '../utils/quoteText';
 import { EXTRA_PALETTE_KEYS } from '../components/quotes/quoteColors';
 import {
+  SEED_BASELINE_ISO,
   defaultWidgets,
   initialAppLock,
   initialBills,
@@ -138,6 +139,7 @@ import {
   validateBackupPayload,
 } from '../utils/localBackupEngine';
 import { showAndroidToast } from '../components/common/AndroidToast';
+import { getStoredCloudMeta, updateStoredCloudMeta } from '../sync/providers/FirestoreSyncProvider';
 
 export interface GlobalTimerState {
   activeId: string | null;
@@ -778,6 +780,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             scheduledTime: '08:30',
             loggedAt: new Date(Date.now() - 3600000 * 3).toISOString(),
             status: 'taken',
+            updatedAt: SEED_BASELINE_ISO,
           },
         ];
       }
@@ -1738,9 +1741,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   useEffect(() => {
     let firestoreUnsub: (() => void) | null = null;
+    let cancelled = false;
 
-    // Handle redirect sign-in result if returning from mobile redirect flow
-    getRedirectResult(auth)
+    const redirectPromise = getRedirectResult(auth)
       .then((res) => {
         if (res?.user) {
           localStorage.setItem('omniplan_user_explicit_login', 'true');
@@ -1749,11 +1752,28 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       .catch(() => {});
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setFirebaseUser(user);
+      await redirectPromise;
+      if (cancelled) return;
+
       if (firestoreUnsub) {
         firestoreUnsub();
         firestoreUnsub = null;
       }
+
+      const hasExplicitAuth =
+        getStoredCloudMeta().cloudOptInConnected ||
+        localStorage.getItem('omniplan_user_explicit_login') === 'true';
+
+      if (user && user.uid && !hasExplicitAuth) {
+        // Stale OS/IndexedDB Firebase session without an active opt-in on this install: sign out silently
+        setFirebaseUser(null);
+        clearInMemoryGDriveToken();
+        setIsGDriveConnected(false);
+        firebaseSignOut(auth).catch(() => {});
+        return;
+      }
+
+      setFirebaseUser(user);
 
       if (user && user.uid) {
         const emailLower = (user.email || '').toLowerCase();
@@ -1856,6 +1876,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     });
 
     return () => {
+      cancelled = true;
       unsubscribe();
       if (firestoreUnsub) firestoreUnsub();
     };
@@ -3004,10 +3025,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const logout = () => {
     try {
-      firebaseSignOut(auth).catch(() => {});
       localStorage.removeItem('omniplan_user_explicit_login');
       localStorage.removeItem(`${LOCAL_STORAGE_KEY}_sync_email`);
       localStorage.removeItem(`${LOCAL_STORAGE_KEY}_profile`);
+      updateStoredCloudMeta({ cloudOptInConnected: false, lastError: null });
+      updateDriveConfig('firebase', { enabled: false, accountEmail: '', lastStatus: 'idle' });
+      firebaseSignOut(auth).catch(() => {});
     } catch {}
     setFirebaseUser(null);
     setSyncEmailState('');

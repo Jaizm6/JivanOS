@@ -92,16 +92,51 @@ public class JivanGoogleDrivePlugin extends Plugin {
         return source.substring(0, Math.min(2, source.length())).toUpperCase();
     }
 
+    private static final String KEY_EXPLICIT_CONNECTED = "gdrive_explicit_connected";
+
+    private boolean isExplicitlyConnected(Context ctx) {
+        try {
+            SharedPreferences prefs = ctx.getSharedPreferences(
+                    JivanDriveAppDataClient.PREFS_NAME,
+                    Context.MODE_PRIVATE
+            );
+            return prefs.getBoolean(KEY_EXPLICIT_CONNECTED, false);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private void setExplicitlyConnected(Context ctx, boolean connected) {
+        try {
+            SharedPreferences prefs = ctx.getSharedPreferences(
+                    JivanDriveAppDataClient.PREFS_NAME,
+                    Context.MODE_PRIVATE
+            );
+            prefs.edit().putBoolean(KEY_EXPLICIT_CONNECTED, connected).apply();
+        } catch (Throwable ignored) {
+        }
+    }
+
     @PluginMethod
     public void connect(PluginCall call) {
         try {
-            GoogleSignInAccount existing = GoogleSignIn.getLastSignedInAccount(getContext());
-            if (existing != null && hasAppDataPermission(existing)) {
-                call.resolve(buildAccountPayload(existing, true));
-                return;
+            Context ctx = getContext();
+            if (isExplicitlyConnected(ctx)) {
+                GoogleSignInAccount existing = GoogleSignIn.getLastSignedInAccount(ctx);
+                if (existing != null && hasAppDataPermission(existing)) {
+                    call.resolve(buildAccountPayload(existing, true));
+                    return;
+                }
             }
-            Intent signInIntent = getSignInClient().getSignInIntent();
-            startActivityForResult(call, signInIntent, "handleSignInResult");
+            // Clear any stale Play Services cache left over from a prior uninstall so user chooses explicitly
+            getSignInClient().signOut().addOnCompleteListener(task -> {
+                try {
+                    Intent signInIntent = getSignInClient().getSignInIntent();
+                    startActivityForResult(call, signInIntent, "handleSignInResult");
+                } catch (Throwable t) {
+                    call.reject("Google sign-in unavailable: " + t.getMessage());
+                }
+            });
         } catch (Throwable t) {
             call.reject("Google sign-in unavailable: " + t.getMessage());
         }
@@ -121,6 +156,7 @@ public class JivanGoogleDrivePlugin extends Plugin {
                 call.reject("Google Drive AppData permission was not granted.");
                 return;
             }
+            setExplicitlyConnected(getContext(), true);
             call.resolve(buildAccountPayload(account, true));
         } catch (ApiException e) {
             call.reject("Google sign-in failed (code " + e.getStatusCode() + "): " + e.getMessage());
@@ -132,6 +168,10 @@ public class JivanGoogleDrivePlugin extends Plugin {
     @PluginMethod
     public void silentReAuth(PluginCall call) {
         try {
+            if (!isExplicitlyConnected(getContext())) {
+                call.resolve(buildAccountPayload(null, false));
+                return;
+            }
             GoogleSignInAccount existing = GoogleSignIn.getLastSignedInAccount(getContext());
             if (existing != null && hasAppDataPermission(existing)) {
                 call.resolve(buildAccountPayload(existing, true));
@@ -158,6 +198,7 @@ public class JivanGoogleDrivePlugin extends Plugin {
     @PluginMethod
     public void disconnect(PluginCall call) {
         Context ctx = getContext();
+        setExplicitlyConnected(ctx, false);
         GoogleSignInAccount existing = null;
         try {
             existing = GoogleSignIn.getLastSignedInAccount(ctx);

@@ -293,11 +293,21 @@ jobs:
           if [ -f "$MANIFEST" ]; then
             sed -i 's|<application|<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.VIBRATE" />\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />\n    <application|g' "$MANIFEST"
 
-            # Register Dropbox OAuth2 PKCE Redirect Activity (db-7vi2yjqec4ezw1q://2/token)
+            # Enforce allowBackup="false" and register Dropbox OAuth2 PKCE Redirect Activity (db-7vi2yjqec4ezw1q://2/token)
             node -e '
               const fs = require("fs");
               const manifestPath = "/tmp/cap-project/android/app/src/main/AndroidManifest.xml";
               let xml = fs.readFileSync(manifestPath, "utf8");
+              if (xml.includes("android:allowBackup=")) {
+                xml = xml.replace(/android:allowBackup="(true|false)"/g, "android:allowBackup=\"false\"");
+              } else {
+                xml = xml.replace("<application", "<application\n        android:allowBackup=\"false\"");
+              }
+              if (xml.includes("android:fullBackupContent=")) {
+                xml = xml.replace(/android:fullBackupContent="[^"]*"/g, "android:fullBackupContent=\"false\"");
+              } else {
+                xml = xml.replace("<application", "<application\n        android:fullBackupContent=\"false\"");
+              }
               if (!xml.includes("com.dropbox.core.android.AuthActivity")) {
                 const dropboxActivity = [
                   "        <activity",
@@ -314,9 +324,9 @@ jobs:
                   "        </activity>"
                 ].join("\n");
                 xml = xml.replace("</application>", dropboxActivity + "\n    </application>");
-                fs.writeFileSync(manifestPath, xml, "utf8");
-                console.log("Registered Dropbox AuthActivity (scheme db-7vi2yjqec4ezw1q) in AndroidManifest.xml");
               }
+              fs.writeFileSync(manifestPath, xml, "utf8");
+              console.log("Enforced allowBackup=false and registered Dropbox AuthActivity in AndroidManifest.xml");
             '
           fi
 

@@ -60,6 +60,8 @@ export const defaultWidgets: DashboardWidgetConfig[] = [
   { id: 'quote_stats', title: 'Wisdom Library Stats', enabled: true, order: 10, size: 'small' },
 ];
 
+export const SEED_BASELINE_ISO = '2026-01-01T00:00:00.000Z';
+
 export const initialInboxItems: InboxItem[] = [
   {
     id: 'inbox_1',
@@ -68,7 +70,7 @@ export const initialInboxItems: InboxItem[] = [
     type: 'task',
     priority: 'high',
     contextTag: '@work',
-    createdAt: new Date(Date.now() - 3600000 * 2).toISOString(),
+    createdAt: SEED_BASELINE_ISO,
     dueDate: new Date().toISOString().split('T')[0],
     isStarred: true,
   },
@@ -79,7 +81,7 @@ export const initialInboxItems: InboxItem[] = [
     type: 'task',
     priority: 'medium',
     contextTag: '@health',
-    createdAt: new Date(Date.now() - 3600000 * 5).toISOString(),
+    createdAt: SEED_BASELINE_ISO,
   },
   {
     id: 'inbox_3',
@@ -88,7 +90,7 @@ export const initialInboxItems: InboxItem[] = [
     type: 'task',
     priority: 'medium',
     contextTag: '@finance',
-    createdAt: new Date(Date.now() - 3600000 * 10).toISOString(),
+    createdAt: SEED_BASELINE_ISO,
   },
   {
     id: 'inbox_4',
@@ -97,7 +99,7 @@ export const initialInboxItems: InboxItem[] = [
     type: 'task',
     priority: 'low',
     contextTag: '@personal',
-    createdAt: new Date(Date.now() - 3600000 * 24).toISOString(),
+    createdAt: SEED_BASELINE_ISO,
   },
 ];
 
@@ -427,7 +429,7 @@ export const initialTasks: TaskItem[] = [
     completedPomodoros: 1,
     recurring: 'none',
     streak: 3,
-    createdAt: new Date(Date.now() - 86400000).toISOString(),
+    createdAt: SEED_BASELINE_ISO,
   },
   {
     id: 'task_2',
@@ -459,7 +461,7 @@ export const initialTasks: TaskItem[] = [
     recurring: 'weekly',
     recurringReminder: true,
     streak: 1,
-    createdAt: new Date().toISOString(),
+    createdAt: SEED_BASELINE_ISO,
   },
   {
     id: 'task_3',
@@ -492,7 +494,7 @@ export const initialTasks: TaskItem[] = [
     completedPomodoros: 0,
     recurring: 'monthly',
     recurringReminder: true,
-    createdAt: new Date().toISOString(),
+    createdAt: SEED_BASELINE_ISO,
   },
   {
     id: 'task_4',
@@ -521,7 +523,7 @@ export const initialTasks: TaskItem[] = [
     completedPomodoros: 0,
     recurring: 'daily',
     recurringReminder: true,
-    createdAt: new Date().toISOString(),
+    createdAt: SEED_BASELINE_ISO,
   },
   {
     id: 'task_5',
@@ -537,7 +539,7 @@ export const initialTasks: TaskItem[] = [
     completed: true,
     location: 'PureGym Soho',
     tags: ['fitness', 'workout'],
-    completedAt: new Date(Date.now() - 3600000 * 2).toISOString(),
+    completedAt: SEED_BASELINE_ISO,
     subtasks: [
       { id: 'sub_5_1', title: 'Dynamic stretch & warm-up 5m', completed: true },
       { id: 'sub_5_2', title: 'Complete 30-minute brisk treadmill walk', completed: true },
@@ -547,7 +549,7 @@ export const initialTasks: TaskItem[] = [
     completedPomodoros: 1,
     recurring: 'daily',
     recurringReminder: true,
-    createdAt: new Date().toISOString(),
+    createdAt: SEED_BASELINE_ISO,
   },
   {
     id: 'task_6',
@@ -566,7 +568,7 @@ export const initialTasks: TaskItem[] = [
     estimatedPomodoros: 1,
     completedPomodoros: 0,
     recurring: 'none',
-    createdAt: new Date().toISOString(),
+    createdAt: SEED_BASELINE_ISO,
   },
   {
     id: 'task_7',
@@ -592,7 +594,7 @@ export const initialTasks: TaskItem[] = [
     estimatedPomodoros: 2,
     completedPomodoros: 0,
     recurring: 'none',
-    createdAt: new Date().toISOString(),
+    createdAt: SEED_BASELINE_ISO,
   },
   {
     id: 'task_8',
@@ -611,7 +613,7 @@ export const initialTasks: TaskItem[] = [
     estimatedPomodoros: 1,
     completedPomodoros: 0,
     recurring: 'none',
-    createdAt: new Date().toISOString(),
+    createdAt: SEED_BASELINE_ISO,
   },
   {
     id: 'task_9',
@@ -630,7 +632,7 @@ export const initialTasks: TaskItem[] = [
     estimatedPomodoros: 1,
     completedPomodoros: 0,
     recurring: 'none',
-    createdAt: new Date().toISOString(),
+    createdAt: SEED_BASELINE_ISO,
   },
 ];
 
@@ -968,7 +970,7 @@ export const initialScheduleItems: ScheduleItem[] = [
     priority: 'high',
     completed: true,
     notes: 'Respond to urgent client inquiries and clear priority backlog.',
-    createdAt: new Date().toISOString(),
+    createdAt: SEED_BASELINE_ISO,
   },
   {
     id: 'sched_2',
@@ -980,7 +982,7 @@ export const initialScheduleItems: ScheduleItem[] = [
     priority: 'medium',
     completed: true,
     notes: 'Review release notes and user guide draft.',
-    createdAt: new Date().toISOString(),
+    createdAt: SEED_BASELINE_ISO,
   },
   {
     id: 'sched_3',
@@ -992,7 +994,7 @@ export const initialScheduleItems: ScheduleItem[] = [
     priority: 'high',
     completed: false,
     notes: 'Weekly product sync with engineering and design leads.',
-    createdAt: new Date().toISOString(),
+    createdAt: SEED_BASELINE_ISO,
   },
   {
     id: 'sched_4',
@@ -1005,7 +1007,7 @@ export const initialScheduleItems: ScheduleItem[] = [
     completed: true,
     goalId: 'goal_1',
     notes: 'Deploy v2 build and deliver deliverables link.',
-    createdAt: new Date().toISOString(),
+    createdAt: SEED_BASELINE_ISO,
   },
   {
     id: 'sched_5',
@@ -1018,7 +1020,7 @@ export const initialScheduleItems: ScheduleItem[] = [
     completed: true,
     goalId: 'goal_2',
     notes: 'Long run pacing and hydration test.',
-    createdAt: new Date().toISOString(),
+    createdAt: SEED_BASELINE_ISO,
   },
   {
     id: 'sched_6',
@@ -1031,7 +1033,7 @@ export const initialScheduleItems: ScheduleItem[] = [
     completed: true,
     goalId: 'goal_3',
     notes: 'Review high-yield savings allocation and autopay status.',
-    createdAt: new Date().toISOString(),
+    createdAt: SEED_BASELINE_ISO,
   },
   {
     id: 'sched_7',
@@ -1043,7 +1045,7 @@ export const initialScheduleItems: ScheduleItem[] = [
     priority: 'low',
     completed: false,
     notes: 'Review sprint velocity and blockers.',
-    createdAt: new Date().toISOString(),
+    createdAt: SEED_BASELINE_ISO,
   },
   {
     id: 'sched_8',
@@ -1055,7 +1057,7 @@ export const initialScheduleItems: ScheduleItem[] = [
     priority: 'high',
     completed: false,
     notes: 'Compile operational metrics and high-level progress.',
-    createdAt: new Date().toISOString(),
+    createdAt: SEED_BASELINE_ISO,
   },
   {
     id: 'sched_9',
@@ -1067,7 +1069,7 @@ export const initialScheduleItems: ScheduleItem[] = [
     priority: 'low',
     completed: false,
     notes: 'Document new accomplishments and completed certifications.',
-    createdAt: new Date().toISOString(),
+    createdAt: SEED_BASELINE_ISO,
   },
   {
     id: 'sched_10',
@@ -1079,7 +1081,7 @@ export const initialScheduleItems: ScheduleItem[] = [
     priority: 'medium',
     completed: false,
     notes: 'Annual vaccination booster and health certificate.',
-    createdAt: new Date().toISOString(),
+    createdAt: SEED_BASELINE_ISO,
   },
   {
     id: 'sched_11',
@@ -1091,7 +1093,7 @@ export const initialScheduleItems: ScheduleItem[] = [
     priority: 'low',
     completed: false,
     notes: 'Chapter 4 & 5 reflections on Atomic Habits.',
-    createdAt: new Date().toISOString(),
+    createdAt: SEED_BASELINE_ISO,
   },
   // Upcoming deadline entries for tomorrow & later
   {
@@ -1104,7 +1106,7 @@ export const initialScheduleItems: ScheduleItem[] = [
     priority: 'medium',
     completed: false,
     notes: 'Proofread and schedule email campaign blast.',
-    createdAt: new Date().toISOString(),
+    createdAt: SEED_BASELINE_ISO,
   },
   {
     id: 'sched_13',
@@ -1116,7 +1118,7 @@ export const initialScheduleItems: ScheduleItem[] = [
     priority: 'high',
     completed: false,
     notes: 'Quarterly financial performance review for executive team.',
-    createdAt: new Date().toISOString(),
+    createdAt: SEED_BASELINE_ISO,
   },
   {
     id: 'sched_14',
@@ -1128,6 +1130,6 @@ export const initialScheduleItems: ScheduleItem[] = [
     priority: 'medium',
     completed: false,
     notes: 'Confirm contract extensions and deliverables sign-off.',
-    createdAt: new Date().toISOString(),
+    createdAt: SEED_BASELINE_ISO,
   },
 ];

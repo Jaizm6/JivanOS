@@ -1037,18 +1037,17 @@ export class TelegramSyncProvider implements SyncProvider {
       remoteIso = fallbackDoc.timestampIso;
     }
 
-    if (localLastSyncedAt && remoteIso) {
-      const localMs = Date.parse(localLastSyncedAt);
-      const remoteMs = Date.parse(remoteIso);
-      if (Number.isFinite(localMs) && Number.isFinite(remoteMs) && remoteMs <= localMs) {
-        return {
-          found: true,
-          envelope: null,
-          lastModified: remoteIso,
-          fileSizeBytes: Number(targetFileSize || stored.lastFileSizeBytes || 0),
-          skippedNotNewer: true,
-        };
-      }
+    const isSameFileId = Boolean(
+      stored.lastBackupFileId && targetFileId && targetFileId === stored.lastBackupFileId
+    );
+    if (localLastSyncedAt && isSameFileId) {
+      return {
+        found: true,
+        envelope: null,
+        lastModified: remoteIso || stored.lastSyncedAt,
+        fileSizeBytes: Number(targetFileSize || stored.lastFileSizeBytes || 0),
+        skippedNotNewer: true,
+      };
     }
 
     const fileMeta = await telegramApiJson<{ file_path?: string; file_size?: number }>(

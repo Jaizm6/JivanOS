@@ -766,7 +766,6 @@ export async function getLastSyncInfo(): Promise<DropboxSyncInfo | null> {
       fileSizeBytes: Number(res.fileSizeBytes || 0),
     };
     updateStoredDropboxSyncMeta({
-      lastSyncedAt: info.lastModified,
       lastFileSizeBytes: info.fileSizeBytes,
     });
     return info;
@@ -790,7 +789,6 @@ export async function getLastSyncInfo(): Promise<DropboxSyncInfo | null> {
   if (!lastModified) return null;
   const fileSizeBytes = Number(meta?.size || 0);
   updateStoredDropboxSyncMeta({
-    lastSyncedAt: lastModified,
     lastFileSizeBytes: fileSizeBytes,
   });
   return { lastModified, fileSizeBytes };
